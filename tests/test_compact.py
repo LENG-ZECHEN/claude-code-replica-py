@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from simple_coding_agent.compact import (
     CLEARED_TOOL_RESULT_CONTENT,
     ContextCompactor,
@@ -67,6 +69,32 @@ class FakeSummarizer:
     def summarize(self, messages: list[Message]) -> str:
         self.calls.append(messages)
         return self.output
+
+
+class _RaisingProvider:
+    """Provider double that raises on call()/stream_call() for fallback tests."""
+
+    def __init__(self, exc: Exception) -> None:
+        self.exc = exc
+        self.calls = 0
+
+    def call(
+        self,
+        system: str,
+        messages: list[dict[str, object]],
+        tools: list[dict[str, object]],
+    ) -> object:
+        self.calls += 1
+        raise self.exc
+
+    def stream_call(
+        self,
+        system: str,
+        messages: list[dict[str, object]],
+        tools: list[dict[str, object]],
+    ) -> object:
+        self.calls += 1
+        raise self.exc
 
 
 # ---------------------------------------------------------------------------
@@ -303,14 +331,105 @@ def test_llm_summarizer_parses_tagged_output() -> None:
     assert len(provider.history) == 1
 
 
-def test_llm_summarizer_returns_plain_text_without_tags() -> None:
+def test_llm_summarizer_no_tags_falls_back_to_rule_based() -> None:
     provider = MockProvider([MockProvider.direct_answer("Plain summary text")])
-    summarizer = LLMSummarizer(provider)
+    fallback = FakeSummarizer("rule-based output")
+    summarizer = LLMSummarizer(provider, fallback_summarizer=fallback)
 
     summary = summarizer.summarize([Message.user("Summarize me")])
 
-    assert summary == "Plain summary text"
+    assert summary == "rule-based output"
+    assert len(fallback.calls) == 1
+
+
+def test_llm_summarizer_empty_response_falls_back() -> None:
+    provider = MockProvider([MockProvider.direct_answer("")])
+    fallback = FakeSummarizer("rule-based output")
+    summarizer = LLMSummarizer(provider, fallback_summarizer=fallback)
+
+    summary = summarizer.summarize([Message.user("Summarize me")])
+
+    assert summary == "rule-based output"
+    assert len(fallback.calls) == 1
+
+
+def test_llm_summarizer_empty_tags_falls_back() -> None:
+    provider = MockProvider([MockProvider.direct_answer("<summary>   </summary>")])
+    fallback = FakeSummarizer("rule-based output")
+    summarizer = LLMSummarizer(provider, fallback_summarizer=fallback)
+
+    summary = summarizer.summarize([Message.user("Summarize me")])
+
+    assert summary == "rule-based output"
+    assert len(fallback.calls) == 1
+
+
+def test_llm_summarizer_generic_exception_falls_back() -> None:
+    provider = _RaisingProvider(RuntimeError("temporary upstream outage"))
+    fallback = FakeSummarizer("rule-based output")
+    summarizer = LLMSummarizer(provider, fallback_summarizer=fallback)
+
+    summary = summarizer.summarize([Message.user("Summarize me")])
+
+    assert summary == "rule-based output"
+    assert len(fallback.calls) == 1
+    assert provider.calls == 1
+
+
+def test_llm_summarizer_prompt_too_long_reraises() -> None:
+    from simple_coding_agent.provider import PromptTooLongError
+
+    provider = _RaisingProvider(PromptTooLongError("input too large"))
+    fallback = FakeSummarizer("rule-based output")
+    summarizer = LLMSummarizer(provider, fallback_summarizer=fallback)
+
+    with pytest.raises(PromptTooLongError):
+        summarizer.summarize([Message.user("Summarize me")])
+
+    assert fallback.calls == []
+
+
+def test_llm_summarizer_pretrunates_oversized_input() -> None:
+    messages: list[Message] = [Message.user("first-user-special-marker")]
+    for i in range(1, 30):
+        messages.append(Message.assistant(f"middle-{i}-noise"))
+    for i in range(30, 50):
+        messages.append(Message.assistant(f"recent-{i}-tail"))
+
+    provider = MockProvider([
+        MockProvider.direct_answer("<summary>ok</summary>"),
+    ])
+    summarizer = LLMSummarizer(provider, max_input_tokens=10)
+
+    summary = summarizer.summarize(messages)
+
+    assert summary == "ok"
     assert len(provider.history) == 1
+    sent_prompt = str(provider.history[0].messages[0]["content"])
+    assert "first-user-special-marker" in sent_prompt
+    assert "recent-30-tail" in sent_prompt
+    assert "recent-49-tail" in sent_prompt
+    assert "middle-15-noise" not in sent_prompt
+    # No duplicate prepend of the first user message
+    assert sent_prompt.count("first-user-special-marker") == 1
+
+
+def test_compact_prompt_template_contains_nine_sections() -> None:
+    from simple_coding_agent.compact import TEMPLATE_HEAD, TEMPLATE_TAIL
+
+    full = TEMPLATE_HEAD + TEMPLATE_TAIL
+    for heading in [
+        "1. Primary Request and Intent",
+        "2. Key Technical Concepts",
+        "3. Files and Code Sections",
+        "4. Errors and fixes",
+        "5. Problem Solving",
+        "6. All user messages",
+        "7. Pending Tasks",
+        "8. Current Work",
+        "9. Optional Next Step",
+    ]:
+        assert heading in full
 
 
 # ---------------------------------------------------------------------------

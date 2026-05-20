@@ -20,17 +20,18 @@ allowing an opt-in provider-backed summarizer.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
 from .context import ContextBudget, _estimate_messages_tokens, _normalize_messages
 from .models import CompactSummary, Message, MessageType, Role, ToolCall, ToolResult
+from .provider import PromptTooLongError, Provider
 from .transcript import Transcript
 
-if TYPE_CHECKING:
-    from .provider import Provider
+logger = logging.getLogger(__name__)
 
 _DEFAULT_SUMMARY_MAX_RESULT_CHARS = 200
 COMPACTABLE_TOOLS = frozenset({
@@ -43,6 +44,49 @@ CLEARED_TOOL_RESULT_CONTENT = "[Old tool result content cleared]"
 _SUMMARY_TAG_RE = re.compile(
     r"<summary>\s*(?P<summary>.*?)\s*</summary>",
     re.DOTALL | re.IGNORECASE,
+)
+
+_DEFAULT_LLM_MAX_INPUT_TOKENS = 100_000
+_KEEP_RECENT_ON_TRUNCATE = 20
+
+TEMPLATE_HEAD = (
+    "Your task is to create a detailed summary of the conversation so far, "
+    "paying close attention to the user's explicit requests and the prior "
+    "actions taken. This summary will replace the older portion of the "
+    "transcript, so it must be thorough enough to continue the work without "
+    "re-reading the evicted messages.\n\n"
+    "Produce your final answer inside <summary>...</summary> tags. The "
+    "summary must contain the following nine numbered sections, in order, "
+    "each on its own line, with the exact headings shown:\n\n"
+    "1. Primary Request and Intent: Capture every explicit request and "
+    "intent the user has expressed, including constraints, acceptance "
+    "criteria, and scope boundaries.\n"
+    "2. Key Technical Concepts: List the important technologies, "
+    "frameworks, languages, and patterns discussed.\n"
+    "3. Files and Code Sections: Enumerate specific files and code "
+    "sections examined, created, or modified. Include the file paths and "
+    "the specific code being modified (function names, class names, line "
+    "ranges) so work can resume without re-reading.\n"
+    "4. Errors and fixes: List the errors encountered and how each was "
+    "resolved (or that it is still open).\n"
+    "5. Problem Solving: Document the problems solved and any ongoing "
+    "troubleshooting still in flight.\n"
+    "6. All user messages: List every non-tool user message verbatim, in "
+    "order, numbered [1], [2], [3] ... This section is critical for "
+    "tracking user feedback and changes of intent.\n"
+    "7. Pending Tasks: List the tasks the user has explicitly asked to be "
+    "worked on that are not yet complete.\n"
+    "8. Current Work: Describe precisely what was being worked on "
+    "immediately before this summary was requested -- the function, file, "
+    "test, or debug step in progress.\n"
+    "9. Optional Next Step: State the single next step that continues the "
+    "current work, or \"(none)\" if no next step is implied.\n\n"
+    "Here is the conversation to summarize:\n\n"
+)
+
+TEMPLATE_TAIL = (
+    "\n\nProvide the summary now, inside <summary>...</summary> tags, "
+    "following the nine-section structure above."
 )
 
 
@@ -133,40 +177,114 @@ class RuleBasedSummarizer:
 
 
 class LLMSummarizer:
-    """Provider-backed Summarizer for opt-in compaction experiments.
+    """Provider-backed Summarizer with input-token control and graceful fallback.
 
-    Tests pass a fake provider.  Production callers can supply any object that
-    implements Provider, but ContextCompactor still defaults to RuleBasedSummarizer
-    to keep the safe offline path unchanged.
+    Behavior:
+      * Pre-truncates messages when serialized input exceeds ``max_input_tokens``
+        by keeping the first user message plus the most recent
+        ``_KEEP_RECENT_ON_TRUNCATE`` messages. If the first user message is
+        already inside the recent slice it is not re-prepended (preserves
+        ordering, avoids duplicates).
+      * Builds the user prompt by concatenating ``TEMPLATE_HEAD`` + a JSON
+        dump of the (possibly truncated) transcript + ``TEMPLATE_TAIL``.
+        Concatenation is used instead of ``str.format`` because the JSON dump
+        contains literal ``{`` / ``}`` characters that would break ``format``.
+      * Calls the injected provider and extracts ``<summary>...</summary>``.
+      * Falls back to ``fallback_summarizer`` (default ``RuleBasedSummarizer``)
+        on empty response, missing tags, empty tags, or any non-PromptTooLong
+        provider exception. A warning is logged on the exception path.
+      * Re-raises ``PromptTooLongError`` so the caller (e.g. AgentLoop) can
+        decide on its own retry/compaction policy.
+
+    ContextCompactor still defaults to ``RuleBasedSummarizer`` -- this class
+    is opt-in via ``ContextCompactor(summarizer=LLMSummarizer(provider))``.
     """
 
-    def __init__(self, provider: Provider) -> None:
+    def __init__(
+        self,
+        provider: Provider,
+        *,
+        max_input_tokens: int = _DEFAULT_LLM_MAX_INPUT_TOKENS,
+        fallback_summarizer: Summarizer | None = None,
+    ) -> None:
         self.provider = provider
+        self.max_input_tokens = max_input_tokens
+        self.fallback_summarizer = fallback_summarizer or RuleBasedSummarizer()
 
     def summarize(self, messages: list[Message]) -> str:
         if not messages:
             return ""
 
+        truncated = self._truncate_if_oversized(messages)
+        json_str = json.dumps(_normalize_messages(truncated), indent=2)
+        user_prompt = TEMPLATE_HEAD + json_str + TEMPLATE_TAIL
         system = (
             "You summarize compacted coding-agent transcripts. "
-            "Preserve user intent, current work, tool outcomes, errors, and "
-            "next steps. Return the result inside <summary>...</summary> tags."
+            "Always return your final answer inside <summary>...</summary> tags."
         )
-        user_prompt = (
-            "Summarize these messages for future context. "
-            "Be concise but keep details needed to continue the work.\n\n"
-            f"{json.dumps(_normalize_messages(messages), indent=2)}"
-        )
-        response = self.provider.call(
-            system=system,
-            messages=[{"role": "user", "content": user_prompt}],
-            tools=[],
-        )
+
+        try:
+            response = self.provider.call(
+                system=system,
+                messages=[{"role": "user", "content": user_prompt}],
+                tools=[],
+            )
+        except PromptTooLongError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "LLMSummarizer provider call failed (%s); falling back to %s",
+                exc.__class__.__name__,
+                self.fallback_summarizer.__class__.__name__,
+            )
+            return self.fallback_summarizer.summarize(messages)
+
         text = response.text or ""
+        if not text:
+            return self.fallback_summarizer.summarize(messages)
+
         match = _SUMMARY_TAG_RE.search(text)
         if match is None:
-            return text
-        return match.group("summary").strip()
+            return self.fallback_summarizer.summarize(messages)
+
+        extracted = match.group("summary").strip()
+        if not extracted:
+            return self.fallback_summarizer.summarize(messages)
+        return extracted
+
+    def _truncate_if_oversized(self, messages: list[Message]) -> list[Message]:
+        """Drop middle messages when serialized input exceeds the token cap.
+
+        Keeps the first user message plus the most recent
+        ``_KEEP_RECENT_ON_TRUNCATE`` messages. If the first user message is
+        already within the recent slice (or there is no user message at all),
+        it is NOT prepended again so message order is preserved and no
+        duplicate is created.
+        """
+        estimate = ContextBudget.estimate_tokens(
+            json.dumps(_normalize_messages(messages))
+        )
+        if estimate <= self.max_input_tokens:
+            return messages
+
+        first_user_idx = next(
+            (i for i, m in enumerate(messages) if m.role == Role.USER),
+            None,
+        )
+        recent = messages[-_KEEP_RECENT_ON_TRUNCATE:]
+        if (
+            first_user_idx is None
+            or first_user_idx >= len(messages) - _KEEP_RECENT_ON_TRUNCATE
+        ):
+            result = recent
+        else:
+            result = [messages[first_user_idx], *recent]
+        logger.info(
+            "LLMSummarizer truncated %d messages -> %d",
+            len(messages),
+            len(result),
+        )
+        return result
 
 
 class MicroCompactor:
