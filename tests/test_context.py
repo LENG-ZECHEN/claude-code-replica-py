@@ -349,3 +349,59 @@ def test_built_context_estimated_tokens_positive_with_system() -> None:
     builder = ContextBuilder(budget=_large_budget())
     result = builder.build(Transcript(), system="A" * 400)
     assert result.estimated_tokens == 100  # 400 chars // 4
+
+
+# ---------------------------------------------------------------------------
+# ContextBuilder — ClaudeMdLoader integration (P6)
+# ---------------------------------------------------------------------------
+
+class _FakeLoader:
+    """Stub loader for dependency-injection tests."""
+
+    def __init__(self, content: str) -> None:
+        self._content = content
+        self.calls: list[object] = []
+
+    def load(self, workspace_path: object) -> str:
+        self.calls.append(workspace_path)
+        return self._content
+
+
+def test_build_prepends_claude_md_with_separator() -> None:
+    from pathlib import Path
+
+    fake = _FakeLoader("# project rules")
+    builder = ContextBuilder(
+        budget=_large_budget(),
+        workspace_path=Path("/fake/workspace"),
+        claude_md_loader=fake,  # type: ignore[arg-type]
+    )
+    result = builder.build(Transcript(), system="base prompt")
+    assert result.system == "# project rules\n\n---\n\nbase prompt"
+
+
+def test_build_leaves_system_unchanged_when_loader_returns_empty() -> None:
+    from pathlib import Path
+
+    fake = _FakeLoader("")
+    builder = ContextBuilder(
+        budget=_large_budget(),
+        workspace_path=Path("/fake/workspace"),
+        claude_md_loader=fake,  # type: ignore[arg-type]
+    )
+    result = builder.build(Transcript(), system="unchanged system")
+    assert result.system == "unchanged system"
+
+
+def test_build_calls_loader_with_workspace_path() -> None:
+    from pathlib import Path
+
+    workspace = Path("/some/project")
+    fake = _FakeLoader("rules")
+    builder = ContextBuilder(
+        budget=_large_budget(),
+        workspace_path=workspace,
+        claude_md_loader=fake,  # type: ignore[arg-type]
+    )
+    builder.build(Transcript(), system="sys")
+    assert fake.calls == [workspace]

@@ -13,6 +13,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+from .claude_md import ClaudeMdLoader
 from .context import ContextBudget, ContextBuilder
 from .loop import AgentLoop, LoopStatus
 from .models import ToolCall
@@ -86,7 +87,11 @@ def _run_demo(workspace: Path) -> int:
     executor = ToolExecutor(registry)
     budget = ContextBudget(max_tokens=200_000, reserved_output_tokens=8_192)
     transcript = Transcript()
-    builder = ContextBuilder(budget=budget)
+    builder = ContextBuilder(
+        budget=budget,
+        workspace_path=workspace,
+        claude_md_loader=ClaudeMdLoader(),
+    )
     provider = MockProvider(_script())
     loop = AgentLoop(
         provider=provider,

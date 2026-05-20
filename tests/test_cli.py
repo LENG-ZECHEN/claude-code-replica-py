@@ -6,12 +6,20 @@ Lightweight by design: no network, no LLM, no API key. The CLI uses
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from simple_coding_agent.cli import main
 
 
-def test_cli_main_returns_zero(capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_main_returns_zero(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import simple_coding_agent.claude_md as cm
+    monkeypatch.setattr(cm, "_DEFAULT_USER_CLAUDE_MD", tmp_path / "no_claude.md")
     rc = main()
     captured = capsys.readouterr()
 

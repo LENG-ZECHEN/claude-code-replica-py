@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
+from .claude_md import ClaudeMdLoader
 from .models import CompactSummary, Message, MessageType, Role, ToolCall, ToolResult
 from .tool_result_store import ToolResultStore
 from .transcript import Transcript
@@ -182,9 +184,13 @@ class ContextBuilder:
         self,
         budget: ContextBudget,
         tool_result_store: ToolResultStore | None = None,
+        workspace_path: Path | None = None,
+        claude_md_loader: ClaudeMdLoader | None = None,
     ) -> None:
         self._budget = budget
         self._store = tool_result_store or ToolResultStore()
+        self._workspace_path = workspace_path
+        self._claude_md_loader = claude_md_loader
 
     # ------------------------------------------------------------------
     # Public API
@@ -309,6 +315,11 @@ class ContextBuilder:
         Source: system prompt assembly in src/query.ts queryLoop().
         Returns base unchanged when no extras are provided.
         """
+        if self._workspace_path is not None and self._claude_md_loader is not None:
+            claude_md = self._claude_md_loader.load(self._workspace_path)
+            if claude_md:
+                base = f"{claude_md}\n\n---\n\n{base}"
+
         parts: list[str] = [base]
 
         if memory_snippets:
