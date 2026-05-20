@@ -212,8 +212,10 @@ class ToolResultStore:
                 # Check cache first: a duplicate tool_use_id in the batch may
                 # have been externalized earlier in this same pass.
                 if self._replacement_state.has_replacement(tool_use_id):
-                    stored = self._stored[tool_use_id]
-                    pointer = self._replacement_state.get_replacement(tool_use_id)  # type: ignore[assignment]
+                    pointer = self._replacement_state.get_replacement(tool_use_id)
+                    stored = self._stored.get(tool_use_id)
+                    if pointer is None or stored is None:
+                        pointer, stored = self._externalize(tool_use_id, content)
                 else:
                     pointer, stored = self._externalize(tool_use_id, content)
                 outputs[i] = (pointer, stored)
