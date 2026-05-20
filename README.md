@@ -1,50 +1,57 @@
 # simple_coding_agent
 
-A minimal Python coding agent replica studying context and memory management
-patterns from Claude Code v2.1.88.
+A minimal Python coding agent replica studying the context-management and
+memory-management pipeline of Claude Code v2.1.88.
 
 ## Purpose
 
-This project is a learning and portfolio artifact. It replicates the core
-context management and memory management mechanisms of Claude Code in plain,
-readable Python — without production features like IDE integration, streaming,
-or multi-agent orchestration.
+This project is a learning and portfolio artifact. It reproduces the core
+runtime of Claude Code — context assembly, compaction, memory injection,
+tool execution, and streaming provider calls — as a self-contained Python
+package. The default execution path makes **no real API calls** and runs no
+real shell commands.
 
-See [`docs/PYTHON_REPLICA_SPEC.md`](../docs/PYTHON_REPLICA_SPEC.md) for the
-full design specification and source-to-module mapping.
+See [`CLAUDE.md`](./CLAUDE.md) for the per-file architecture summary,
+implementation roadmap (P1–P6, all completed), and documented limitations.
 
 ## Key concepts replicated
 
 | Concept | Source (Claude Code) | Python module |
 |---|---|---|
 | Agent loop | `src/query.ts:queryLoop()` | `loop.py` |
-| Context budget | `src/services/compact/autoCompact.ts` | `context.py` |
-| Tool result externalization | `src/utils/toolResultStorage.ts` | `tool_result_store.py` |
-| Full compaction | `src/services/compact/compact.ts` | `compact.py` |
-| Memory system | `src/memdir/` | `memory.py` |
-| Relevant memory prefetch | `src/memdir/findRelevantMemories.ts` | `memory.py` |
+| Context budget + assembly | `src/services/compact/autoCompact.ts` | `context.py` |
+| Tool result externalization + 200k budget | `src/utils/toolResultStorage.ts` | `tool_result_store.py` |
+| Full compaction + summarizer protocol | `src/services/compact/compact.ts` | `compact.py` |
+| Microcompact (cold-cache cleanup) | 60-min idle path in source | `compact.py` |
+| Reactive compact on prompt-too-long | error handling in `queryLoop()` | `provider.py` + `loop.py` |
+| Memory store + Jaccard relevance | `src/memdir/`, `findRelevantMemories.ts` | `memory.py` |
+| CLAUDE.md injection | `src/utils/claudeMd.ts` | `claude_md.py` |
+| OpenAI Chat Completions adapter | (out of scope in source) | `provider.py` |
 
 ## Project structure
 
 ```
 src/simple_coding_agent/
-  __init__.py          package version
-  models.py            Message, ToolCall, ToolResult, Role (Phase 2)
-  transcript.py        Transcript with compact boundary tracking (Phase 2)
-  tools.py             Tool, ToolRegistry, ToolExecutor (Phase 3)
-  tool_result_store.py Persist large results to disk (Phase 4)
-  context.py           ContextBuilder, ContextBudget (Phase 5)
-  memory.py            MemoryStore, MemorySelector (Phase 6)
-  compact.py           ContextCompactor (Phase 7)
-  provider.py          LLMProvider, MockProvider, AnthropicProvider (Phase 8)
-  loop.py              AgentLoop (Phase 8)
-  coding_tools.py      Safe workspace tools (Phase 9)
-  cli.py               CLI entry point (Phase 10)
+  __init__.py             package version
+  models.py               Message, ToolCall, ToolResult, Role, AgentStep, CompactSummary
+  transcript.py           Transcript with compact-boundary tracking + replace_all
+  tools.py                Tool, ToolRegistry, ToolExecutor, preview_result
+  tool_result_store.py    ToolResultStore + ContentReplacementState (idempotent pointers, 200k cap)
+  context.py              ContextBuilder, ContextBudget (CLAUDE.md prepend, memory + summary)
+  memory.py               SessionMemory, ProjectMemory, MemorySelector (top-5 Jaccard)
+  compact.py              ContextCompactor + Summarizer + RuleBasedSummarizer + LLMSummarizer + MicroCompactor
+  provider.py             Provider protocol, MockProvider, OpenAIProvider, PromptTooLongError
+  loop.py                 AgentLoop.run() / run_stream() with reactive compact + microcompact
+  claude_md.py            ClaudeMdLoader (project + optional user-level)
+  coding_tools.py         Safe workspace tools (list/read/write/search/run_shell, MOCK default)
+  tool_registry_factory.py  build_default_registry(workspace)
+  cli.py                  simple-agent (MockProvider demo)
+  openai_cli.py           simple-agent-openai (real OpenAI-compatible CLI)
 tests/
-  test_import.py       Phase 1 smoke test
-  ...                  (Phase 2-9 tests added incrementally)
+  370 tests across context, compaction, memory, provider, loop, tools, CLI, demos
 examples/
-  demo.py              End-to-end demo with MockProvider
+  demo.py                 MockProvider demo (no API key, no network)
+  openai_chat_demo.py     Hardened OpenAI demo (requires --confirm-api-call)
 ```
 
 ## Setup
@@ -55,14 +62,66 @@ pip install -e ".[dev]"
 pytest
 ```
 
-## Running the demo
+## Console scripts
+
+After install:
+
+| Script | Backing module | Default behavior |
+|---|---|---|
+| `simple-agent` | `simple_coding_agent.cli` | MockProvider end-to-end demo in a tempdir. No API call. |
+| `simple-agent-openai` | `simple_coding_agent.openai_cli` | **Calls the real OpenAI-compatible Chat Completions API.** Loads `.env` by default; pass `--no-dotenv` to skip. |
+
+## Running the demo (safe, no API key required)
 
 ```bash
 python examples/demo.py
+# or, after install:
+simple-agent
 ```
+
+Both routes drive a `MockProvider` over a temporary workspace and produce a
+structured trace plus a generated `REPORT.md`. No network call is ever made.
+
+## Running with a real OpenAI-compatible endpoint
+
+The OpenAI demo and CLI **will spend tokens against your configured
+endpoint**. They are intentional opt-ins; treat them like any real-API tool.
+
+```bash
+# Hardened demo — refuses to call the API without an explicit flag:
+python examples/openai_chat_demo.py --dry-run                # safe preflight, no network
+python examples/openai_chat_demo.py --no-dotenv --dry-run    # preflight, ignore .env
+python examples/openai_chat_demo.py --confirm-api-call       # actually call the API
+
+# Non-interactive CLI — auto-loads .env and calls the API immediately:
+simple-agent-openai --no-dotenv -m <model> "your task"
+```
+
+Safety guarantees:
+
+- `examples/demo.py` and the `simple-agent` script are MockProvider-only and
+  cannot reach the network.
+- `examples/openai_chat_demo.py` refuses to call the API unless
+  `--confirm-api-call` is passed, supports `--no-dotenv` and `--dry-run`,
+  and never prints secret values (reports `present` / `missing` only).
+- `simple-agent-openai` is the intentional real-task entry point and has
+  no confirm-gate; pass `--no-dotenv` if you do not want `.env` auto-loaded.
+- `run_shell` defaults to `ShellMode.MOCK` in `build_default_registry`; the
+  `ALLOWLIST` mode is opt-in and restricted to `pwd ls cat grep python -m pytest`
+  inside the workspace root.
+- `.env` and `.env.*` are gitignored.
 
 ## Current status
 
-**Phase 1 — Project skeleton** (complete)
+All implementation phases are complete; see
+[`CLAUDE.md`](./CLAUDE.md#implementation-roadmap-completed-p1p6) for the
+P1–P6 roadmap with commit references and current limitations.
 
-Phases 2-12 are planned. See `docs/PYTHON_REPLICA_SPEC.md` section 18.
+Quality gates:
+
+```bash
+pytest                                                # 370 tests pass
+mypy src                                              # strict, clean
+ruff check src tests examples/openai_chat_demo.py     # clean
+python examples/demo.py                               # exits 0, REPORT.md generated
+```
