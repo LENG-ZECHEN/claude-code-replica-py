@@ -12,10 +12,13 @@
 Defines the core data structures shared by every other module. `Message` is the transcript unit: it carries a `Role`, typed `content` (either a plain string or a list of `ToolCall`/`ToolResult` items), and boolean flags (`is_virtual`, `is_meta`, `is_compact_summary`) that control API serialization and UI rendering. Supporting dataclasses include `AgentStep` (one full turn record), `CompactSummary` (compaction run output), and the `MessageType` enum that distinguishes TEXT, TOOL_USE, TOOL_RESULT, COMPACT_BOUNDARY, and ATTACHMENT messages.
 
 ### `loop.py`
-Contains `AgentLoop`, the central while-loop that drives one user turn from input to final answer. The two public methods — `run()` (synchronous) and `run_stream()` (streaming) — implement the same per-turn pipeline: full-compaction check → microcompact (cold cache cleanup, at most once per loop instance) → memory injection (with query-based selection for `ProjectMemory`) → context assembly → provider call → response branching into COMPLETED / MAX_STEPS / MAX_TOKENS / MALFORMED. When the provider raises `PromptTooLongError`, `AgentLoop` force-compacts and retries the same turn exactly once; a second prompt-too-long error returns `LoopStatus.MAX_TOKENS` without further retries. `AgentLoop` never raises on agent-runtime conditions; all failure modes surface as fields on the returned `LoopResult` or as `LoopStreamEvent` objects.
+Contains `AgentLoop`, the central while-loop that drives one user turn from input to final answer. The two public methods — `run()` (synchronous) and `run_stream()` (streaming) — implement the same per-turn pipeline: microcompact (cold cache cleanup, at most once per loop instance) → snip redundant tool results (at most once per user turn) → full-compaction check → memory injection (with query-based selection for `ProjectMemory`) → context assembly → provider call → response branching into COMPLETED / MAX_STEPS / MAX_TOKENS / MALFORMED. When the provider raises `PromptTooLongError`, `AgentLoop` force-compacts and retries the same turn exactly once; a second prompt-too-long error returns `LoopStatus.MAX_TOKENS` without further retries. `AgentLoop` never raises on agent-runtime conditions; all failure modes surface as fields on the returned `LoopResult` or as `LoopStreamEvent` objects.
 
 ### `compact.py`
 Implements three cooperating components: `ContextCompactor` (full compaction), `MicroCompactor` (cold-cache cleanup), and the `Summarizer` Protocol with two implementations (`RuleBasedSummarizer`, `LLMSummarizer`). `ContextCompactor.should_compact()` compares estimated tokens against a configurable fraction of `ContextBudget.available_tokens`; `compact()` splits the transcript at a keep-recent boundary, calls `self.summarizer.summarize()` on the older half, appends a compact-boundary marker, and re-appends the kept messages. `summarizer` is dependency-injected (defaults to `RuleBasedSummarizer`, the deterministic 9-section extractor previously baked into `_summarize`). `LLMSummarizer` wraps any `Provider`, builds a compact summarization prompt, and extracts content between `<summary>...</summary>` tags (falling back to full response text when tags are absent). `MicroCompactor.should_microcompact()` triggers when the latest assistant message is older than 60 minutes (or unparseable); `microcompact()` rewrites every `ToolResult` belonging to a `COMPACTABLE_TOOLS` call (`read_file`, `run_shell`, `search_text`, `list_files`) to `CLEARED_TOOL_RESULT_CONTENT`, pairing by `tool_use_id` and leaving unpaired or conflicting-duplicate IDs untouched. Both compactors return new lists / new messages and never mutate inputs.
+
+### `snip.py`
+Provides `SnipTool`, the deterministic redundant tool-result folding layer that runs after microcompact and before full auto-compact. It preserves transcript shape while replacing superseded `ToolResult.content` with `[Snipped: superseded by later call]`: `read_file` and `list_files` keep the latest non-snipped result per path, while `run_shell` and `search_text` keep the latest 3 non-snipped results globally. Pairing is by `tool_use_id`; malformed path inputs, unpaired results, duplicate conflicting IDs, and non-configured tools are left untouched. The transformation is immutable and idempotent, and already-snipped or microcompacted results are not counted as latest preserved results on later passes.
 
 ### `context.py`
 `ContextBuilder.build()` assembles the full API payload for each agent turn in five steps: slice post-compact messages, externalize oversized tool results via `ToolResultStore` (per-item 50k threshold + 200k total-budget cap, largest-first), normalize to Anthropic API dicts, trim the oldest messages until within budget, then compose the system prompt. The free function `_remove_orphan_tool_results()` is called after the trim loop to drop `tool_result` blocks whose parent `tool_use` was removed, preventing API validation errors. When `workspace_path` and a `ClaudeMdLoader` are both supplied, the loader's combined CLAUDE.md content is prepended to the base system prompt with the exact separator `"\n\n---\n\n"` before memory snippets and compact summary are appended. Empty loader output leaves the base prompt untouched. Key dataclass: `BuiltContext`.
@@ -37,9 +40,9 @@ Workspace-scoped file operations (`list_files`, `read_file`, `write_file`, `sear
 
 ---
 
-## Implementation Roadmap (Completed P1–P6)
+## Implementation Roadmap (Completed P1–P8)
 
-The six priorities originally listed in this document have all shipped. Commits are pinned for traceability; see each module's per-file summary above for the current behavior.
+The priorities tracked in this document have shipped through P8. Commits are pinned for traceability where stable; see each module's per-file summary above for the current behavior.
 
 - **P1 — ToolResultBudget hardening** (`dbc3a86`, follow-up `01dc7ca`). `ContentReplacementState` is wired into `ToolResultStore.process_result()` so the same `tool_use_id` always returns the same pointer (prompt-cache stability). `process_results_batch()` adds a `DEFAULT_TOTAL_BUDGET_CHARS = 200_000` message-level cap that externalizes the largest remaining inline items first. Cache / stored-record inconsistency is repaired in place rather than crashing.
 
@@ -53,6 +56,10 @@ The six priorities originally listed in this document have all shipped. Commits 
 
 - **P6 — CLAUDE.md loader** (`d1e8f70`). `ClaudeMdLoader` (`claude_md.py`) reads project-level `CLAUDE.md` and an optional user-level fallback, traps `OSError` safely, and caches per workspace. `ContextBuilder` accepts `workspace_path` and `claude_md_loader` as optional dependencies and prepends loaded content to the base system prompt with the exact separator `"\n\n---\n\n"`; empty loader output leaves the prompt unchanged. Tests inject a controlled `user_claude_path` so the real `~/.claude/CLAUDE.md` is never read.
 
+- **P7 — LLMSummarizer hardening** (`be3afde`). `LLMSummarizer` now uses the 9-section compaction prompt, pre-truncates oversized serialized inputs by keeping the first user message plus recent context, re-raises `PromptTooLongError`, and falls back to `RuleBasedSummarizer` for empty, malformed, missing-tag, or non-context provider failures.
+
+- **P8 — SnipTool** (this change). `snip.py` adds `SnipTool` for proactive, deterministic folding of redundant active-conversation tool results. `AgentLoop.run()` and `run_stream()` apply it after microcompact and before auto-compact, guarded by `_snip_attempted_this_turn` so each user turn attempts snipping at most once.
+
 ---
 
 ## Current Limitations
@@ -64,5 +71,7 @@ These are intentional simplifications, not regressions, and are documented here 
 - **`MemorySelector` uses lexical Jaccard only.** Entries that are semantically related but share no surface tokens with the query are scored zero. A stronger selector (embeddings or BM25) is out of scope for this replica.
 
 - **`MicroCompactor.should_microcompact()` is conservative on malformed timestamps.** When `datetime.fromisoformat` cannot parse a stored assistant timestamp, the loader treats it as "no parseable assistant time" and triggers microcompact on the next turn. Acceptable for token cleanup since the operation is idempotent and only clears compactable tool results.
+
+- **Snip is active but intentionally narrow.** `SnipTool` only folds configured tools (`read_file`, `list_files`, `run_shell`, `search_text`). It does not deduplicate `edit` / `write_file`-style side-effecting operations, and it does not use LLM-based semantic deduplication.
 
 - **`ContextCompactor.compact()` re-appends kept messages after the boundary marker** rather than splicing the transcript. The pre-boundary copies remain in `Transcript.all_messages()` (and `export()`) but are filtered out by `messages_after_compact_boundary()` before reaching the API. This matches the source design and is harmless, but the transcript grows monotonically.

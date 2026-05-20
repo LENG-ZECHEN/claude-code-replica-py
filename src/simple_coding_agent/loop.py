@@ -45,6 +45,7 @@ from .models import (
     ToolResult,
 )
 from .provider import STOP_MAX_TOKENS, PromptTooLongError, Provider
+from .snip import SnipTool
 from .tool_result_store import ToolResultStore
 from .tools import ToolExecutor, ToolRegistry, UnknownToolError
 from .transcript import Transcript
@@ -125,7 +126,7 @@ class LoopStreamEvent:
 class AgentLoop:
     """Synchronous agent loop.
 
-    Constructor wires together every component built in Phases 2-6:
+    Constructor wires together every component built in Phases 2-8:
       - Provider                  produces assistant responses
       - ToolExecutor              runs tool calls and captures errors
       - ToolRegistry (optional)   supplies the tool spec passed to the provider
@@ -133,6 +134,7 @@ class AgentLoop:
       - ContextBuilder            assembles the per-turn API payload
       - ContextBudget             token budget shared with the compactor
       - ContextCompactor (opt)    summarizes old messages on threshold breach
+      - SnipTool (opt)            folds redundant tool result bodies
       - SessionMemory (opt)       ephemeral memory injected into system prompt
       - ProjectMemory (opt)       file-backed memory injected into system prompt
       - ToolResultStore (opt)     externalizes oversized tool results to disk
@@ -153,6 +155,7 @@ class AgentLoop:
         registry: ToolRegistry | None = None,
         compactor: ContextCompactor | None = None,
         microcompactor: MicroCompactor | None = None,
+        snip_tool: SnipTool | None = None,
         session_memory: SessionMemory | None = None,
         project_memory: ProjectMemory | None = None,
         tool_result_store: ToolResultStore | None = None,
@@ -170,6 +173,8 @@ class AgentLoop:
         self._compactor = compactor
         self._microcompactor = microcompactor or MicroCompactor()
         self._microcompacted = False
+        self._snip_tool = snip_tool or SnipTool()
+        self._snip_attempted_this_turn = False
         self._session_memory = session_memory
         self._project_memory = project_memory
         self._tool_result_store = tool_result_store
@@ -189,12 +194,14 @@ class AgentLoop:
         steps: list[AgentStep] = []
         compacted_overall = False
         reactive_compact_attempted = False
+        self._snip_attempted_this_turn = False
 
         for turn in range(1, self._max_steps + 1):
+            self._maybe_microcompact()
+            self._maybe_snip()
             compacted_this_turn = self._maybe_compact()
             if compacted_this_turn:
                 compacted_overall = True
-            self._maybe_microcompact()
 
             while True:
                 memory_snippets = self._collect_memory_snippets(user_input)
@@ -314,12 +321,14 @@ class AgentLoop:
         steps: list[AgentStep] = []
         compacted_overall = False
         reactive_compact_attempted = False
+        self._snip_attempted_this_turn = False
 
         for turn in range(1, self._max_steps + 1):
+            self._maybe_microcompact()
+            self._maybe_snip()
             compacted_this_turn = self._maybe_compact()
             if compacted_this_turn:
                 compacted_overall = True
-            self._maybe_microcompact()
 
             while True:
                 memory_snippets = self._collect_memory_snippets(user_input)
@@ -483,6 +492,18 @@ class AgentLoop:
         compacted = self._microcompactor.microcompact(messages)
         self._transcript.replace_all(compacted)
         self._microcompacted = True
+        return True
+
+    def _maybe_snip(self) -> bool:
+        """Fold redundant tool results at most once per user turn."""
+        if self._snip_attempted_this_turn:
+            return False
+        messages = self._transcript.all_messages()
+        if not self._snip_tool.should_snip(messages):
+            return False
+        snipped = self._snip_tool.snip(messages)
+        self._transcript.replace_all(snipped)
+        self._snip_attempted_this_turn = True
         return True
 
     def _collect_memory_snippets(self, query: str | None = None) -> list[str]:

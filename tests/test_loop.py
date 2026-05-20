@@ -37,6 +37,7 @@ from simple_coding_agent.provider import (
     ProviderStreamEvent,
     TokenUsage,
 )
+from simple_coding_agent.snip import SNIPPED_CONTENT, SnipTool
 from simple_coding_agent.tools import Tool, ToolExecutor, ToolRegistry
 from simple_coding_agent.transcript import Transcript
 
@@ -54,6 +55,7 @@ def _make_loop(
     project_memory: ProjectMemory | None = None,
     compactor: ContextCompactor | None = None,
     microcompactor: MicroCompactor | None = None,
+    snip_tool: SnipTool | None = None,
     transcript: Transcript | None = None,
     system_prompt: str = "You are a coding assistant.",
 ) -> tuple[AgentLoop, Transcript, ToolRegistry]:
@@ -73,6 +75,7 @@ def _make_loop(
         registry=registry,
         compactor=compactor,
         microcompactor=microcompactor,
+        snip_tool=snip_tool,
         session_memory=session_memory,
         project_memory=project_memory,
         system_prompt=system_prompt,
@@ -154,6 +157,52 @@ class _AlwaysMicroCompactor(MicroCompactor):
     def microcompact(self, messages: list[Message]) -> list[Message]:
         self.microcompact_calls += 1
         return super().microcompact(messages)
+
+
+class _OrderingMicroCompactor(MicroCompactor):
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+
+    def should_microcompact(
+        self,
+        messages: list[Message],
+        threshold_minutes: int = 60,
+        now: datetime | None = None,
+    ) -> bool:
+        self.events.append("micro_should")
+        return True
+
+    def microcompact(self, messages: list[Message]) -> list[Message]:
+        self.events.append("micro_apply")
+        return list(messages)
+
+
+class _OrderingSnipTool(SnipTool):
+    def __init__(self, events: list[str], should: bool = True) -> None:
+        self.events = events
+        self.should_calls = 0
+        self.snip_calls = 0
+        self.should = should
+
+    def should_snip(self, messages: list[Message]) -> bool:
+        self.should_calls += 1
+        self.events.append("snip_should")
+        return self.should
+
+    def snip(self, messages: list[Message]) -> list[Message]:
+        self.snip_calls += 1
+        self.events.append("snip_apply")
+        return list(messages)
+
+
+class _OrderingCompactor(ContextCompactor):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__()
+        self.events = events
+
+    def should_compact(self, transcript: Transcript, budget: ContextBudget) -> bool:
+        self.events.append("compact_should")
+        return False
 
 
 def _tool_exchange_messages(
@@ -604,6 +653,118 @@ def test_agent_loop_microcompacts_at_most_once_per_session() -> None:
 
     assert result.status == LoopStatus.COMPLETED
     assert microcompactor.microcompact_calls == 1
+
+
+# ---------------------------------------------------------------------------
+# 8c. Snip redundant tool results after microcompact and before compaction
+# ---------------------------------------------------------------------------
+
+def test_agent_loop_snips_before_context_building() -> None:
+    recent_timestamp = datetime.now(UTC).isoformat()
+    transcript = Transcript()
+    for i in range(3):
+        for msg in _tool_exchange_messages(
+            tool_use_id=f"read-{i}",
+            result_content=f"read result {i}",
+            timestamp=recent_timestamp,
+        ):
+            transcript.append(msg)
+    transcript.append(Message(
+        uuid="recent-final",
+        role=Role.ASSISTANT,
+        content="recent final answer",
+        timestamp=recent_timestamp,
+    ))
+    p = MockProvider([MockProvider.direct_answer("ok")])
+    loop, _, _ = _make_loop(p, transcript=transcript)
+
+    result = loop.run("continue")
+
+    assert result.status == LoopStatus.COMPLETED
+    sent_context = str(p.history[0].messages)
+    assert SNIPPED_CONTENT in sent_context
+    assert "read result 0" not in sent_context
+    assert "read result 2" in sent_context
+
+
+def test_agent_loop_run_snip_order_is_after_microcompact_before_compaction() -> None:
+    events: list[str] = []
+    p = MockProvider([MockProvider.direct_answer("ok")])
+    loop, _, _ = _make_loop(
+        p,
+        microcompactor=_OrderingMicroCompactor(events),
+        snip_tool=_OrderingSnipTool(events),
+        compactor=_OrderingCompactor(events),
+    )
+
+    result = loop.run("hello")
+
+    assert result.status == LoopStatus.COMPLETED
+    assert events[:5] == [
+        "micro_should",
+        "micro_apply",
+        "snip_should",
+        "snip_apply",
+        "compact_should",
+    ]
+
+
+def test_agent_loop_run_stream_snip_order_is_after_microcompact_before_compaction() -> None:
+    events: list[str] = []
+    p = MockProvider([MockProvider.direct_answer("ok")])
+    loop, _, _ = _make_loop(
+        p,
+        microcompactor=_OrderingMicroCompactor(events),
+        snip_tool=_OrderingSnipTool(events),
+        compactor=_OrderingCompactor(events),
+    )
+
+    stream_events = list(loop.run_stream("hello"))
+
+    assert stream_events[-1].result is not None
+    assert stream_events[-1].result.status == LoopStatus.COMPLETED
+    assert events[:5] == [
+        "micro_should",
+        "micro_apply",
+        "snip_should",
+        "snip_apply",
+        "compact_should",
+    ]
+
+
+def test_agent_loop_snip_attempted_only_once_within_same_user_turn() -> None:
+    events: list[str] = []
+    snip_tool = _OrderingSnipTool(events)
+    echo = Tool(name="echo", description="", input_schema={}, fn=lambda text: text)
+    p = MockProvider([
+        MockProvider.tool_call("echo", {"text": "first"}, id="tu_echo"),
+        MockProvider.direct_answer("done"),
+    ])
+    loop, _, _ = _make_loop(p, tools=[echo], snip_tool=snip_tool)
+
+    result = loop.run("call echo")
+
+    assert result.status == LoopStatus.COMPLETED
+    assert snip_tool.should_calls == 1
+    assert snip_tool.snip_calls == 1
+
+
+def test_agent_loop_snip_attempt_flag_resets_next_user_turn() -> None:
+    events: list[str] = []
+    snip_tool = _OrderingSnipTool(events)
+    p = MockProvider([
+        MockProvider.direct_answer("first"),
+        MockProvider.direct_answer("second"),
+    ])
+    loop, _, _ = _make_loop(p, snip_tool=snip_tool)
+
+    first = loop.run("first request")
+    second = loop.run("second request")
+
+    assert first.status == LoopStatus.COMPLETED
+    assert second.status == LoopStatus.COMPLETED
+    assert snip_tool.should_calls == 2
+    assert snip_tool.snip_calls == 2
 
 
 # ---------------------------------------------------------------------------
