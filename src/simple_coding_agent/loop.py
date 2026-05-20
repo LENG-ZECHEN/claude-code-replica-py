@@ -193,7 +193,7 @@ class AgentLoop:
                 compacted_overall = True
 
             while True:
-                memory_snippets = self._collect_memory_snippets()
+                memory_snippets = self._collect_memory_snippets(user_input)
                 built = self._context_builder.build(
                     transcript=self._transcript,
                     system=self._system_prompt,
@@ -317,7 +317,7 @@ class AgentLoop:
                 compacted_overall = True
 
             while True:
-                memory_snippets = self._collect_memory_snippets()
+                memory_snippets = self._collect_memory_snippets(user_input)
                 built = self._context_builder.build(
                     transcript=self._transcript,
                     system=self._system_prompt,
@@ -468,13 +468,13 @@ class AgentLoop:
         self._last_summary = self._compactor.compact(self._transcript, self._budget)
         return True
 
-    def _collect_memory_snippets(self) -> list[str]:
+    def _collect_memory_snippets(self, query: str | None = None) -> list[str]:
         """Combine snippets from session and project memory stores."""
         snippets: list[str] = []
         if self._session_memory is not None:
             snippets.extend(self._session_memory.to_snippets())
         if self._project_memory is not None:
-            snippets.extend(self._project_memory.to_snippets())
+            snippets.extend(self._project_memory.to_snippets(query=query))
         return snippets
 
     def _handle_tool_calls(

@@ -22,7 +22,7 @@ from collections.abc import Iterator
 from simple_coding_agent.compact import ContextCompactor
 from simple_coding_agent.context import ContextBudget, ContextBuilder
 from simple_coding_agent.loop import AgentLoop, LoopResult, LoopStatus
-from simple_coding_agent.memory import MemoryEntry, MemoryType, SessionMemory
+from simple_coding_agent.memory import MemoryEntry, MemoryType, ProjectMemory, SessionMemory
 from simple_coding_agent.models import Message, MessageType, Role, ToolCall, ToolResult
 from simple_coding_agent.provider import (
     MockProvider,
@@ -46,6 +46,7 @@ def _make_loop(
     max_steps: int = 10,
     budget: ContextBudget | None = None,
     session_memory: SessionMemory | None = None,
+    project_memory: ProjectMemory | None = None,
     compactor: ContextCompactor | None = None,
     transcript: Transcript | None = None,
     system_prompt: str = "You are a coding assistant.",
@@ -66,6 +67,7 @@ def _make_loop(
         registry=registry,
         compactor=compactor,
         session_memory=session_memory,
+        project_memory=project_memory,
         system_prompt=system_prompt,
         max_steps=max_steps,
     )
@@ -119,6 +121,15 @@ class _CountingCompactor(ContextCompactor):
     def compact(self, transcript: Transcript, budget: ContextBudget):
         self.compact_calls += 1
         return super().compact(transcript, budget)
+
+
+class _RecordingProjectMemory:
+    def __init__(self) -> None:
+        self.queries: list[str | None] = []
+
+    def to_snippets(self, query: str | None = None) -> list[str]:
+        self.queries.append(query)
+        return ["[project] recorded: query captured"]
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +422,17 @@ def test_no_memory_injected_when_no_memory_store() -> None:
     loop, _, _ = _make_loop(p)
     result = loop.run("hi")
     assert result.steps[0].memory_injected == []
+
+
+def test_project_memory_receives_latest_user_text_as_query() -> None:
+    project_memory = _RecordingProjectMemory()
+    p = MockProvider([MockProvider.direct_answer("ok")])
+    loop, _, _ = _make_loop(p, project_memory=project_memory)
+
+    result = loop.run("Need pytest guidance for the backend")
+
+    assert project_memory.queries == ["Need pytest guidance for the backend"]
+    assert result.steps[0].memory_injected == ["[project] recorded: query captured"]
 
 
 # ---------------------------------------------------------------------------
