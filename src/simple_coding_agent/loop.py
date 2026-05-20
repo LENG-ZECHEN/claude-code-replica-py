@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from .compact import ContextCompactor
+from .compact import ContextCompactor, MicroCompactor
 from .context import ContextBudget, ContextBuilder
 from .memory import ProjectMemory, SessionMemory
 from .models import (
@@ -152,6 +152,7 @@ class AgentLoop:
         budget: ContextBudget,
         registry: ToolRegistry | None = None,
         compactor: ContextCompactor | None = None,
+        microcompactor: MicroCompactor | None = None,
         session_memory: SessionMemory | None = None,
         project_memory: ProjectMemory | None = None,
         tool_result_store: ToolResultStore | None = None,
@@ -167,6 +168,8 @@ class AgentLoop:
         self._budget = budget
         self._registry = registry
         self._compactor = compactor
+        self._microcompactor = microcompactor or MicroCompactor()
+        self._microcompacted = False
         self._session_memory = session_memory
         self._project_memory = project_memory
         self._tool_result_store = tool_result_store
@@ -191,6 +194,7 @@ class AgentLoop:
             compacted_this_turn = self._maybe_compact()
             if compacted_this_turn:
                 compacted_overall = True
+            self._maybe_microcompact()
 
             while True:
                 memory_snippets = self._collect_memory_snippets(user_input)
@@ -315,6 +319,7 @@ class AgentLoop:
             compacted_this_turn = self._maybe_compact()
             if compacted_this_turn:
                 compacted_overall = True
+            self._maybe_microcompact()
 
             while True:
                 memory_snippets = self._collect_memory_snippets(user_input)
@@ -466,6 +471,18 @@ class AgentLoop:
         if self._compactor is None:
             return False
         self._last_summary = self._compactor.compact(self._transcript, self._budget)
+        return True
+
+    def _maybe_microcompact(self) -> bool:
+        """Run cold-cache tool-result cleanup at most once per loop instance."""
+        if self._microcompacted:
+            return False
+        messages = self._transcript.all_messages()
+        if not self._microcompactor.should_microcompact(messages):
+            return False
+        compacted = self._microcompactor.microcompact(messages)
+        self._transcript.replace_all(compacted)
+        self._microcompacted = True
         return True
 
     def _collect_memory_snippets(self, query: str | None = None) -> list[str]:

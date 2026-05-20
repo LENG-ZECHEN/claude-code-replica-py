@@ -32,6 +32,9 @@ class Transcript:
     def append(self, message: Message) -> None:
         self._messages.append(message)
 
+    def replace_all(self, messages: list[Message]) -> None:
+        self._messages = list(messages)
+
     def all_messages(self) -> list[Message]:
         return list(self._messages)
 

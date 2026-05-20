@@ -18,8 +18,13 @@ Coverage matches the 12 cases enumerated in the Phase 7 instructions:
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 
-from simple_coding_agent.compact import ContextCompactor
+from simple_coding_agent.compact import (
+    CLEARED_TOOL_RESULT_CONTENT,
+    ContextCompactor,
+    MicroCompactor,
+)
 from simple_coding_agent.context import ContextBudget, ContextBuilder
 from simple_coding_agent.loop import AgentLoop, LoopResult, LoopStatus
 from simple_coding_agent.memory import MemoryEntry, MemoryType, ProjectMemory, SessionMemory
@@ -48,6 +53,7 @@ def _make_loop(
     session_memory: SessionMemory | None = None,
     project_memory: ProjectMemory | None = None,
     compactor: ContextCompactor | None = None,
+    microcompactor: MicroCompactor | None = None,
     transcript: Transcript | None = None,
     system_prompt: str = "You are a coding assistant.",
 ) -> tuple[AgentLoop, Transcript, ToolRegistry]:
@@ -66,6 +72,7 @@ def _make_loop(
         budget=real_budget,
         registry=registry,
         compactor=compactor,
+        microcompactor=microcompactor,
         session_memory=session_memory,
         project_memory=project_memory,
         system_prompt=system_prompt,
@@ -130,6 +137,48 @@ class _RecordingProjectMemory:
     def to_snippets(self, query: str | None = None) -> list[str]:
         self.queries.append(query)
         return ["[project] recorded: query captured"]
+
+
+class _AlwaysMicroCompactor(MicroCompactor):
+    def __init__(self) -> None:
+        self.microcompact_calls = 0
+
+    def should_microcompact(
+        self,
+        messages: list[Message],
+        threshold_minutes: int = 60,
+        now: datetime | None = None,
+    ) -> bool:
+        return True
+
+    def microcompact(self, messages: list[Message]) -> list[Message]:
+        self.microcompact_calls += 1
+        return super().microcompact(messages)
+
+
+def _tool_exchange_messages(
+    tool_use_id: str = "tc_old",
+    tool_name: str = "read_file",
+    result_content: str = "old tool result body",
+    timestamp: str = "2024-01-01T00:00:00+00:00",
+) -> list[Message]:
+    return [
+        Message(
+            uuid=f"asst-{tool_use_id}",
+            role=Role.ASSISTANT,
+            content=[ToolCall(id=tool_use_id, name=tool_name, input={"path": "x.py"})],
+            timestamp=timestamp,
+            type=MessageType.TOOL_USE,
+        ),
+        Message(
+            uuid=f"user-{tool_use_id}",
+            role=Role.USER,
+            content=[ToolResult(tool_use_id=tool_use_id, content=result_content)],
+            timestamp=timestamp,
+            type=MessageType.TOOL_RESULT,
+            is_meta=True,
+        ),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -483,6 +532,78 @@ def test_no_compaction_when_under_threshold() -> None:
     loop, _, _ = _make_loop(p, compactor=compactor, budget=budget)
     result = loop.run("small input")
     assert result.compacted is False
+
+
+# ---------------------------------------------------------------------------
+# 8b. Microcompact old tool results before context building
+# ---------------------------------------------------------------------------
+
+def test_agent_loop_microcompacts_old_tool_results_before_context_building() -> None:
+    now = datetime.now(UTC)
+    old_timestamp = (now - timedelta(minutes=90)).isoformat()
+    transcript = Transcript()
+    for msg in _tool_exchange_messages(timestamp=old_timestamp):
+        transcript.append(msg)
+    transcript.append(Message(
+        uuid="old-final",
+        role=Role.ASSISTANT,
+        content="old final answer",
+        timestamp=old_timestamp,
+    ))
+    p = MockProvider([MockProvider.direct_answer("ok")])
+    loop, _, _ = _make_loop(p, transcript=transcript)
+
+    result = loop.run("continue")
+
+    assert result.status == LoopStatus.COMPLETED
+    sent_context = str(p.history[0].messages)
+    assert CLEARED_TOOL_RESULT_CONTENT in sent_context
+    assert "old tool result body" not in sent_context
+
+
+def test_agent_loop_does_not_microcompact_recent_tool_results() -> None:
+    recent_timestamp = datetime.now(UTC).isoformat()
+    transcript = Transcript()
+    for msg in _tool_exchange_messages(timestamp=recent_timestamp):
+        transcript.append(msg)
+    transcript.append(Message(
+        uuid="recent-final",
+        role=Role.ASSISTANT,
+        content="recent final answer",
+        timestamp=recent_timestamp,
+    ))
+    p = MockProvider([MockProvider.direct_answer("ok")])
+    loop, _, _ = _make_loop(p, transcript=transcript)
+
+    result = loop.run("continue")
+
+    assert result.status == LoopStatus.COMPLETED
+    sent_context = str(p.history[0].messages)
+    assert "old tool result body" in sent_context
+    assert CLEARED_TOOL_RESULT_CONTENT not in sent_context
+
+
+def test_agent_loop_microcompacts_at_most_once_per_session() -> None:
+    transcript = Transcript()
+    for msg in _tool_exchange_messages():
+        transcript.append(msg)
+    microcompactor = _AlwaysMicroCompactor()
+    echo = Tool(name="echo", description="", input_schema={}, fn=lambda text: text)
+    p = MockProvider([
+        MockProvider.tool_call("echo", {"text": "first"}, id="tu_echo"),
+        MockProvider.direct_answer("done"),
+    ])
+    loop, _, _ = _make_loop(
+        p,
+        tools=[echo],
+        transcript=transcript,
+        microcompactor=microcompactor,
+    )
+
+    result = loop.run("call echo")
+
+    assert result.status == LoopStatus.COMPLETED
+    assert microcompactor.microcompact_calls == 1
 
 
 # ---------------------------------------------------------------------------

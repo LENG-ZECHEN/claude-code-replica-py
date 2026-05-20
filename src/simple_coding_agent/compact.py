@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 
 from .context import ContextBudget, _estimate_messages_tokens, _normalize_messages
@@ -31,6 +33,13 @@ if TYPE_CHECKING:
     from .provider import Provider
 
 _DEFAULT_SUMMARY_MAX_RESULT_CHARS = 200
+COMPACTABLE_TOOLS = frozenset({
+    "read_file",
+    "run_shell",
+    "search_text",
+    "list_files",
+})
+CLEARED_TOOL_RESULT_CONTENT = "[Old tool result content cleared]"
 _SUMMARY_TAG_RE = re.compile(
     r"<summary>\s*(?P<summary>.*?)\s*</summary>",
     re.DOTALL | re.IGNORECASE,
@@ -158,6 +167,93 @@ class LLMSummarizer:
         if match is None:
             return text
         return match.group("summary").strip()
+
+
+class MicroCompactor:
+    """Cold-cache cleanup for old compactable tool results."""
+
+    def should_microcompact(
+        self,
+        messages: list[Message],
+        threshold_minutes: int = 60,
+        now: datetime | None = None,
+    ) -> bool:
+        if not messages:
+            return False
+
+        current_time = now or datetime.now(UTC)
+        if current_time.tzinfo is None:
+            current_time = current_time.replace(tzinfo=UTC)
+
+        latest_assistant_time: datetime | None = None
+        for msg in messages:
+            if msg.role != Role.ASSISTANT:
+                continue
+            timestamp = self._parse_timestamp(msg.timestamp)
+            if timestamp is None:
+                continue
+            if latest_assistant_time is None or timestamp > latest_assistant_time:
+                latest_assistant_time = timestamp
+
+        if latest_assistant_time is None:
+            return True
+
+        return current_time - latest_assistant_time > timedelta(minutes=threshold_minutes)
+
+    def microcompact(self, messages: list[Message]) -> list[Message]:
+        tool_names_by_id = self._tool_names_by_id(messages)
+        compacted: list[Message] = []
+
+        for msg in messages:
+            if not isinstance(msg.content, list):
+                compacted.append(replace(msg))
+                continue
+
+            new_content: list[ToolCall | ToolResult] = []
+            for item in msg.content:
+                if isinstance(item, ToolCall):
+                    new_content.append(replace(item, input=dict(item.input)))
+                    continue
+                tool_name = tool_names_by_id.get(item.tool_use_id)
+                if tool_name in COMPACTABLE_TOOLS:
+                    new_content.append(replace(
+                        item,
+                        content=CLEARED_TOOL_RESULT_CONTENT,
+                    ))
+                else:
+                    new_content.append(replace(item))
+            compacted.append(replace(msg, content=new_content))
+
+        return compacted
+
+    @staticmethod
+    def _parse_timestamp(value: str) -> datetime | None:
+        if not value:
+            return None
+        try:
+            normalized = value.replace("Z", "+00:00")
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
+
+    @staticmethod
+    def _tool_names_by_id(messages: list[Message]) -> dict[str, str | None]:
+        tool_names: dict[str, str | None] = {}
+        for msg in messages:
+            if msg.role != Role.ASSISTANT or not isinstance(msg.content, list):
+                continue
+            for item in msg.content:
+                if not isinstance(item, ToolCall):
+                    continue
+                existing = tool_names.get(item.id)
+                if existing is None and item.id not in tool_names:
+                    tool_names[item.id] = item.name
+                elif existing != item.name:
+                    tool_names[item.id] = None
+        return tool_names
 
 
 class ContextCompactor:

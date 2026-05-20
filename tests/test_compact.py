@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from simple_coding_agent.compact import ContextCompactor, LLMSummarizer, RuleBasedSummarizer
+from datetime import UTC, datetime, timedelta
+
+from simple_coding_agent.compact import (
+    CLEARED_TOOL_RESULT_CONTENT,
+    ContextCompactor,
+    LLMSummarizer,
+    MicroCompactor,
+    RuleBasedSummarizer,
+)
 from simple_coding_agent.context import ContextBudget
 from simple_coding_agent.models import (
     Message,
@@ -26,8 +34,12 @@ def _make_transcript(n_pairs: int, content_size: int = 20) -> Transcript:
     return t
 
 
-def _make_tool_exchange(tool_use_id: str, result_content: str) -> tuple[Message, Message]:
-    tc = ToolCall(id=tool_use_id, name="read_file", input={"path": "x.py"})
+def _make_tool_exchange(
+    tool_use_id: str,
+    result_content: str,
+    tool_name: str = "read_file",
+) -> tuple[Message, Message]:
+    tc = ToolCall(id=tool_use_id, name=tool_name, input={"path": "x.py"})
     asst = Message(
         uuid=f"asst-{tool_use_id}",
         role=Role.ASSISTANT,
@@ -299,3 +311,174 @@ def test_llm_summarizer_returns_plain_text_without_tags() -> None:
 
     assert summary == "Plain summary text"
     assert len(provider.history) == 1
+
+
+# ---------------------------------------------------------------------------
+# MicroCompactor
+# ---------------------------------------------------------------------------
+
+def test_should_microcompact_false_for_empty_transcript() -> None:
+    assert MicroCompactor().should_microcompact([]) is False
+
+
+def test_should_microcompact_true_when_no_assistant_timestamp() -> None:
+    msg = Message(
+        uuid="user-no-ts",
+        role=Role.USER,
+        content="hello",
+        timestamp="2024-01-01T00:00:00Z",
+    )
+    assert MicroCompactor().should_microcompact([msg]) is True
+
+
+def test_should_microcompact_true_when_latest_assistant_is_old() -> None:
+    now = datetime(2024, 1, 1, 2, 0, tzinfo=UTC)
+    old_assistant = Message(
+        uuid="asst-old",
+        role=Role.ASSISTANT,
+        content="old",
+        timestamp=(now - timedelta(minutes=61)).isoformat(),
+    )
+    assert MicroCompactor().should_microcompact([old_assistant], now=now) is True
+
+
+def test_should_microcompact_false_when_latest_assistant_is_recent() -> None:
+    now = datetime(2024, 1, 1, 2, 0, tzinfo=UTC)
+    recent_assistant = Message(
+        uuid="asst-recent",
+        role=Role.ASSISTANT,
+        content="recent",
+        timestamp=(now - timedelta(minutes=10)).isoformat(),
+    )
+    assert MicroCompactor().should_microcompact([recent_assistant], now=now) is False
+
+
+def test_microcompact_clears_compactable_tool_results() -> None:
+    messages: list[Message] = []
+    for tool_name in ("read_file", "run_shell", "search_text", "list_files"):
+        asst, user_r = _make_tool_exchange(
+            f"tc_{tool_name}",
+            f"{tool_name} output",
+            tool_name=tool_name,
+        )
+        messages.extend([asst, user_r])
+
+    compacted = MicroCompactor().microcompact(messages)
+    result_contents = [
+        item.content
+        for msg in compacted
+        if isinstance(msg.content, list)
+        for item in msg.content
+        if isinstance(item, ToolResult)
+    ]
+
+    assert result_contents == [CLEARED_TOOL_RESULT_CONTENT] * 4
+
+
+def test_microcompact_does_not_clear_non_compactable_tool_result() -> None:
+    asst, user_r = _make_tool_exchange("tc_custom", "important output", tool_name="custom_tool")
+
+    compacted = MicroCompactor().microcompact([asst, user_r])
+    compacted_content = compacted[1].content
+
+    assert isinstance(compacted_content, list)
+    assert isinstance(compacted_content[0], ToolResult)
+    assert compacted_content[0].content == "important output"
+
+
+def test_microcompact_returns_new_list_and_does_not_mutate_original() -> None:
+    asst, user_r = _make_tool_exchange("tc_mut", "original output")
+    original_messages = [asst, user_r]
+
+    compacted = MicroCompactor().microcompact(original_messages)
+
+    assert compacted is not original_messages
+    assert compacted[1] is not user_r
+    original_content = user_r.content
+    compacted_content = compacted[1].content
+    assert isinstance(original_content, list)
+    assert isinstance(compacted_content, list)
+    assert isinstance(original_content[0], ToolResult)
+    assert isinstance(compacted_content[0], ToolResult)
+    assert original_content[0].content == "original output"
+    assert compacted_content[0].content == CLEARED_TOOL_RESULT_CONTENT
+
+
+def test_microcompact_preserves_message_order_and_structure() -> None:
+    asst, user_r = _make_tool_exchange("tc_order", "output")
+    user_msg = Message.user("next request")
+    messages = [asst, user_r, user_msg]
+
+    compacted = MicroCompactor().microcompact(messages)
+
+    assert [msg.uuid for msg in compacted] == [msg.uuid for msg in messages]
+    assert compacted[0].type == MessageType.TOOL_USE
+    assert compacted[1].type == MessageType.TOOL_RESULT
+    assert compacted[2].role == Role.USER
+    assert isinstance(compacted[0].content, list)
+    assert isinstance(compacted[0].content[0], ToolCall)
+
+
+def test_microcompact_pairs_tool_result_by_tool_use_id() -> None:
+    compactable_asst, compactable_result = _make_tool_exchange(
+        "tc_same_position_wrong_order",
+        "read output",
+        tool_name="read_file",
+    )
+    custom_asst, custom_result = _make_tool_exchange(
+        "tc_custom_pair",
+        "custom output",
+        tool_name="custom_tool",
+    )
+    messages = [custom_asst, compactable_asst, compactable_result, custom_result]
+
+    compacted = MicroCompactor().microcompact(messages)
+    first_result_content = compacted[2].content
+    second_result_content = compacted[3].content
+
+    assert isinstance(first_result_content, list)
+    assert isinstance(second_result_content, list)
+    assert isinstance(first_result_content[0], ToolResult)
+    assert isinstance(second_result_content[0], ToolResult)
+    assert first_result_content[0].content == CLEARED_TOOL_RESULT_CONTENT
+    assert second_result_content[0].content == "custom output"
+
+
+def test_microcompact_leaves_unpaired_tool_result_unchanged() -> None:
+    user_r = Message(
+        uuid="user-unpaired",
+        role=Role.USER,
+        content=[ToolResult(tool_use_id="missing_tool_use", content="unpaired output")],
+        timestamp="2024-01-01T00:00:01Z",
+        type=MessageType.TOOL_RESULT,
+        is_meta=True,
+    )
+
+    compacted = MicroCompactor().microcompact([user_r])
+    compacted_content = compacted[0].content
+
+    assert isinstance(compacted_content, list)
+    assert isinstance(compacted_content[0], ToolResult)
+    assert compacted_content[0].content == "unpaired output"
+
+
+def test_microcompact_handles_conflicting_duplicate_tool_use_ids_conservatively() -> None:
+    first_asst, user_r = _make_tool_exchange(
+        "tc_duplicate",
+        "duplicate output",
+        tool_name="read_file",
+    )
+    second_asst = Message(
+        uuid="asst-duplicate-custom",
+        role=Role.ASSISTANT,
+        content=[ToolCall(id="tc_duplicate", name="custom_tool", input={})],
+        timestamp="2024-01-01T00:00:02Z",
+        type=MessageType.TOOL_USE,
+    )
+
+    compacted = MicroCompactor().microcompact([first_asst, second_asst, user_r])
+    compacted_content = compacted[2].content
+
+    assert isinstance(compacted_content, list)
+    assert isinstance(compacted_content[0], ToolResult)
+    assert compacted_content[0].content == "duplicate output"
