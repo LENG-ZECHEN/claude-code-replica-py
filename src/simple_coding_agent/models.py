@@ -1,0 +1,195 @@
+"""
+Core data structures for simple_coding_agent.
+
+Source mapping:
+  Role / MessageType  <- src/types/message.ts (UserMessage, AssistantMessage, etc.)
+  ToolCall            <- tool_use block in AssistantMessage content
+  ToolResult          <- tool_result block in UserMessage content
+  Message             <- src/types/message.ts (UserMessage | AssistantMessage)
+  AgentStep           <- one full query-loop turn in src/query.ts
+  CompactSummary      <- CompactionResult in src/services/compact/compact.ts
+"""
+
+from __future__ import annotations
+
+import uuid as _uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _new_uuid() -> str:
+    return str(_uuid.uuid4())
+
+
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
+
+class Role(StrEnum):
+    """Message sender role.  Mirrors the role field sent to the Anthropic API."""
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+
+
+class MessageType(StrEnum):
+    """Internal message classification.
+    Only TEXT / TOOL_USE / TOOL_RESULT messages ever reach the API.
+    COMPACT_BOUNDARY and ATTACHMENT are internal bookkeeping types stripped
+    by Transcript.normalize_for_api(), mirroring the filtering in
+    src/utils/messages.ts:normalizeMessagesForAPI().
+    """
+    TEXT = "text"
+    TOOL_USE = "tool_use"
+    TOOL_RESULT = "tool_result"
+    COMPACT_BOUNDARY = "compact_boundary"
+    ATTACHMENT = "attachment"
+
+
+# ---------------------------------------------------------------------------
+# Tool primitives
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ToolCall:
+    """A single tool_use block from an assistant response.
+
+    Source: ToolUseBlock in AssistantMessage content (src/types/message.ts).
+    """
+    id: str                    # stable tool_use_id; pairs with a matching ToolResult
+    name: str                  # registered tool name
+    input: dict[str, Any]      # validated input dict
+
+
+@dataclass
+class ToolResult:
+    """A single tool_result block returned to the model after execution.
+
+    Source: ToolResultBlockParam in src/utils/toolResultStorage.ts.
+    The content field may be replaced with a <persisted-output> reference
+    when the result exceeds the externalization threshold (default 50k chars).
+    Source constant: maxResultSizeChars in src/Tool.ts.
+    """
+    tool_use_id: str
+    content: str
+    is_error: bool = False
+    persisted_path: str | None = None   # disk path if externalized
+    original_size: int | None = None    # char count before externalization
+
+    def to_api_block(self) -> dict[str, Any]:
+        """Convert to Anthropic API tool_result content block."""
+        return {
+            "type": "tool_result",
+            "tool_use_id": self.tool_use_id,
+            "content": self.content,
+            "is_error": self.is_error,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Message
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Message:
+    """A single message in the conversation transcript.
+
+    Source: UserMessage | AssistantMessage | SystemMessage in src/types/message.ts.
+
+    Key flags (matching source):
+      is_virtual  — display-only; must not be sent to the API
+      is_meta     — tool_result pairing message (sent to API, but flagged for UI)
+      is_compact_summary — this message carries a compaction summary
+    """
+    uuid: str
+    role: Role
+    content: str | list[ToolCall | ToolResult]
+    timestamp: str
+    is_meta: bool = False
+    is_virtual: bool = False
+    is_compact_summary: bool = False
+    type: MessageType = MessageType.TEXT
+
+    # --- Factory helpers ---
+
+    @classmethod
+    def user(cls, content: str, **kwargs: Any) -> Message:
+        return cls(
+            uuid=_new_uuid(),
+            role=Role.USER,
+            content=content,
+            timestamp=_now_iso(),
+            **kwargs,
+        )
+
+    @classmethod
+    def assistant(cls, content: str, **kwargs: Any) -> Message:
+        return cls(
+            uuid=_new_uuid(),
+            role=Role.ASSISTANT,
+            content=content,
+            timestamp=_now_iso(),
+            **kwargs,
+        )
+
+    @classmethod
+    def compact_boundary(cls, messages_summarized: int = 0) -> Message:
+        """Create the fence marker inserted after a full compaction.
+
+        Source: createCompactBoundaryMessage() in src/utils/messages.ts (line 4530).
+        The boundary is a SYSTEM-role, COMPACT_BOUNDARY-type message.
+        getMessagesAfterCompactBoundary() slices the transcript at this marker.
+        """
+        return cls(
+            uuid=_new_uuid(),
+            role=Role.SYSTEM,
+            content="Conversation compacted",
+            timestamp=_now_iso(),
+            type=MessageType.COMPACT_BOUNDARY,
+            is_meta=True,
+        )
+
+
+# ---------------------------------------------------------------------------
+# AgentStep
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AgentStep:
+    """Record of one complete agent turn (user input -> assistant response).
+
+    Source: one iteration of queryLoop() in src/query.ts.
+    """
+    turn: int
+    user_message: Message
+    assistant_message: Message
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    tool_results: list[ToolResult] = field(default_factory=list)
+    compacted: bool = False
+    memory_injected: list[str] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# CompactSummary
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CompactSummary:
+    """Result of a full compaction run.
+
+    Source: CompactionResult in src/services/compact/compact.ts.
+    The boundary_uuid links this summary to its Message.compact_boundary() marker.
+    """
+    boundary_uuid: str
+    summary_text: str           # model-generated 9-section summary (<analysis> stripped)
+    messages_summarized: int
+    pre_token_count: int
+    post_token_count: int
+    restored_files: list[str] = field(default_factory=list)
+    timestamp: str = field(default_factory=_now_iso)
