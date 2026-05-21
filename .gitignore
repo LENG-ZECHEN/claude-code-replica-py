@@ -14,5 +14,10 @@ build/
 dist/
 *.egg-info/
 
-# Autonomous-loop runtime artifacts (logs/loop.log, logs/M{N}.log)
-logs/
+# Autonomous-loop runtime artifacts.
+# automation/logs/    — scratch; never committed.
+# initiatives/current/logs/  — per-milestone logs of the in-flight initiative;
+#                              moved into initiatives/_archive/<slug>/logs/ at
+#                              wrap-up time (where they ARE tracked).
+automation/logs/
+initiatives/current/logs/

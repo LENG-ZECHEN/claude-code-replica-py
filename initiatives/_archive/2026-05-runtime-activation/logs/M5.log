@@ -1,0 +1,12 @@
+M5 complete. Exit gate verified end-to-end:
+
+- **Commit**: `de3ecad P9-M5: HANDOFF ... complete` (preceded by `a3f51b1 P9-M5: openai_cli REPL ...`). Loop exit-gate grep `P9-M5` matches.
+- **pytest**: 497 passing (475 → 497, +22 — exceeds M5 ≥485 target).
+- **mypy**: clean. **ruff**: clean.
+- **Exit-gate behaviors verified by smoke test**:
+  - `simple-agent --repl` prints `(cue detected: '记住' -- type /remember ...)` on Chinese cue input.
+  - `/remember feedback indent_pref ...` writes a valid `MemoryEntry` JSON to `<workspace>/.simple-agent/memory/`.
+  - `openai_cli --repl` dispatches into a real-provider-backed REPL (test-mocked).
+- **Files**: `src/.../auto_learn.py` + 3 new test files; `cli.py` + `openai_cli.py` extended; `test_end_to_end_long_session.py` gains plan 3.5 scenario 3; `CLAUDE.md`, `PROGRESS.md`, `HANDOFF.md` updated.
+
+RUNTIME_ACTIVATION_PLAN initiative is complete — M5 was the terminal milestone. HANDOFF.md instructs the autonomous loop to stop here.

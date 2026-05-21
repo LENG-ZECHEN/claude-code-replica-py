@@ -1,0 +1,9 @@
+M2 complete. Summary:
+
+**Phase C1 — `examples/stress_demo.py`** drives full-compact (210k-char scripted transcript inside a 10k-token `ContextBudget`) and reactive-compact (`PromptTooLongError` → retry). Prints normative markers `compact fired (messages_summarized=N)` and `reactive compact fired (messages_summarized=N)`.
+
+**Phase C2 — `examples/microcompact_demo.py`** seeds 120-min-aged timestamps so `MicroCompactor` fires inside `AgentLoop._maybe_microcompact`. Prints `microcompact fired (results cleared=N)`. `--fresh` flag demonstrates the negative-path `microcompact skipped`.
+
+**Tests:** Section 3.3 tests (`test_stress_full_compact.py` 6 cases, `test_microcompact_runtime.py` 3 cases — both were pre-existing untracked files from a prior aborted attempt; M2 lands them) plus new demo-stdout tests (`test_stress_demo.py` 3 cases, `test_microcompact_demo.py` 3 cases).
+
+**Exit-ritual:** P9-M2 commit `55dc845`, CLAUDE.md / PROGRESS.md / HANDOFF.md updated. pytest 421 → 436. `.gitignore` adds `logs/` to keep autonomous-loop artifacts out of `git status`.

@@ -12,7 +12,8 @@ package. The default execution path makes **no real API calls** and runs no
 real shell commands.
 
 See [`CLAUDE.md`](./CLAUDE.md) for the per-file architecture summary,
-implementation roadmap (P1–P6, all completed), and documented limitations.
+implementation roadmap, and documented limitations. See [`NOW.md`](./NOW.md)
+for the current active initiative (if any).
 
 ## Key concepts replicated
 
@@ -48,7 +49,8 @@ src/simple_coding_agent/
   cli.py                  simple-agent (MockProvider demo)
   openai_cli.py           simple-agent-openai (real OpenAI-compatible CLI)
 tests/
-  370 tests across context, compaction, memory, provider, loop, tools, CLI, demos
+  Unit + integration tests across context, compaction, memory, provider,
+  loop, tools, CLI, and demos. Run `pytest` for the current count.
 examples/
   demo.py                 MockProvider demo (no API key, no network)
   openai_chat_demo.py     Hardened OpenAI demo (requires --confirm-api-call)
@@ -111,17 +113,20 @@ Safety guarantees:
   inside the workspace root.
 - `.env` and `.env.*` are gitignored.
 
-## Current status
+## Status and ongoing work
 
-All implementation phases are complete; see
-[`CLAUDE.md`](./CLAUDE.md#implementation-roadmap-completed-p1p6) for the
-P1–P6 roadmap with commit references and current limitations.
+Current state, active initiative (if any), and last completed work are
+tracked in a single place: [`NOW.md`](./NOW.md). Architecture and the
+completed P-roadmap live in [`CLAUDE.md`](./CLAUDE.md).
 
-Quality gates:
+Quality gates (run anytime to verify the project is green):
 
 ```bash
-pytest                                                # 370 tests pass
-mypy src                                              # strict, clean
-ruff check src tests examples/openai_chat_demo.py     # clean
-python examples/demo.py                               # exits 0, REPORT.md generated
+pytest                                                # full suite
+mypy src                                              # strict
+ruff check src tests examples/openai_chat_demo.py     # lint
+python examples/demo.py                               # MockProvider demo
 ```
+
+To kick off a new multi-milestone initiative, see
+[`automation/RUNBOOK.md`](./automation/RUNBOOK.md).

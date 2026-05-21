@@ -1,5 +1,10 @@
 # RUNTIME_ACTIVATION_PLAN
 
+> **STATUS: complete** — 2026-05-21. Final commit: `de3ecad`.
+> pytest 392 → 497 (+105 over 5 milestones). mypy + ruff clean.
+> Archived from project root to `initiatives/_archive/` on 2026-05-22.
+> See `HANDOFF.md` for terminal state and `PROGRESS.md` for per-milestone log.
+
 > **Purpose**: All context-management and memory mechanisms in
 > `simple_coding_agent` are implemented and unit-tested (392 passing as
 > of this writing), but the current one-shot CLI never runs long enough

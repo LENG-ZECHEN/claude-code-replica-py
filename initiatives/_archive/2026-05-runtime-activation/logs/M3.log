@@ -1,0 +1,11 @@
+M3 complete. Final state:
+
+- **Commit**: `7a3bb51 P9-M3: MetricsCollector, REPL /stats, SessionMemory persistence` (exit-gate `grep "P9-M3"` matches at HEAD)
+- **pytest**: 455 passing (was 436, +19, target was ≥455)
+- **mypy**: clean
+- **ruff**: clean
+- **Working tree**: clean
+- **REPL `/stats`**: prints all six per-mechanism counter lines end-to-end
+- **CLAUDE.md, PROGRESS.md, HANDOFF.md**: all updated per exit ritual; HANDOFF Section 3 documents 5 plan-divergences (most important: `ToolResultStore.total_externalized_bytes` property, 9 vs 6 persist tests, mutable MetricsCollector, workspace-local session_memory path, classmethod `load_json`)
+
+The next milestone session will find M4 (D1+D2+D3: Transcript persistence + named session save/load + `--resume`) at the top of the queue.

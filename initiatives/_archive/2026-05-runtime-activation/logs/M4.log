@@ -1,0 +1,7 @@
+M4 done. Summary:
+
+- **D1 (`Transcript` persistence)**: `to_jsonable` / `from_jsonable` / `dump_json` / `load_json` in `transcript.py` with required-field validation and a shared `_atomic_write_json` helper. 6 tests in `tests/test_transcript_persist.py`.
+- **D2 (REPL `/save` & `/load`)**: New `session_store.py` (Transcript + last `CompactSummary` → `<sessions_dir>/<name>.json`) plus `/save` / `/load` slash commands. `SIMPLE_AGENT_SESSIONS_DIR` env override. 8 tests in `tests/test_repl_save_load.py`.
+- **D3 (`--resume` CLI flag)**: `_apply_resume` in `cli.py`, implicit REPL when only `--resume` is given, exit code 2 on clear failures. 4 tests in `tests/test_resume_session.py`, plus 2 cross-process integration scenarios in `tests/test_end_to_end_long_session.py` (plan 3.5 #1 + #2).
+- **Gates**: pytest 455 → 475 (+20, target ≥475 met), mypy strict clean, ruff clean.
+- **Exit ritual**: PROGRESS.md + CLAUDE.md appended; HANDOFF.md rewritten for M5 with Section 3 documenting four divergences (extra `to_jsonable` layer, exit code 2 convention, implicit REPL for bare `--resume`, mutating `_handle_slash_command`); two `P9-M4:` commits (`ea7e383`, `2aa9706`); exit-gate grep `git log --oneline -1 | grep "P9-M4"` matches.
