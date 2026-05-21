@@ -6,10 +6,12 @@ Lightweight by design: no network, no LLM, no API key. The CLI uses
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import pytest
 
+import simple_coding_agent.cli as cli_mod
 from simple_coding_agent.cli import main
 
 
@@ -20,7 +22,7 @@ def test_cli_main_returns_zero(
 ) -> None:
     import simple_coding_agent.claude_md as cm
     monkeypatch.setattr(cm, "_DEFAULT_USER_CLAUDE_MD", tmp_path / "no_claude.md")
-    rc = main()
+    rc = main([])
     captured = capsys.readouterr()
 
     assert rc == 0
@@ -36,3 +38,40 @@ def test_cli_main_returns_zero(
     # Generated REPORT.md was reported as existing inside the workspace
     assert "REPORT.md" in captured.out
     assert "exists=True" in captured.out
+
+
+def test_cli_repl_flag_dispatches_to_repl_handler(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """`--repl` must invoke the REPL handler, not the one-shot demo."""
+    import simple_coding_agent.claude_md as cm
+    monkeypatch.setattr(cm, "_DEFAULT_USER_CLAUDE_MD", tmp_path / "no_claude.md")
+    monkeypatch.setattr("sys.stdin", io.StringIO("/exit\n"))
+
+    dispatched = {"value": False}
+
+    def _spy(*_args: object, **_kwargs: object) -> int:
+        dispatched["value"] = True
+        return 0
+
+    monkeypatch.setattr(cli_mod, "_run_repl", _spy)
+    rc = main(["--repl", "--workspace", str(tmp_path)])
+    assert rc == 0
+    assert dispatched["value"] is True
+
+
+def test_cli_max_steps_flag_default_is_10(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Without `--max-steps`, the REPL loop must default to 10."""
+    import simple_coding_agent.claude_md as cm
+    monkeypatch.setattr(cm, "_DEFAULT_USER_CLAUDE_MD", tmp_path / "no_claude.md")
+    monkeypatch.setattr("sys.stdin", io.StringIO("/exit\n"))
+
+    rc = main(["--repl", "--workspace", str(tmp_path)])
+    assert rc == 0
+    loops = list(getattr(cli_mod, "_LAST_LOOPS", []))
+    assert loops, "REPL should have built at least one AgentLoop"
+    assert loops[0]._max_steps == 10

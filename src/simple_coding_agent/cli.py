@@ -1,19 +1,35 @@
 """
-Phase 10: Runnable CLI/demo for simple_coding_agent.
+Phase 10 / P9-M1: Runnable CLI for simple_coding_agent.
 
-Drives the AgentLoop end-to-end against a deterministic MockProvider over a
-temporary workspace. No LLM call is made; no API key is required; all file
-operations are confined to the temporary directory and torn down on exit.
+Two modes:
 
-Entry point: ``simple-agent`` (declared in pyproject.toml ``[project.scripts]``).
+  ``simple-agent``                  -- one-shot MockProvider demo (the
+                                       original Phase 10 behavior).
+  ``simple-agent --repl``           -- multi-turn interactive REPL with a
+                                       shared AgentLoop, MockProvider for
+                                       determinism, and slash commands
+                                       (``/exit``, ``/quit``, ``/help``).
+  ``simple-agent memory ...``       -- delegate to memory_cli.
+
+Long-running modes (``--repl``) are what makes the P1-P8 context-management
+mechanisms actually reachable: snip, full-compact, microcompact, reactive
+compact, and prompt-cache stability all require more than one provider call
+to fire. The one-shot mode is preserved for backwards-compatible smoke
+tests; argparse routes between them based on flags / positional args.
+
+This module does no network I/O and requires no API key. All flags map
+into either ``AgentLoop`` constructor arguments or ``ContextBudget`` fields.
 """
 
 from __future__ import annotations
 
+import argparse
+import sys
 import tempfile
 from pathlib import Path
 
 from .claude_md import ClaudeMdLoader
+from .compact import ContextCompactor
 from .context import ContextBudget, ContextBuilder
 from .loop import AgentLoop, LoopStatus
 from .models import ToolCall
@@ -21,6 +37,10 @@ from .provider import MockProvider, ProviderResponse
 from .tool_registry_factory import build_default_registry
 from .tools import ToolExecutor
 from .transcript import Transcript
+
+# ---------------------------------------------------------------------------
+# Demo-mode constants (preserved from Phase 10)
+# ---------------------------------------------------------------------------
 
 _USER_INPUT: str = (
     "Read src/app.py, find where 'hello' appears, "
@@ -41,6 +61,35 @@ _FINAL_ANSWER: str = (
 
 _PREVIEW_CHARS: int = 200
 
+# ---------------------------------------------------------------------------
+# REPL constants
+# ---------------------------------------------------------------------------
+
+_DEFAULT_MAX_STEPS: int = 10
+_DEFAULT_CONTEXT_TOKENS: int = 200_000
+_DEFAULT_RESERVED_OUTPUT_TOKENS: int = 8_192
+_REPL_BANNER: str = (
+    "simple-agent REPL -- type /help for commands, /exit to quit.\n"
+    "MockProvider only: no network, no API key, no real shell.\n"
+)
+_REPL_PROMPT: str = "> "
+_REPL_HELP_TEXT: str = (
+    "Commands:\n"
+    "  /help          Show this help.\n"
+    "  /exit, /quit   Leave the REPL.\n"
+)
+_REPL_DEFAULT_ANSWER: str = (
+    "[MockProvider] Acknowledged. (No real LLM is wired in this build.)"
+)
+
+# Test hooks: REPL records the AgentLoop instances it created so tests can
+# inspect token budget / max_steps without monkeypatching constructors.
+_LAST_LOOPS: list[AgentLoop] = []
+
+
+# ---------------------------------------------------------------------------
+# Demo-mode helpers (Phase 10 logic, unchanged)
+# ---------------------------------------------------------------------------
 
 def _seed_workspace(ws: Path) -> None:
     """Seed the temporary workspace with the file the script expects to read."""
@@ -140,12 +189,243 @@ def _run_demo(workspace: Path) -> int:
     return 0 if result.status == LoopStatus.COMPLETED else 1
 
 
-def main() -> int:
+# ---------------------------------------------------------------------------
+# REPL implementation
+# ---------------------------------------------------------------------------
+
+def _make_repl_provider(_workspace: Path) -> MockProvider:
+    """Provider used by the REPL by default.
+
+    Returns a MockProvider preloaded with a generous pool of canned
+    acknowledgements -- enough to survive long sessions without exhausting
+    the script. Tests replace this hook with a tighter scripted provider
+    via ``monkeypatch.setattr(cli_mod, "_make_repl_provider", ...)``.
+    """
+    return MockProvider([
+        MockProvider.direct_answer(_REPL_DEFAULT_ANSWER) for _ in range(1_000)
+    ])
+
+
+def _build_repl_loop(
+    workspace: Path,
+    *,
+    max_steps: int,
+    max_context_tokens: int,
+    reserved_output_tokens: int,
+) -> AgentLoop:
+    """Wire one shared AgentLoop for the REPL session."""
+    registry = build_default_registry(workspace)
+    executor = ToolExecutor(registry)
+    budget = ContextBudget(
+        max_tokens=max_context_tokens,
+        reserved_output_tokens=reserved_output_tokens,
+    )
+    transcript = Transcript()
+    builder = ContextBuilder(
+        budget=budget,
+        workspace_path=workspace,
+        claude_md_loader=ClaudeMdLoader(),
+    )
+    loop = AgentLoop(
+        provider=_make_repl_provider(workspace),
+        tool_executor=executor,
+        transcript=transcript,
+        context_builder=builder,
+        budget=budget,
+        registry=registry,
+        compactor=ContextCompactor(),
+        max_steps=max_steps,
+    )
+    _LAST_LOOPS.append(loop)
+    return loop
+
+
+def _handle_slash_command(cmd: str) -> str:
+    """Map a slash command to a control signal.
+
+    Returns:
+      ``"exit"``     -- caller should terminate the loop.
+      ``"continue"`` -- handled (printed help / hint), keep looping.
+    """
+    head = cmd.strip().split()[0]
+    if head in ("/exit", "/quit"):
+        return "exit"
+    if head == "/help":
+        print(_REPL_HELP_TEXT, end="")
+        return "continue"
+    print(f"Unknown command: {head!r}. Try /help for the command list.")
+    return "continue"
+
+
+def _read_input_line() -> str | None:
+    """Read one line from stdin. Return None on EOF."""
+    try:
+        return input(_REPL_PROMPT)
+    except EOFError:
+        return None
+
+
+def _run_turn(loop: AgentLoop, user_input: str, stream: bool) -> None:
+    """Drive one user turn; print the assistant answer."""
+    if stream:
+        streamed = False
+        final_answer: str | None = None
+        for event in loop.run_stream(user_input):
+            if event.type == "text_delta" and event.text:
+                print(event.text, end="", flush=True)
+                streamed = True
+            elif event.type == "done" and event.result is not None:
+                final_answer = event.result.answer
+        if streamed:
+            print()
+            return
+        print(final_answer or "(no answer)")
+        return
+    result = loop.run(user_input)
+    print(result.answer or "(no answer)")
+
+
+def _run_repl(
+    *,
+    workspace: Path,
+    max_steps: int,
+    max_context_tokens: int,
+    reserved_output_tokens: int,
+    stream: bool,
+) -> int:
+    """Run the interactive REPL.
+
+    Builds one shared ``AgentLoop`` and calls it repeatedly with each user
+    input. Slash commands intercept before the loop is invoked. EOF on
+    stdin and ``/exit`` / ``/quit`` both terminate cleanly.
+
+    KeyboardInterrupt during a single turn is caught and reported; the
+    transcript and the loop instance are preserved so the next turn sees
+    every prior user message.
+    """
+    print(_REPL_BANNER, end="")
+    print(f"Workspace: {workspace}")
+    print()
+
+    # Each REPL session owns a fresh slot in the per-process loop log.
+    _LAST_LOOPS.clear()
+    loop = _build_repl_loop(
+        workspace,
+        max_steps=max_steps,
+        max_context_tokens=max_context_tokens,
+        reserved_output_tokens=reserved_output_tokens,
+    )
+
+    while True:
+        line = _read_input_line()
+        if line is None:
+            print()
+            return 0
+
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        if stripped.startswith("/"):
+            signal = _handle_slash_command(stripped)
+            if signal == "exit":
+                return 0
+            continue
+
+        try:
+            _run_turn(loop, stripped, stream)
+        except KeyboardInterrupt:
+            print("\n(interrupted; transcript preserved)")
+            continue
+
+
+# ---------------------------------------------------------------------------
+# Argparse routing
+# ---------------------------------------------------------------------------
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="simple-agent",
+        description=(
+            "simple_coding_agent: one-shot demo by default, or a multi-turn "
+            "REPL with --repl. Also exposes `memory` and other subcommands."
+        ),
+    )
+    parser.add_argument(
+        "--repl",
+        action="store_true",
+        help="Start an interactive REPL using MockProvider.",
+    )
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Stream assistant text as it arrives (REPL mode).",
+    )
+    parser.add_argument(
+        "--workspace",
+        default=None,
+        help="Workspace path. Defaults to a fresh tempdir.",
+    )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=_DEFAULT_MAX_STEPS,
+        help="Max tool-using iterations per user turn (default: 10).",
+    )
+    parser.add_argument(
+        "--max-context-tokens",
+        type=int,
+        default=_DEFAULT_CONTEXT_TOKENS,
+        help="ContextBudget.max_tokens (default: 200_000).",
+    )
+    parser.add_argument(
+        "--reserved-output-tokens",
+        type=int,
+        default=_DEFAULT_RESERVED_OUTPUT_TOKENS,
+        help="ContextBudget.reserved_output_tokens (default: 8_192).",
+    )
+    return parser
+
+
+def _resolve_workspace_arg(raw: str | None) -> Path:
+    if raw is None:
+        # No workspace given -> fresh tempdir.
+        tmp = tempfile.mkdtemp(prefix="simple-agent-repl-")
+        return Path(tmp)
+    workspace = Path(raw).expanduser().resolve()
+    workspace.mkdir(parents=True, exist_ok=True)
+    return workspace
+
+
+def main(argv: list[str] | None = None) -> int:
     """Entry point for the ``simple-agent`` console script.
 
-    Creates a throwaway workspace, drives the AgentLoop with a scripted
-    MockProvider, and prints a structured trace. Returns a process exit code.
+    Routing rules:
+      * ``simple-agent memory ...``   -> ``memory_cli.main(argv_after_memory)``
+      * ``simple-agent --repl ...``   -> ``_run_repl(...)``
+      * ``simple-agent``              -> one-shot MockProvider demo.
     """
+    args_in = list(argv) if argv is not None else sys.argv[1:]
+
+    # Subcommand dispatch: `memory ...` runs the memory CLI without our flags.
+    if args_in and args_in[0] == "memory":
+        from .memory_cli import main as memory_main
+        return memory_main(args_in[1:])
+
+    parser = _build_parser()
+    args = parser.parse_args(args_in)
+
+    if args.repl:
+        workspace = _resolve_workspace_arg(args.workspace)
+        return _run_repl(
+            workspace=workspace,
+            max_steps=int(args.max_steps),
+            max_context_tokens=int(args.max_context_tokens),
+            reserved_output_tokens=int(args.reserved_output_tokens),
+            stream=bool(args.stream),
+        )
+
+    # One-shot demo (unchanged behavior).
     with tempfile.TemporaryDirectory(prefix="simple-agent-demo-") as tmp:
         return _run_demo(Path(tmp))
 
