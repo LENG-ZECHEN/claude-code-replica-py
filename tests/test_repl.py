@@ -120,6 +120,44 @@ def test_repl_help_lists_commands(
     assert rc == 0
     assert "/exit" in out
     assert "/help" in out
+    assert "/stats" in out
+
+
+def test_repl_stats_prints_metric_counters(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`/stats` prints every per-mechanism counter line so the exit gate is met."""
+    _set_stdin(monkeypatch, "hello there", "/stats", "/exit")
+    rc = main(["--repl", "--workspace", str(tmp_path)])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "full compacts" in out
+    assert "reactive compacts" in out
+    assert "microcompact runs" in out
+    assert "snip runs" in out
+    assert "externalized bytes" in out
+    assert "turns recorded:" in out
+
+
+def test_repl_stats_increments_after_each_turn(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`tokens_per_turn` accumulates inside the shared loop across REPL turns."""
+    _set_stdin(monkeypatch, "alpha", "beta", "/exit")
+    rc = main(["--repl", "--workspace", str(tmp_path)])
+
+    captured = capsys.readouterr()
+    loops = _captured_loops()
+
+    assert rc == 0, captured.out + captured.err
+    assert len(loops) == 1
+    metrics = loops[0]._metrics
+    assert len(metrics.tokens_per_turn) == 2
 
 
 def test_repl_unknown_slash_command_prints_hint(

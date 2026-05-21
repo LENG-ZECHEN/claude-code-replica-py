@@ -32,11 +32,16 @@ from .claude_md import ClaudeMdLoader
 from .compact import ContextCompactor
 from .context import ContextBudget, ContextBuilder
 from .loop import AgentLoop, LoopStatus
+from .memory import SessionMemory
+from .metrics import MetricsCollector
 from .models import ToolCall
 from .provider import MockProvider, ProviderResponse
 from .tool_registry_factory import build_default_registry
 from .tools import ToolExecutor
 from .transcript import Transcript
+
+_SESSION_MEMORY_FILENAME = "session_memory.json"
+_SIMPLE_AGENT_DIR = ".simple-agent"
 
 # ---------------------------------------------------------------------------
 # Demo-mode constants (preserved from Phase 10)
@@ -76,6 +81,7 @@ _REPL_PROMPT: str = "> "
 _REPL_HELP_TEXT: str = (
     "Commands:\n"
     "  /help          Show this help.\n"
+    "  /stats         Show per-mechanism counters for this session.\n"
     "  /exit, /quit   Leave the REPL.\n"
 )
 _REPL_DEFAULT_ANSWER: str = (
@@ -206,12 +212,18 @@ def _make_repl_provider(_workspace: Path) -> MockProvider:
     ])
 
 
+def _session_memory_path(workspace: Path) -> Path:
+    """Per-workspace JSON snapshot location for SessionMemory auto-persist."""
+    return workspace / _SIMPLE_AGENT_DIR / _SESSION_MEMORY_FILENAME
+
+
 def _build_repl_loop(
     workspace: Path,
     *,
     max_steps: int,
     max_context_tokens: int,
     reserved_output_tokens: int,
+    session_memory: SessionMemory | None = None,
 ) -> AgentLoop:
     """Wire one shared AgentLoop for the REPL session."""
     registry = build_default_registry(workspace)
@@ -234,24 +246,32 @@ def _build_repl_loop(
         budget=budget,
         registry=registry,
         compactor=ContextCompactor(),
+        session_memory=session_memory,
+        metrics=MetricsCollector(),
         max_steps=max_steps,
     )
     _LAST_LOOPS.append(loop)
     return loop
 
 
-def _handle_slash_command(cmd: str) -> str:
+def _handle_slash_command(cmd: str, loop: AgentLoop | None = None) -> str:
     """Map a slash command to a control signal.
 
     Returns:
       ``"exit"``     -- caller should terminate the loop.
-      ``"continue"`` -- handled (printed help / hint), keep looping.
+      ``"continue"`` -- handled (printed help / stats / hint), keep looping.
     """
     head = cmd.strip().split()[0]
     if head in ("/exit", "/quit"):
         return "exit"
     if head == "/help":
         print(_REPL_HELP_TEXT, end="")
+        return "continue"
+    if head == "/stats":
+        if loop is None:
+            print("(no active session)")
+        else:
+            print(loop._metrics.format_stats())
         return "continue"
     print(f"Unknown command: {head!r}. Try /help for the command list.")
     return "continue"
@@ -309,17 +329,27 @@ def _run_repl(
 
     # Each REPL session owns a fresh slot in the per-process loop log.
     _LAST_LOOPS.clear()
+    session_mem_path = _session_memory_path(workspace)
+    session_memory = SessionMemory.load_json(session_mem_path)
     loop = _build_repl_loop(
         workspace,
         max_steps=max_steps,
         max_context_tokens=max_context_tokens,
         reserved_output_tokens=reserved_output_tokens,
+        session_memory=session_memory,
     )
+
+    def _save_session() -> None:
+        try:
+            session_memory.dump_json(session_mem_path)
+        except OSError as err:
+            print(f"(warning: could not save session memory: {err})")
 
     while True:
         line = _read_input_line()
         if line is None:
             print()
+            _save_session()
             return 0
 
         stripped = line.strip()
@@ -327,8 +357,9 @@ def _run_repl(
             continue
 
         if stripped.startswith("/"):
-            signal = _handle_slash_command(stripped)
+            signal = _handle_slash_command(stripped, loop)
             if signal == "exit":
+                _save_session()
                 return 0
             continue
 

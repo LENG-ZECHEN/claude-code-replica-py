@@ -16,13 +16,17 @@ Security: save() rejects body text that looks like a secret assignment
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import tempfile
 import uuid as _uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _MANIFEST_FILENAME = "MEMORY.md"
 _MAX_MANIFEST_BODY_PREVIEW = 80
@@ -126,6 +130,9 @@ class MemorySelector:
         return " ".join([entry.name, entry.body, *entry.tags])
 
 
+_SESSION_MEMORY_VERSION = 1
+
+
 class SessionMemory:
     """Ephemeral per-session memory; lives only in process memory."""
 
@@ -152,6 +159,83 @@ class SessionMemory:
     def to_snippets(self) -> list[str]:
         """Format all entries for ContextBuilder.memory_snippets."""
         return [e.to_snippet() for e in self._entries.values()]
+
+    def dump_json(self, path: str | Path) -> None:
+        """Atomically persist all entries to `path` as JSON.
+
+        Writes to a tempfile in the parent directory then `os.replace`s onto
+        the target so a crash mid-dump leaves the previous snapshot intact.
+        """
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": _SESSION_MEMORY_VERSION,
+            "entries": [e.to_dict() for e in self._entries.values()],
+        }
+        tmp_fd, tmp_name = tempfile.mkstemp(
+            prefix=target.name + ".",
+            suffix=".tmp",
+            dir=str(target.parent),
+        )
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, indent=2)
+            os.replace(tmp_name, str(target))
+        except Exception:
+            if os.path.exists(tmp_name):
+                try:
+                    os.remove(tmp_name)
+                except OSError:
+                    pass
+            raise
+
+    @classmethod
+    def load_json(cls, path: str | Path) -> SessionMemory:
+        """Load a SessionMemory snapshot from disk.
+
+        Missing file -> empty store.  Malformed JSON or non-conforming entries
+        log a warning and yield an empty store; the caller never has to
+        handle exceptions from this read path.
+        """
+        store = cls()
+        target = Path(path)
+        if not target.exists():
+            return store
+        try:
+            with open(target, encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except (json.JSONDecodeError, OSError) as err:
+            logger.warning(
+                "session_memory: failed to parse JSON at %s: %s; "
+                "returning empty store",
+                target,
+                err,
+            )
+            return store
+
+        raw_entries = payload.get("entries") if isinstance(payload, dict) else None
+        if not isinstance(raw_entries, list):
+            logger.warning(
+                "session_memory: JSON at %s has no entries list; "
+                "returning empty store",
+                target,
+            )
+            return store
+
+        for raw in raw_entries:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                entry = MemoryEntry.from_dict(raw)
+            except (KeyError, ValueError) as err:
+                logger.warning(
+                    "session_memory: skipping malformed entry in %s: %s",
+                    target,
+                    err,
+                )
+                continue
+            store.add(entry)
+        return store
 
 
 class ProjectMemory:

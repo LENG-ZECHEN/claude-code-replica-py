@@ -230,3 +230,8 @@ class ToolResultStore:
             return None
         with open(stored.path, encoding="utf-8") as fh:
             return fh.read()
+
+    @property
+    def total_externalized_bytes(self) -> int:
+        """Sum of original sizes (bytes) for every result this store wrote."""
+        return sum(s.original_size for s in self._stored.values())

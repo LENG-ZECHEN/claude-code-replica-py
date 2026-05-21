@@ -35,6 +35,7 @@ from enum import StrEnum
 from .compact import ContextCompactor, MicroCompactor
 from .context import ContextBudget, ContextBuilder
 from .memory import ProjectMemory, SessionMemory
+from .metrics import MetricsCollector
 from .models import (
     AgentStep,
     CompactSummary,
@@ -90,6 +91,7 @@ class LoopResult:
     status: LoopStatus
     compacted: bool = False
     last_summary: CompactSummary | None = field(default=None, repr=False)
+    metrics: MetricsCollector | None = field(default=None, repr=False)
 
 
 @dataclass
@@ -159,6 +161,7 @@ class AgentLoop:
         session_memory: SessionMemory | None = None,
         project_memory: ProjectMemory | None = None,
         tool_result_store: ToolResultStore | None = None,
+        metrics: MetricsCollector | None = None,
         system_prompt: str = _DEFAULT_SYSTEM_PROMPT,
         max_steps: int = _DEFAULT_MAX_STEPS,
     ) -> None:
@@ -178,6 +181,7 @@ class AgentLoop:
         self._session_memory = session_memory
         self._project_memory = project_memory
         self._tool_result_store = tool_result_store
+        self._metrics = metrics if metrics is not None else MetricsCollector()
         self._system_prompt = system_prompt
         self._max_steps = max_steps
         self._last_summary: CompactSummary | None = None
@@ -230,9 +234,11 @@ class AgentLoop:
                             status=LoopStatus.MAX_TOKENS,
                             compacted=compacted_overall,
                             last_summary=self._last_summary,
+                            metrics=self._metrics,
                         )
                     reactive_compact_attempted = True
                     compacted_this_turn = self._force_compact()
+                    self._metrics.record_reactive_compact()
                     compacted_overall = True
 
             # Branch 0: provider hit max_tokens; preserve any partial text but
@@ -250,22 +256,27 @@ class AgentLoop:
                         compacted=compacted_this_turn,
                         memory_injected=list(memory_snippets),
                     ))
+                    self._metrics.record_turn_tokens(built.estimated_tokens)
+                self._refresh_externalized_bytes()
                 return LoopResult(
                     answer=response.text,
                     steps=steps,
                     status=LoopStatus.MAX_TOKENS,
                     compacted=compacted_overall,
                     last_summary=self._last_summary,
+                    metrics=self._metrics,
                 )
 
             # Branch 1: malformed (no text, no tool calls)
             if not response.text and not response.tool_calls:
+                self._refresh_externalized_bytes()
                 return LoopResult(
                     answer=None,
                     steps=steps,
                     status=LoopStatus.MALFORMED,
                     compacted=compacted_overall,
                     last_summary=self._last_summary,
+                    metrics=self._metrics,
                 )
 
             # Branch 2: tool calls -> execute and continue
@@ -282,6 +293,8 @@ class AgentLoop:
                     compacted=compacted_this_turn,
                     memory_injected=list(memory_snippets),
                 ))
+                self._metrics.record_turn_tokens(built.estimated_tokens)
+                self._refresh_externalized_bytes()
                 continue
 
             # Branch 3: final text answer
@@ -296,21 +309,26 @@ class AgentLoop:
                 compacted=compacted_this_turn,
                 memory_injected=list(memory_snippets),
             ))
+            self._metrics.record_turn_tokens(built.estimated_tokens)
+            self._refresh_externalized_bytes()
             return LoopResult(
                 answer=response.text,
                 steps=steps,
                 status=LoopStatus.COMPLETED,
                 compacted=compacted_overall,
                 last_summary=self._last_summary,
+                metrics=self._metrics,
             )
 
         # Hit max_steps without a final answer.
+        self._refresh_externalized_bytes()
         return LoopResult(
             answer=None,
             steps=steps,
             status=LoopStatus.MAX_STEPS,
             compacted=compacted_overall,
             last_summary=self._last_summary,
+            metrics=self._metrics,
         )
 
     def run_stream(self, user_input: str) -> Iterator[LoopStreamEvent]:
@@ -362,20 +380,24 @@ class AgentLoop:
                             status=LoopStatus.MAX_TOKENS,
                             compacted=compacted_overall,
                             last_summary=self._last_summary,
+                            metrics=self._metrics,
                         )
                         yield LoopStreamEvent.done(result)
                         return
                     reactive_compact_attempted = True
                     compacted_this_turn = self._force_compact()
+                    self._metrics.record_reactive_compact()
                     compacted_overall = True
 
             if response is None:
+                self._refresh_externalized_bytes()
                 result = LoopResult(
                     answer=None,
                     steps=steps,
                     status=LoopStatus.MALFORMED,
                     compacted=compacted_overall,
                     last_summary=self._last_summary,
+                    metrics=self._metrics,
                 )
                 yield LoopStreamEvent.done(result)
                 return
@@ -393,23 +415,28 @@ class AgentLoop:
                         compacted=compacted_this_turn,
                         memory_injected=list(memory_snippets),
                     ))
+                    self._metrics.record_turn_tokens(built.estimated_tokens)
+                self._refresh_externalized_bytes()
                 result = LoopResult(
                     answer=response.text,
                     steps=steps,
                     status=LoopStatus.MAX_TOKENS,
                     compacted=compacted_overall,
                     last_summary=self._last_summary,
+                    metrics=self._metrics,
                 )
                 yield LoopStreamEvent.done(result)
                 return
 
             if not response.text and not response.tool_calls:
+                self._refresh_externalized_bytes()
                 result = LoopResult(
                     answer=None,
                     steps=steps,
                     status=LoopStatus.MALFORMED,
                     compacted=compacted_overall,
                     last_summary=self._last_summary,
+                    metrics=self._metrics,
                 )
                 yield LoopStreamEvent.done(result)
                 return
@@ -428,6 +455,8 @@ class AgentLoop:
                     memory_injected=list(memory_snippets),
                 )
                 steps.append(step)
+                self._metrics.record_turn_tokens(built.estimated_tokens)
+                self._refresh_externalized_bytes()
                 for call, tool_result in zip(step.tool_calls, step.tool_results, strict=True):
                     yield LoopStreamEvent.tool_step(call, tool_result, turn)
                 continue
@@ -443,22 +472,27 @@ class AgentLoop:
                 compacted=compacted_this_turn,
                 memory_injected=list(memory_snippets),
             ))
+            self._metrics.record_turn_tokens(built.estimated_tokens)
+            self._refresh_externalized_bytes()
             result = LoopResult(
                 answer=response.text,
                 steps=steps,
                 status=LoopStatus.COMPLETED,
                 compacted=compacted_overall,
                 last_summary=self._last_summary,
+                metrics=self._metrics,
             )
             yield LoopStreamEvent.done(result)
             return
 
+        self._refresh_externalized_bytes()
         result = LoopResult(
             answer=None,
             steps=steps,
             status=LoopStatus.MAX_STEPS,
             compacted=compacted_overall,
             last_summary=self._last_summary,
+            metrics=self._metrics,
         )
         yield LoopStreamEvent.done(result)
 
@@ -480,6 +514,7 @@ class AgentLoop:
         if self._compactor is None:
             return False
         self._last_summary = self._compactor.compact(self._transcript, self._budget)
+        self._metrics.record_full_compact()
         return True
 
     def _maybe_microcompact(self) -> bool:
@@ -492,6 +527,7 @@ class AgentLoop:
         compacted = self._microcompactor.microcompact(messages)
         self._transcript.replace_all(compacted)
         self._microcompacted = True
+        self._metrics.record_microcompact()
         return True
 
     def _maybe_snip(self) -> bool:
@@ -504,7 +540,22 @@ class AgentLoop:
         snipped = self._snip_tool.snip(messages)
         self._transcript.replace_all(snipped)
         self._snip_attempted_this_turn = True
+        self._metrics.record_snip()
         return True
+
+    def _refresh_externalized_bytes(self) -> None:
+        """Sync metrics.externalized_bytes with the store's cumulative total.
+
+        Tool externalization can happen in two places (per-item path in
+        ``_execute_one`` and the total-budget rebatch in
+        ``ContextBuilder._process_tool_results``), so the metric is sampled
+        rather than incremented at each call site.
+        """
+        if self._tool_result_store is None:
+            return
+        self._metrics.externalized_bytes = (
+            self._tool_result_store.total_externalized_bytes
+        )
 
     def _collect_memory_snippets(self, query: str | None = None) -> list[str]:
         """Combine snippets from session and project memory stores."""
