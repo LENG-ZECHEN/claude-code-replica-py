@@ -1,52 +1,52 @@
 #!/usr/bin/env bash
-# scripts/run_all_milestones.sh
+# automation/scripts/run_all_milestones.sh
 #
-# Autonomous milestone runner — loops over selected milestones, each in a
-# fresh `claude --print` process (independent context). Spawns claude with
-# cwd = /Users/leng/my-cc-py so the session can see both python-replica/
-# and claude-code-source-code/.
+# Phase 2 of automation/RUNBOOK.md (Execute + Review + Wrap-up).
+# Reads initiatives/current/config.yaml + initiatives/current/prompts/M*.md
+# produced by Phase 1, runs each milestone in a fresh `claude --print`
+# session, then spawns one final review session that audits + archives
+# the initiative.
 #
-# IMPORTANT: `claude --print` silently ignores ~/.claude/settings.json's
-# `permissions.allow` block (see `claude --help` note: "Settings files that
-# fail validation are silently ignored in this mode"). The permission
-# whitelist MUST be passed as CLI flags --allowedTools / --disallowedTools.
-# Without them, claude --print hangs silently when it wants to call a tool.
+# Conventions:
+#   - cwd at invocation can be anywhere under python-replica/ or
+#     /Users/leng/my-cc-py; the script cd's to PROJECT_ROOT itself.
+#   - All paths in messages below are relative to python-replica/.
 #
-# Requirements:
-#   - Claude Code CLI v2.1.51+ (you have 2.1.146, OK)
-#   - claude.ai account on any paid plan (Pro/Max/Team/Enterprise)
-#   - python-replica/templates/milestone_prompt_template.md present
-#   - Working tree clean before launch (checked in python-replica/.git)
+# IMPORTANT: `claude --print` silently ignores ~/.claude/settings.json
+# permissions; the --allowedTools / --disallowedTools CLI flags below
+# are MANDATORY (without them claude --print hangs when a tool needs
+# permission). See automation/README.md for the full explanation.
 #
 # Usage:
-#   ./scripts/run_all_milestones.sh                       # M2..M5 (default)
-#   ./scripts/run_all_milestones.sh M3 M4                 # custom subset
-#   ./scripts/run_all_milestones.sh --dry-run             # print prompts only
-#   ./scripts/run_all_milestones.sh --print-allowlist     # show whitelist
-#   ./scripts/run_all_milestones.sh --help                # this header
-#
-# What you do while it's running:
-#   1. tail -f python-replica/logs/M*.log  (in another terminal — live view)
-#   2. Or just wait and inspect logs after each milestone exits.
-#
-# Note: --remote-control is INCOMPATIBLE with --print (the former needs an
-# interactive session). For mobile/remote observability, run this script
-# inside `tmux new -s ms` and attach from another machine via SSH+tmux.
+#   ./automation/scripts/run_all_milestones.sh          # run every milestone in config
+#   ./automation/scripts/run_all_milestones.sh M3 M4    # run a subset (debug)
+#   ./automation/scripts/run_all_milestones.sh --dry-run
+#   ./automation/scripts/run_all_milestones.sh --skip-review
+#   ./automation/scripts/run_all_milestones.sh --help
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"   # /Users/leng/my-cc-py
-cd "$PROJECT_ROOT"
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
 
-REPLICA_DIR="python-replica"
-TEMPLATE="$REPLICA_DIR/templates/milestone_prompt_template.md"
-LOGS_DIR="$REPLICA_DIR/logs"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPLICA_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"        # python-replica/
+PROJECT_ROOT="$(cd "$REPLICA_DIR/.." && pwd)"         # /Users/leng/my-cc-py
+
+CURRENT_DIR="$REPLICA_DIR/initiatives/current"
+CONFIG="$CURRENT_DIR/config.yaml"
+PROMPTS_DIR="$CURRENT_DIR/prompts"
+LOGS_DIR="$CURRENT_DIR/logs"
+REVIEW_TEMPLATE="$REPLICA_DIR/automation/templates/review.md"
+
 CLAUDE_MODEL="claude-opus-4-7"
 
-# CLI-level permission whitelist (must match settings.json permissions block,
-# but CLI is what --print actually honors). Format per `claude --help`:
-# space-separated tool names, "Bash(cmd *)" pattern uses space inside parens.
+# ---------------------------------------------------------------------------
+# Permission whitelist (passed as CLI flags; settings.json is ignored
+# by `claude --print`).
+# ---------------------------------------------------------------------------
+
 ALLOWED_TOOLS="Read Write Edit Glob Grep \
 TaskCreate TaskUpdate TaskList TaskGet TaskOutput \
 Bash(git *) Bash(pytest *) Bash(python *) Bash(python3 *) \
@@ -63,50 +63,32 @@ Bash(sudo *) Bash(ssh *) Bash(scp *) \
 Bash(npm publish *) Bash(git push --force *)"
 
 # ---------------------------------------------------------------------------
-# Lookups (from RUNTIME_ACTIVATION_PLAN.md sections 2 + 4)
-# ---------------------------------------------------------------------------
-
-phase_ids_for() {
-  case "$1" in
-    M1) echo "A1, A3, A4, B1" ;;
-    M2) echo "C1, C2" ;;
-    M3) echo "C3, C4, B3" ;;
-    M4) echo "D1, D2, D3" ;;
-    M5) echo "A2, B4" ;;
-    *)  echo "(unknown)" ;;
-  esac
-}
-
-section_ids_for() {
-  case "$1" in
-    M1) echo "3.1 + 3.2" ;;
-    M2) echo "3.3 (stress + microcompact)" ;;
-    M3) echo "3.3 (metrics) + 3.2 (session-persist)" ;;
-    M4) echo "3.4 + 3.5 scenarios 1,2" ;;
-    M5) echo "3.5 scenario 3" ;;
-    *)  echo "(unknown)" ;;
-  esac
-}
-
-# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-print_allowlist() {
-  cat <<EOF
-=== ALLOWED (passed via --allowedTools) ===
-$ALLOWED_TOOLS
-
-=== DISALLOWED (passed via --disallowedTools) ===
-$DISALLOWED_TOOLS
-
-These are passed as CLI flags to claude --print, because settings.json
-permissions are silently ignored in --print mode.
-EOF
-}
-
 show_help() {
   sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
+}
+
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+# Read a top-level scalar key from initiatives/current/config.yaml.
+# Handles `key: value` (no nested keys, no quoting).
+read_config_scalar() {
+  local key="$1"
+  awk -v k="^${key}:" '$0 ~ k { sub(/^[^:]+:[ \t]*/, ""); print; exit }' "$CONFIG"
+}
+
+# List milestone IDs by scanning prompts/M*.md (sorted naturally).
+list_milestones_from_prompts() {
+  local f
+  for f in "$PROMPTS_DIR"/M*.md; do
+    [ -f "$f" ] || continue
+    basename "$f" .md
+  done | sort -V
 }
 
 # ---------------------------------------------------------------------------
@@ -114,124 +96,169 @@ show_help() {
 # ---------------------------------------------------------------------------
 
 DRY_RUN=0
-MILESTONES=()
+SKIP_REVIEW=0
+MILESTONE_FILTER=()
 
 for arg in "$@"; do
   case "$arg" in
-    --help|-h)         show_help; exit 0 ;;
-    --print-allowlist) print_allowlist; exit 0 ;;
-    --dry-run)         DRY_RUN=1 ;;
-    M[1-9])            MILESTONES+=("$arg") ;;
-    M[1-9][0-9])       MILESTONES+=("$arg") ;;
-    *)                 echo "Unknown arg: $arg"; echo "Try --help"; exit 2 ;;
+    --help|-h)       show_help; exit 0 ;;
+    --dry-run)       DRY_RUN=1 ;;
+    --skip-review)   SKIP_REVIEW=1 ;;
+    M[0-9])          MILESTONE_FILTER+=("$arg") ;;
+    M[0-9][0-9])     MILESTONE_FILTER+=("$arg") ;;
+    *)               die "Unknown arg: $arg (try --help)" ;;
   esac
 done
-
-if [ ${#MILESTONES[@]} -eq 0 ]; then
-  MILESTONES=(M2 M3 M4 M5)
-fi
 
 # ---------------------------------------------------------------------------
 # Pre-flight
 # ---------------------------------------------------------------------------
 
+cd "$PROJECT_ROOT"
+
 printf '=== Pre-flight ===\n'
-printf 'cwd        : %s (sessions will spawn here)\n' "$PROJECT_ROOT"
-printf 'project    : %s\n' "$REPLICA_DIR"
+printf 'cwd        : %s\n' "$PROJECT_ROOT"
+printf 'project    : %s\n' "$(basename "$REPLICA_DIR")"
 
-if [ ! -f "$TEMPLATE" ]; then
-  echo "ERROR: template not found: $TEMPLATE"
-  exit 1
-fi
-echo "OK   template present: $TEMPLATE"
+[ -f "$CONFIG" ]            || die "config not found: $CONFIG (run Phase 1 first)"
+[ -d "$PROMPTS_DIR" ]       || die "prompts dir not found: $PROMPTS_DIR (run Phase 1 first)"
+[ -f "$REVIEW_TEMPLATE" ]   || die "review template missing: $REVIEW_TEMPLATE"
+command -v claude >/dev/null 2>&1 || die "claude CLI not on PATH"
 
-if ! command -v claude >/dev/null 2>&1; then
-  echo "ERROR: 'claude' CLI not found on PATH"
-  exit 1
+INITIATIVE_SLUG=$(read_config_scalar "slug")
+COMMIT_PREFIX=$(read_config_scalar "commit_prefix")
+ARCHIVE_SLUG=$(read_config_scalar "archive_slug")
+
+[ -n "$INITIATIVE_SLUG" ]   || die "slug missing from $CONFIG"
+[ -n "$COMMIT_PREFIX" ]     || die "commit_prefix missing from $CONFIG"
+[ -n "$ARCHIVE_SLUG" ]      || die "archive_slug missing from $CONFIG"
+
+printf 'slug       : %s\n' "$INITIATIVE_SLUG"
+printf 'prefix     : %s\n' "$COMMIT_PREFIX"
+printf 'archive    : %s\n' "$ARCHIVE_SLUG"
+printf 'model      : %s\n' "$CLAUDE_MODEL"
+
+ALL_MILESTONES=()
+while IFS= read -r m; do
+  [ -n "$m" ] && ALL_MILESTONES+=("$m")
+done < <(list_milestones_from_prompts)
+
+[ ${#ALL_MILESTONES[@]} -gt 0 ] || die "no prompts/M*.md found under $PROMPTS_DIR"
+
+if [ ${#MILESTONE_FILTER[@]} -gt 0 ]; then
+  MILESTONES=("${MILESTONE_FILTER[@]}")
+else
+  MILESTONES=("${ALL_MILESTONES[@]}")
 fi
-echo "OK   claude CLI: $(claude --version 2>&1 | head -1)"
-echo "     model     : $CLAUDE_MODEL"
-echo "     allowed   : $(echo $ALLOWED_TOOLS | wc -w | tr -d ' ') tools"
-echo "     denied    : $(echo $DISALLOWED_TOOLS | wc -w | tr -d ' ') tools"
+
+printf 'milestones : %s\n' "${MILESTONES[*]}"
 
 if [ "$DRY_RUN" -eq 0 ]; then
   if ! git -C "$REPLICA_DIR" diff --quiet HEAD 2>/dev/null \
      || ! git -C "$REPLICA_DIR" diff --cached --quiet 2>/dev/null; then
-    echo "ERROR: working tree in $REPLICA_DIR is dirty. Commit or stash before launching."
     git -C "$REPLICA_DIR" status --short
-    exit 1
+    die "working tree in $REPLICA_DIR is dirty (commit or stash, then retry)"
   fi
-  echo "OK   working tree clean (in $REPLICA_DIR)"
+  printf 'OK         : working tree clean\n'
 fi
 
 mkdir -p "$LOGS_DIR"
 
-printf '\n=== Plan ===\n'
-printf 'Milestones : %s\n' "${MILESTONES[*]}"
-printf 'Logs       : %s/\n' "$LOGS_DIR"
-printf 'Template   : %s\n' "$TEMPLATE"
-printf 'Dry-run    : %s\n\n' "$DRY_RUN"
-
 # ---------------------------------------------------------------------------
-# Loop
+# Execute milestones (Phase 2A)
 # ---------------------------------------------------------------------------
 
 for M in "${MILESTONES[@]}"; do
-  printf '================================================================\n'
+  PROMPT="$PROMPTS_DIR/$M.md"
+  [ -f "$PROMPT" ] || die "prompt missing for $M: $PROMPT"
+
+  printf '\n================================================================\n'
   printf '=== Starting %s at %s ===\n' "$M" "$(date)"
   printf '================================================================\n'
 
-  PHASE_IDS=$(phase_ids_for "$M")
-  SECTION_IDS=$(section_ids_for "$M")
-
-  PROMPT_FILE=$(mktemp -t "prompt-${M}-XXXX")
-  sed \
-    -e "s/{{MILESTONE}}/$M/g" \
-    -e "s|{{PHASE_IDS}}|$PHASE_IDS|g" \
-    -e "s|{{SECTION_IDS}}|$SECTION_IDS|g" \
-    "$TEMPLATE" > "$PROMPT_FILE"
-
   if [ "$DRY_RUN" -eq 1 ]; then
-    printf -- '--- prompt for %s ---\n' "$M"
-    cat "$PROMPT_FILE"
-    printf -- '--- end ---\n\n'
-    rm -f "$PROMPT_FILE"
+    printf -- '--- prompt for %s (first 40 lines) ---\n' "$M"
+    head -40 "$PROMPT"
+    printf -- '--- end ---\n'
     continue
   fi
 
   LOG="$LOGS_DIR/${M}.log"
-  printf 'Log         : %s\n' "$LOG"
-  printf 'Live view   : tail -f %s   (in another terminal)\n' "$LOG"
-  printf 'Model       : %s\n\n' "$CLAUDE_MODEL"
+  printf 'Prompt     : %s\n' "$PROMPT"
+  printf 'Log        : %s\n' "$LOG"
+  printf 'Live view  : tail -f %s\n\n' "$LOG"
 
-  # The two --allowedTools / --disallowedTools flags are MANDATORY for
-  # --print mode (settings.json is silently ignored — see header comment).
   if ! claude --print --model "$CLAUDE_MODEL" \
-       --remote-control \
        --allowedTools "$ALLOWED_TOOLS" \
        --disallowedTools "$DISALLOWED_TOOLS" \
-       < "$PROMPT_FILE" 2>&1 | tee "$LOG"; then
-    echo
-    echo "ERROR: $M's claude invocation exited non-zero. See $LOG."
-    rm -f "$PROMPT_FILE"
-    exit 1
+       < "$PROMPT" 2>&1 | tee "$LOG"; then
+    die "$M: claude invocation exited non-zero (see $LOG)"
   fi
 
-  rm -f "$PROMPT_FILE"
-
-  # Exit-gate: did the milestone actually commit?
-  if ! git -C "$REPLICA_DIR" log --oneline -1 | grep -q "P9-${M}"; then
-    echo
-    echo "ERROR: $M did not produce a 'P9-${M}' commit. Loop stopping."
-    echo "Latest commits in $REPLICA_DIR:"
+  # Exit-gate: did the milestone commit with the expected subject?
+  if ! git -C "$REPLICA_DIR" log --oneline -1 | grep -qF "[${COMMIT_PREFIX}/${M}]"; then
     git -C "$REPLICA_DIR" log --oneline -5
-    exit 1
+    die "$M did not produce a '[${COMMIT_PREFIX}/${M}]' commit (loop stopping)"
   fi
 
-  printf '\n=== %s done at %s ===\n\n' "$M" "$(date)"
+  printf '\n=== %s done at %s ===\n' "$M" "$(date)"
 done
 
+# ---------------------------------------------------------------------------
+# Review + wrap-up (Phase 2B + 2C)
+# ---------------------------------------------------------------------------
+
+if [ "$DRY_RUN" -eq 1 ] || [ "$SKIP_REVIEW" -eq 1 ]; then
+  printf '\n================================================================\n'
+  printf '=== Skipping review (--dry-run or --skip-review) ===\n'
+  printf '================================================================\n'
+  exit 0
+fi
+
+if [ ${#MILESTONE_FILTER[@]} -gt 0 ]; then
+  printf '\n================================================================\n'
+  printf '=== Skipping review (subset run; not all milestones executed) ===\n'
+  printf '================================================================\n'
+  exit 0
+fi
+
+printf '\n================================================================\n'
+printf '=== Phase 2B + 2C: review + wrap-up at %s ===\n' "$(date)"
 printf '================================================================\n'
-printf '=== All milestones complete ===\n'
+
+REVIEW_LOG="$LOGS_DIR/review.log"
+REVIEW_PROMPT="$LOGS_DIR/review_prompt.md"
+
+# Substitute initiative-specific tokens into the review template.
+sed \
+  -e "s|{{INITIATIVE_SLUG}}|$INITIATIVE_SLUG|g" \
+  -e "s|{{COMMIT_PREFIX}}|$COMMIT_PREFIX|g" \
+  -e "s|{{ARCHIVE_SLUG}}|$ARCHIVE_SLUG|g" \
+  "$REVIEW_TEMPLATE" > "$REVIEW_PROMPT"
+
+printf 'Review prompt : %s\n' "$REVIEW_PROMPT"
+printf 'Review log    : %s\n\n' "$REVIEW_LOG"
+
+if ! claude --print --model "$CLAUDE_MODEL" \
+     --allowedTools "$ALLOWED_TOOLS" \
+     --disallowedTools "$DISALLOWED_TOOLS" \
+     < "$REVIEW_PROMPT" 2>&1 | tee "$REVIEW_LOG"; then
+  die "review session exited non-zero (see $REVIEW_LOG)"
+fi
+
+# Exit gate for the review session: it must have committed
+# [<prefix>/wrap] AND moved current/ into _archive/<archive_slug>/.
+if ! git -C "$REPLICA_DIR" log --oneline -1 | grep -qF "[${COMMIT_PREFIX}/wrap]"; then
+  git -C "$REPLICA_DIR" log --oneline -5
+  die "review session did not produce a '[${COMMIT_PREFIX}/wrap]' commit"
+fi
+
+if [ ! -d "$REPLICA_DIR/initiatives/_archive/$ARCHIVE_SLUG" ]; then
+  die "review session did not archive initiative to initiatives/_archive/$ARCHIVE_SLUG"
+fi
+
+printf '\n================================================================\n'
+printf '=== Initiative %s complete at %s ===\n' "$INITIATIVE_SLUG" "$(date)"
 printf '================================================================\n'
 git -C "$REPLICA_DIR" log --oneline -10
+printf '\nREVIEW.md : initiatives/_archive/%s/REVIEW.md\n' "$ARCHIVE_SLUG"
