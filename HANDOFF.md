@@ -1,8 +1,13 @@
-# HANDOFF — Next: M5
+# HANDOFF — RUNTIME_ACTIVATION_PLAN complete
 
-> Updated by: M4 session
+> Updated by: M5 session
 > Date: 2026-05-21
 > Read this file FIRST in the next session, then verify against git/pytest.
+>
+> **There is no M6.** M5 was the terminal milestone of the
+> RUNTIME_ACTIVATION_PLAN initiative. If you are reading this from the
+> autonomous loop, the loop should stop here. If you are starting a new
+> initiative against simple_coding_agent, write a fresh plan first.
 
 ---
 
@@ -11,155 +16,136 @@
 > The next session MUST re-verify these numbers. Do not trust this list
 > blindly — re-run the commands.
 
-- Last commit: `ea7e383` — `git -C python-replica show ea7e383` to inspect
-- pytest: 475 passing (was 455 after M3, delta +20)
-- mypy:   clean (Success: no issues found in 19 source files)
+- Last commit: `a3f51b1` — `git -C python-replica show a3f51b1` to inspect
+- pytest: 497 passing (was 475 after M4, delta +22)
+- mypy:   clean (Success: no issues found in 20 source files)
 - ruff:   clean (All checks passed!)
 - Branch: main
 
-## 2. What M4 Accomplished
+## 2. What M5 Accomplished
 
-- D1: `Transcript` gains `to_jsonable` / `from_jsonable` / `dump_json` /
-  `load_json` in `src/simple_coding_agent/transcript.py`. `dump_json`
-  drops `is_virtual` messages by default; `from_jsonable` validates the
-  five required per-message fields (`uuid`/`role`/`content`/`timestamp`/
-  `type`) and unknown enum values, raising `ValueError` with the field
-  name in the message so callers can `pytest.raises(ValueError,
-  match="uuid")`. A new free `_atomic_write_json` helper centralises
-  the `tempfile.mkstemp` + `os.replace` pattern shared with
-  `SessionMemory.dump_json`. Six tests in
-  `tests/test_transcript_persist.py`.
-- D2: New `src/simple_coding_agent/session_store.py` exposes
-  `save_session` / `load_session` / `session_path_for` /
-  `resolve_sessions_dir`, typed errors `InvalidSessionNameError` +
-  `SessionNotFoundError`, and a `_SAFE_SESSION_NAME_PATTERN`
-  matching `ProjectMemory`'s regex. `cli.py` adds `/save <name>` and
-  `/load <name>` slash commands (with `/help` entries) that mutate the
-  active `AgentLoop` in place via `_transcript.replace_all()` and
-  `_last_summary = ...`. `SIMPLE_AGENT_SESSIONS_DIR` env var redirects
-  the default `~/.simple-agent/sessions/` for test isolation. Eight
-  tests in `tests/test_repl_save_load.py`.
-- D3: `cli.py` gains a top-level `--resume <name>` flag (implicit
-  `--repl` when only `--resume` is given), driven by a new
-  `_apply_resume(name, loop)` helper that returns exit code 2 on a
-  clear failure (invalid name, missing file, schema error) and 0 on
-  success. Four tests in `tests/test_resume_session.py` plus two
-  integration scenarios in `tests/test_end_to_end_long_session.py`
-  (plan 3.5 scenarios 1 + 2). The kill-then-resume exit gate is
-  exercised end-to-end via two `main()` invocations per integration
-  test, with separate workspace tempdirs guaranteeing no in-process
-  carryover.
+- A2: `openai_cli.py` gains `--repl` (plus `--max-steps`,
+  `--max-context-tokens`, `--reserved-output-tokens`, `--resume`) and a
+  new `_run_openai_repl` that builds an `OpenAIProvider`-backed
+  `AgentLoop` via `cli._build_repl_loop` (with `provider=` injection)
+  and delegates to the shared `cli._drive_repl_session`. The slash
+  command surface (`/help`, `/stats`, `/save`, `/load`, `/remember`,
+  `/exit`) is identical between MockProvider and live-provider REPLs.
+- B4: New `src/simple_coding_agent/auto_learn.py` exposes
+  pure-function `detect_cue(text) -> str | None` matching `记住`,
+  `以后`, `don't` (apostrophe variants), and `prefer` (morphological
+  siblings) plus a `format_hint(cue)` renderer. The REPL turn loop
+  scans each user input with `detect_cue` and prints `format_hint`
+  on stdout BEFORE the loop runs, so the operator sees the save
+  target without inspecting code. Matches the M5 exit-gate marker
+  `"记住" cue triggers save prompt`.
+- B2-enabling: New `/remember <type> <id> <body...>` slash command in
+  the REPL wires through `ProjectMemory.save()`, surfacing the
+  existing secret-rejection and path-traversal guards. The REPL now
+  wires a `ProjectMemory` (env-overridable via
+  `SIMPLE_AGENT_MEMORY_DIR`, default `<workspace>/.simple-agent/memory/`)
+  into every AgentLoop it constructs, making `MemorySelector` reachable
+  end-to-end. `cli._drive_repl_session` was extracted from `_run_repl`
+  for reuse by `openai_cli`.
+- Plan 3.5 scenario 3: `tests/test_end_to_end_long_session.py` gains a
+  test that seeds a `ProjectMemory` `feedback` entry, drives one REPL
+  turn through `main()`, and proves both (a) the snippet appears in the
+  provider's recorded `system` prompt (= `built.system`) and (b)
+  `AgentStep.memory_injected` carries the snippet on the first step
+  (verified via a direct `loop.run()` follow-up on the same instance).
+- Tests: 22 new cases — `tests/test_auto_learn.py` (6),
+  `tests/test_repl_slash_remember.py` (8),
+  `tests/test_openai_cli_repl.py` (7),
+  `tests/test_end_to_end_long_session.py` (+1).
 
 ## 3. Decisions Made That Diverge From Plan ⚠️
 
 > THE MOST IMPORTANT SECTION. Any place reality diverged from
 > RUNTIME_ACTIVATION_PLAN.md — alternative library, skipped test,
 > renamed function, added abstraction, deferred work, etc. Include
-> the WHY so the next session can decide whether to inherit or revert.
->
-> If nothing diverged, write "(none)" — do NOT delete the section.
+> the WHY so any future session can decide whether to inherit or revert.
 
-- **`Transcript` exposes a `to_jsonable` / `from_jsonable` layer above
-  the raw `dump_json` / `load_json` filesystem methods, rather than
-  the in-place persistence the plan implied.** The split was needed
-  so `session_store.save_session` could compose a single JSON payload
-  (`{transcript: {...}, last_summary: {...}}`) without writing the
-  transcript and the summary to two separate files. The filesystem
-  wrappers (`dump_json` / `load_json`) remain on Transcript as
-  documented in plan section 2 D1; they delegate to
-  `to_jsonable` / `from_jsonable` + a shared `_atomic_write_json`. No
-  behaviour from the plan was dropped — only one extra public method
-  pair was added.
-- **`--resume <name>` returns exit code 2 (not 1) on a clear startup
-  failure**, so harness scripts (and the shell loop's exit-gate
-  greps) can distinguish a startup failure from a normal `/exit` (0)
-  or a generic runtime issue. The plan did not specify a code; 2 is
-  the conventional "misuse of arguments" code and matches what
-  `argparse` already uses for unknown flags.
-- **`--resume <name>` without `--repl` implicitly enables REPL
-  mode.** The plan listed both `simple-agent --resume <name>` and
-  `--repl --resume <name>` as valid surfaces. Rather than enforce a
-  separate code path or error out when `--repl` is omitted, `main()`
-  ORs the two booleans (`args.repl or args.resume is not None`) and
-  dispatches to `_run_repl(... resume=args.resume)`. The one-shot
-  demo path was preserved as the default when neither flag is given.
-- **`_handle_slash_command` is now mutating** (it can rewrite
-  `loop._transcript` and `loop._last_summary` via `/load`), where
-  previously it only printed. The mutation is in-place because the
-  REPL holds a single `AgentLoop` instance for the entire process —
-  re-creating one would discard `metrics`, `session_memory`, and
-  every other dependency wired at construction time. This is
-  consistent with `Transcript.replace_all`, which exists for exactly
-  this purpose.
-- **`tests/test_end_to_end_long_session.py` ships with the 2
-  scenarios from plan section 3.5 that are in M4 scope (scenarios 1
-  and 2)**; scenario 3 (memory injection) is deliberately deferred
-  to M5 per the plan's milestone table (M5 picks up scenario 3
-  alongside Phase A2 + B4).
-- **Manual smoke run of `simple-agent --repl --resume smoke` was
-  attempted but the autonomous-loop sandbox blocked the required
-  multi-operation shell command and the destructive cleanup.** The
-  exit gate is still proven by the two integration tests in
-  `tests/test_end_to_end_long_session.py`, each of which runs two
-  separate `main()` invocations with different workspaces — the
-  same shape as a kill-then-resume cycle. The leftover
-  `/Users/leng/my-cc-py/.m4-smoke/` directory is empty (two empty
-  subdirs created during the attempted smoke), outside the
-  `python-replica/` git tree, and has no impact on the
-  repository state.
+- **`cli._drive_repl_session` was extracted from `cli._run_repl` so
+  `openai_cli._run_openai_repl` can reuse the read/run/exit machinery
+  without duplication.** The plan implies A2 would ship as an
+  independent REPL in `openai_cli.py`; in practice an exact duplicate
+  of the slash command surface (≈150 LoC including `_handle_slash_command`,
+  `_apply_resume`, `_handle_save_command`, `_handle_load_command`,
+  the new `_handle_remember_command`, the KeyboardInterrupt + EOF
+  handlers, and SessionMemory auto-save) would diverge over time. The
+  extracted helper takes a pre-built `AgentLoop` and is what both REPL
+  modes call.
+- **`cli._build_repl_loop` was generalized with optional `provider=`
+  and `system_prompt=` parameters** so `openai_cli` can inject its
+  real-provider instance and coder-style system prompt without
+  duplicating the AgentLoop wiring. When the parameters are omitted
+  the existing MockProvider path is preserved exactly (every existing
+  REPL test still passes unchanged).
+- **`ProjectMemory` is auto-attached to every REPL `AgentLoop`** so
+  the Jaccard selector and `_collect_memory_snippets` are reachable
+  without explicit user wiring. The plan called for memory injection
+  to be observable; it is hard to observe if the loop is constructed
+  without a ProjectMemory. Storage dir resolution honours
+  `SIMPLE_AGENT_MEMORY_DIR` (matching `memory_cli`); the workspace-
+  relative fallback is `<workspace>/.simple-agent/memory/` (note:
+  workspace-anchored, not cwd-anchored as in `memory_cli`) so REPL
+  tests using `tmp_path` workspaces stay isolated.
+- **`/remember` is implemented even though it was technically a B2
+  task not explicitly listed in any milestone.** B4's exit gate is
+  "cue triggers save prompt", and the prompt would be useless if there
+  were no command to follow up with. `/remember` is the natural
+  follow-up the prompt points at; it reuses every existing guardrail
+  on `ProjectMemory.save()` (secret rejection, path traversal). This
+  is documented in `cli._REPL_HELP_TEXT`.
+- **The auto-learn hint is printed BEFORE the turn runs, not after.**
+  The plan does not specify timing; printing before lets the operator
+  read the hint while the provider call is in flight (and, in the
+  MockProvider build, it is the only visible side-effect since the
+  Mock answers are stock). Tests assert the hint string appears on
+  stdout, not its position relative to the answer.
+- **`tempfile` import was dropped from `openai_cli.py`** because the
+  REPL mode receives an explicit `--workspace` (resolved by the
+  existing `_resolve_workspace`) and there is no need to create a
+  fresh tempdir; the one-shot mode already required `--workspace`.
+- **The plan's `tests/test_repl_slash_commands.py` (5 cases for B2)
+  ships as `tests/test_repl_slash_remember.py` (8 cases)** because
+  the suite combines B2's `/remember` validation with B4's cue
+  printing in the same REPL flow — the two are functionally one
+  feature. File renamed to make the focus explicit.
 
-## 4. Open Questions / Blockers for M5
+## 4. Open Questions / Blockers for Next Initiative
 
-> Anything needing human input, or pre-conditions for M5.
-> If none, write "(none)".
+> Anything needing human input, or pre-conditions for whatever comes
+> next. If none, write "(none)".
 
-- (none) — all M4 gates green. M5 picks up Phase A2 (openai_cli REPL),
-  B4 (auto-learn cues from user input like "记住" / "以后" / "don't" /
-  "prefer"), and the 3.5 scenario 3 (memory injection affects
-  response). The `session_store` API is stable; M5 may reuse
-  `resolve_sessions_dir()` if it adds new persistence surfaces, but
-  no schema changes are anticipated.
+- (none) — the RUNTIME_ACTIVATION_PLAN initiative is complete. Every
+  P1–P8 mechanism that was unit-tested-only after the pre-M1 baseline
+  is now reachable, observable, and demonstrable via the CLI: snip,
+  full-compact, microcompact, reactive-compact, externalization,
+  memory injection, session save/load/resume, and metrics counters.
+  The next initiative against this repo can start from a clean
+  follow-up plan document — there are no unresolved dependencies
+  blocking it.
 
 ## 5. Next Session Prompt
 
-> Paste the content of the fenced block below into a fresh `claude`
-> session opened from `python-replica/`. The prompt is self-contained;
-> the next session needs nothing from the current conversation.
+> The initiative is complete; there is no next milestone to run.
+> If the autonomous loop fires another session anyway, it should
+> read this HANDOFF, observe that `git log -1 | grep "P9-M5"` matches,
+> and stop. If a human session starts work on something new, paste
+> a fresh plan instead of using a stale milestone prompt.
 
 ```
-I'm continuing work on simple_coding_agent, a Python replica of Claude
-Code v2.1.88's context-management and memory pipeline.
+The RUNTIME_ACTIVATION_PLAN initiative is complete.
 
-Before doing anything:
-1. Read CLAUDE.md (architecture + completed P-roadmap).
-2. Read RUNTIME_ACTIVATION_PLAN.md
-     - Section 4 for milestone M5's scope
-     - Section 5 for execution rules
-3. Read HANDOFF.md — pay close attention to Section 3
-   "Decisions Made That Diverge From Plan".
-4. Run `git log --oneline -10` and `pytest --tb=no -q` to confirm
-   the baseline matches HANDOFF.md Section 1.
+Last commit: a3f51b1 (P9-M5).
+pytest: 497 passing.
+mypy + ruff: clean.
 
-Then execute Milestone M5 only:
-  - A2 + B4    (from RUNTIME_ACTIVATION_PLAN.md Section 2)
-
-Follow Section 5 "Execution Rules" in RUNTIME_ACTIVATION_PLAN.md
-strictly. The exact test case lists are in plan Section 3.2
-(`test_repl_slash_commands.py` for /remember + B4 auto-learn) plus
-the cross-session integration scenario 3 in 3.5.
-
-Out of scope: any other milestone. Do NOT touch out-of-milestone code.
-
-Exit ritual for this session (MANDATORY — do all five before stopping):
-  1. Milestone M5's exit gate (per plan Section 4) is met
-     — openai_cli --repl works; "记住" cue triggers save prompt.
-  2. `git commit -m "P9-M5: <one-line>"` has landed.
-  3. CLAUDE.md updated with a P9-M5 entry mirroring P1-P8 format.
-  4. PROGRESS.md appended with a one-line summary.
-  5. HANDOFF.md overwritten using templates/handoff_template.md, with
-     all placeholders filled, to hand off to the M6 session (or mark
-     the initiative complete if M5 is the last milestone).
-
-Confirm you've read all three files (CLAUDE.md, RUNTIME_ACTIVATION_PLAN.md,
-HANDOFF.md), then ask me to approve before starting implementation.
+If you are continuing to evolve simple_coding_agent, start by writing
+a new plan document (do NOT reuse RUNTIME_ACTIVATION_PLAN.md -- that
+plan's milestone table is exhausted). Read CLAUDE.md for the current
+architecture and the completed P1-P9 roadmap, then propose the next
+initiative with explicit milestones, exit gates, and a fresh HANDOFF
+template before writing any code.
 ```
