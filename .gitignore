@@ -13,3 +13,6 @@ venv/
 build/
 dist/
 *.egg-info/
+
+# Autonomous-loop runtime artifacts (logs/loop.log, logs/M{N}.log)
+logs/
