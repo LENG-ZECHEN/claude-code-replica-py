@@ -11,7 +11,7 @@
 > The next session MUST re-verify these numbers. Do not trust this list
 > blindly — re-run the commands.
 
-- Last commit: `<filled-by-commit>` — `git -C python-replica log --oneline -1`
+- Last commit: `ea7e383` — `git -C python-replica show ea7e383` to inspect
 - pytest: 475 passing (was 455 after M3, delta +20)
 - mypy:   clean (Success: no issues found in 19 source files)
 - ruff:   clean (All checks passed!)
