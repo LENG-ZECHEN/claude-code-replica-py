@@ -36,6 +36,13 @@ from .memory import SessionMemory
 from .metrics import MetricsCollector
 from .models import ToolCall
 from .provider import MockProvider, ProviderResponse
+from .session_store import (
+    InvalidSessionNameError,
+    SessionNotFoundError,
+    load_session,
+    save_session,
+    session_path_for,
+)
 from .tool_registry_factory import build_default_registry
 from .tools import ToolExecutor
 from .transcript import Transcript
@@ -80,9 +87,11 @@ _REPL_BANNER: str = (
 _REPL_PROMPT: str = "> "
 _REPL_HELP_TEXT: str = (
     "Commands:\n"
-    "  /help          Show this help.\n"
-    "  /stats         Show per-mechanism counters for this session.\n"
-    "  /exit, /quit   Leave the REPL.\n"
+    "  /help            Show this help.\n"
+    "  /stats           Show per-mechanism counters for this session.\n"
+    "  /save <name>     Persist transcript + last summary to a named session.\n"
+    "  /load <name>     Restore a previously saved session into this REPL.\n"
+    "  /exit, /quit     Leave the REPL.\n"
 )
 _REPL_DEFAULT_ANSWER: str = (
     "[MockProvider] Acknowledged. (No real LLM is wired in this build.)"
@@ -261,7 +270,8 @@ def _handle_slash_command(cmd: str, loop: AgentLoop | None = None) -> str:
       ``"exit"``     -- caller should terminate the loop.
       ``"continue"`` -- handled (printed help / stats / hint), keep looping.
     """
-    head = cmd.strip().split()[0]
+    tokens = cmd.strip().split()
+    head = tokens[0]
     if head in ("/exit", "/quit"):
         return "exit"
     if head == "/help":
@@ -273,8 +283,93 @@ def _handle_slash_command(cmd: str, loop: AgentLoop | None = None) -> str:
         else:
             print(loop._metrics.format_stats())
         return "continue"
+    if head == "/save":
+        _handle_save_command(tokens[1:], loop)
+        return "continue"
+    if head == "/load":
+        _handle_load_command(tokens[1:], loop)
+        return "continue"
     print(f"Unknown command: {head!r}. Try /help for the command list.")
     return "continue"
+
+
+def _handle_save_command(args: list[str], loop: AgentLoop | None) -> None:
+    """Implement ``/save <name>``: persist transcript + summary to disk."""
+    if not args:
+        print("Usage: /save <name>")
+        return
+    if loop is None:
+        print("(no active session)")
+        return
+    name = args[0]
+    try:
+        path = session_path_for(name)
+    except InvalidSessionNameError as err:
+        print(f"Invalid session name: {err}")
+        return
+    try:
+        save_session(
+            path,
+            transcript=loop._transcript,
+            last_summary=loop._last_summary,
+        )
+    except OSError as err:
+        print(f"(warning: could not save session {name!r}: {err})")
+        return
+    print(f"Saved session to {path}")
+
+
+def _apply_resume(name: str, loop: AgentLoop) -> int:
+    """Load the named session into ``loop`` before the REPL reads input.
+
+    Returns 0 on success and 2 on a clear failure (invalid name, missing
+    file, schema error). The exit code is intentionally distinct from a
+    normal ``/exit`` so harness scripts can distinguish startup failures.
+    """
+    try:
+        path = session_path_for(name)
+    except InvalidSessionNameError as err:
+        print(f"Invalid session name: {err}")
+        return 2
+    try:
+        transcript, last_summary = load_session(path)
+    except SessionNotFoundError:
+        print(f"No such session: {name!r}")
+        return 2
+    except (ValueError, OSError) as err:
+        print(f"(warning: could not load session {name!r}: {err})")
+        return 2
+    loop._transcript.replace_all(transcript.all_messages())
+    loop._last_summary = last_summary
+    print(f"Resumed session from {path}")
+    return 0
+
+
+def _handle_load_command(args: list[str], loop: AgentLoop | None) -> None:
+    """Implement ``/load <name>``: restore transcript + summary in place."""
+    if not args:
+        print("Usage: /load <name>")
+        return
+    if loop is None:
+        print("(no active session)")
+        return
+    name = args[0]
+    try:
+        path = session_path_for(name)
+    except InvalidSessionNameError as err:
+        print(f"Invalid session name: {err}")
+        return
+    try:
+        transcript, last_summary = load_session(path)
+    except SessionNotFoundError:
+        print(f"No such session: {name!r}")
+        return
+    except (ValueError, OSError) as err:
+        print(f"(warning: could not load session {name!r}: {err})")
+        return
+    loop._transcript.replace_all(transcript.all_messages())
+    loop._last_summary = last_summary
+    print(f"Loaded session from {path}")
 
 
 def _read_input_line() -> str | None:
@@ -312,6 +407,7 @@ def _run_repl(
     max_context_tokens: int,
     reserved_output_tokens: int,
     stream: bool,
+    resume: str | None = None,
 ) -> int:
     """Run the interactive REPL.
 
@@ -322,6 +418,11 @@ def _run_repl(
     KeyboardInterrupt during a single turn is caught and reported; the
     transcript and the loop instance are preserved so the next turn sees
     every prior user message.
+
+    When ``resume`` is set the named session is loaded before reading user
+    input. A missing or corrupted session causes ``_run_repl`` to return
+    nonzero so the operator sees the failure immediately, matching the M4
+    exit-gate contract.
     """
     print(_REPL_BANNER, end="")
     print(f"Workspace: {workspace}")
@@ -338,6 +439,11 @@ def _run_repl(
         reserved_output_tokens=reserved_output_tokens,
         session_memory=session_memory,
     )
+
+    if resume is not None:
+        resume_rc = _apply_resume(resume, loop)
+        if resume_rc != 0:
+            return resume_rc
 
     def _save_session() -> None:
         try:
@@ -415,6 +521,15 @@ def _build_parser() -> argparse.ArgumentParser:
         default=_DEFAULT_RESERVED_OUTPUT_TOKENS,
         help="ContextBudget.reserved_output_tokens (default: 8_192).",
     )
+    parser.add_argument(
+        "--resume",
+        default=None,
+        metavar="NAME",
+        help=(
+            "Resume a previously saved REPL session by name. Looks under "
+            "$SIMPLE_AGENT_SESSIONS_DIR (default ~/.simple-agent/sessions/)."
+        ),
+    )
     return parser
 
 
@@ -446,7 +561,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(args_in)
 
-    if args.repl:
+    if args.repl or args.resume is not None:
         workspace = _resolve_workspace_arg(args.workspace)
         return _run_repl(
             workspace=workspace,
@@ -454,6 +569,7 @@ def main(argv: list[str] | None = None) -> int:
             max_context_tokens=int(args.max_context_tokens),
             reserved_output_tokens=int(args.reserved_output_tokens),
             stream=bool(args.stream),
+            resume=args.resume,
         )
 
     # One-shot demo (unchanged behavior).

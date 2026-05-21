@@ -49,3 +49,23 @@ test_session_memory_persist.py` (9), `tests/test_repl.py` (+2 stats
 cases). pytest 436 → 455 (+19). M4 should pick up Phase D1 + D2 + D3
 (Transcript.dump_json/load_json, cross-process session save/load,
 `--resume <name>`) per RUNTIME_ACTIVATION_PLAN.md section 4.
+
+## M4 — done 2026-05-21
+
+Phase D1 + D2 + D3. `Transcript` gains `to_jsonable` /
+`from_jsonable` / `dump_json` / `load_json` (drops `is_virtual`
+messages by default; required-field validation raises `ValueError`).
+New `src/simple_coding_agent/session_store.py` wraps a Transcript +
+last `CompactSummary` into a `<sessions_dir>/<name>.json` file with
+atomic write (`tempfile` + `os.replace` shared with Transcript via a
+new `_atomic_write_json` helper). REPL gains `/save <name>` and
+`/load <name>` slash commands plus a top-level `--resume <name>`
+flag; missing-file and corrupted-JSON paths surface as exit code 2
+with a clear message. `SIMPLE_AGENT_SESSIONS_DIR` env var overrides
+the default `~/.simple-agent/sessions/`. New tests:
+`tests/test_transcript_persist.py` (6), `tests/test_repl_save_load.py`
+(8), `tests/test_resume_session.py` (4), `tests/
+test_end_to_end_long_session.py` (2 scenarios from plan 3.5). pytest
+455 → 475 (+20, meeting the M4 target). M5 should pick up Phase A2
++ B4 (openai_cli REPL + auto-learn cues) per RUNTIME_ACTIVATION_PLAN.md
+section 4.
