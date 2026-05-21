@@ -207,13 +207,15 @@ for M in "${MILESTONES[@]}"; do
 
   LOG="$LOGS_DIR/${M}.log"
   printf 'Log         : %s\n' "$LOG"
-  printf 'Remote view : open Claude mobile app or claude.ai/code\n'
+  printf 'Live view   : tail -f %s   (run in another terminal)\n' "$LOG"
   printf 'Model       : %s\n\n' "$CLAUDE_MODEL"
 
   # Launch a fresh claude session with cwd = $PROJECT_ROOT (we're already there).
-  # --remote-control exposes this invocation for mobile / claude.ai/code.
+  # NOTE: --remote-control was removed — it is incompatible with --print mode
+  # (--print is headless, --remote-control needs an auth/browser handshake).
+  # For live observation, use `tail -f` on the log file in another terminal.
   # --model pins to Opus 4.7 (uses your account plan tier, e.g. Max).
-  if ! claude --print --remote-control --model "$CLAUDE_MODEL" \
+  if ! claude --print --model "$CLAUDE_MODEL" \
        < "$PROMPT_FILE" 2>&1 | tee "$LOG"; then
     echo
     echo "ERROR: $M's claude invocation exited non-zero. See $LOG."
