@@ -77,3 +77,33 @@ These are intentional simplifications, not regressions, and are documented here 
 - **Snip is active but intentionally narrow.** `SnipTool` only folds configured tools (`read_file`, `list_files`, `run_shell`, `search_text`). It does not deduplicate `edit` / `write_file`-style side-effecting operations, and it does not use LLM-based semantic deduplication.
 
 - **`ContextCompactor.compact()` re-appends kept messages after the boundary marker** rather than splicing the transcript. The pre-boundary copies remain in `Transcript.all_messages()` (and `export()`) but are filtered out by `messages_after_compact_boundary()` before reaching the API. This matches the source design and is harmless, but the transcript grows monotonically.
+
+---
+
+## Active Initiative: RUNTIME_ACTIVATION_PLAN
+
+You are executing the 5-milestone plan in `RUNTIME_ACTIVATION_PLAN.md`. M1 is complete (commit `4cdbc79`, pytest 392 → 421). M2-M5 remain.
+
+The script `scripts/run_all_milestones.sh` (run from `/Users/leng/my-cc-py`) launches each remaining milestone in a fresh `claude --print --remote-control --model claude-opus-4-7` process. You may be inside such a process right now.
+
+### Resumption Protocol
+
+Run this whenever context feels stale, after any `/compact`, or at the start of any new session:
+
+1. `git -C python-replica log --oneline -15` — the latest `P9-M{N}` commit tells you which milestones are done.
+2. Read `python-replica/PROGRESS.md` if it exists — current milestone, last completed task, blockers.
+3. Read `python-replica/HANDOFF.md` — Section 3 ("Decisions Made That Diverge From Plan") is MANDATORY reading.
+4. Read `python-replica/RUNTIME_ACTIVATION_PLAN.md` Section 4 to confirm next milestone's exit gate.
+5. `cd python-replica && pytest --tb=no -q` — record current pass count vs the milestone target.
+6. Only then resume work.
+
+### Per-milestone Exit Ritual (MANDATORY)
+
+After each milestone's exit gate (per `RUNTIME_ACTIVATION_PLAN.md` Section 4) is met, before stopping:
+
+1. **Update PROGRESS.md** — append a "## M{N} — done <YYYY-MM-DD>" block with: pytest count delta (was X, now Y), files changed (one line), what M{N+1} should pick up. Create the file if it does not yet exist.
+2. **Commit** with explicit file paths (never `git add -A`): `git commit -m "P9-M{N}: <one-line summary>"`. The shell loop's exit-gate check `git log --oneline -1 | grep "P9-M{N}"` halts the loop if this commit is missing — without it, M{N+1} and beyond will not run.
+3. **Update this CLAUDE.md** — append a "P9 — M{N} complete" entry mirroring the P1-P8 format directly below the existing P9-M{N-1} entry.
+4. **Overwrite HANDOFF.md** — copy `templates/handoff_template.md`, fill ALL placeholders ({HASH}, {COUNT}, {PHASE_IDS}, etc.), and write the M{N+1} prompt in Section 5. Pay special attention to Section 3 (decisions that diverge from plan) — the next session reads this first.
+
+Do not skip any step. The exit ritual is what makes the autonomous loop work.
