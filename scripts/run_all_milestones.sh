@@ -4,15 +4,17 @@
 # Autonomous milestone runner — loops over selected milestones, each in a
 # fresh `claude --print` process (independent context). Spawns claude with
 # cwd = /Users/leng/my-cc-py so the session can see both python-replica/
-# and claude-code-source-code/. Uses --remote-control so you can watch /
-# co-pilot from the Claude mobile app or claude.ai/code, and --model
-# claude-opus-4-7 to pin the model.
+# and claude-code-source-code/.
+#
+# IMPORTANT: `claude --print` silently ignores ~/.claude/settings.json's
+# `permissions.allow` block (see `claude --help` note: "Settings files that
+# fail validation are silently ignored in this mode"). The permission
+# whitelist MUST be passed as CLI flags --allowedTools / --disallowedTools.
+# Without them, claude --print hangs silently when it wants to call a tool.
 #
 # Requirements:
 #   - Claude Code CLI v2.1.51+ (you have 2.1.146, OK)
-#   - claude.ai account on Pro / Max / Team / Enterprise plan
-#   - ~/.claude/settings.json with the recommended permissions whitelist
-#     (run `./scripts/run_all_milestones.sh --print-allowlist` to see it)
+#   - claude.ai account on any paid plan (Pro/Max/Team/Enterprise)
 #   - python-replica/templates/milestone_prompt_template.md present
 #   - Working tree clean before launch (checked in python-replica/.git)
 #
@@ -20,18 +22,19 @@
 #   ./scripts/run_all_milestones.sh                       # M2..M5 (default)
 #   ./scripts/run_all_milestones.sh M3 M4                 # custom subset
 #   ./scripts/run_all_milestones.sh --dry-run             # print prompts only
-#   ./scripts/run_all_milestones.sh --print-allowlist     # show settings JSON
+#   ./scripts/run_all_milestones.sh --print-allowlist     # show whitelist
 #   ./scripts/run_all_milestones.sh --help                # this header
 #
 # What you do while it's running:
-#   1. Open Claude mobile app (or claude.ai/code in any browser)
-#   2. Each milestone's session appears as it spawns
-#   3. Watch, intervene, or let it run unattended
-#   4. Tail logs in parallel:  tail -f python-replica/logs/M*.log
+#   1. tail -f python-replica/logs/M*.log  (in another terminal — live view)
+#   2. Or just wait and inspect logs after each milestone exits.
+#
+# Note: --remote-control is INCOMPATIBLE with --print (the former needs an
+# interactive session). For mobile/remote observability, run this script
+# inside `tmux new -s ms` and attach from another machine via SSH+tmux.
 
 set -euo pipefail
 
-# Resolve script dir, then jump UP TWO levels (scripts/ -> python-replica/ -> my-cc-py/)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"   # /Users/leng/my-cc-py
 cd "$PROJECT_ROOT"
@@ -40,6 +43,24 @@ REPLICA_DIR="python-replica"
 TEMPLATE="$REPLICA_DIR/templates/milestone_prompt_template.md"
 LOGS_DIR="$REPLICA_DIR/logs"
 CLAUDE_MODEL="claude-opus-4-7"
+
+# CLI-level permission whitelist (must match settings.json permissions block,
+# but CLI is what --print actually honors). Format per `claude --help`:
+# space-separated tool names, "Bash(cmd *)" pattern uses space inside parens.
+ALLOWED_TOOLS="Read Write Edit Glob Grep \
+TaskCreate TaskUpdate TaskList TaskGet TaskOutput \
+Bash(git *) Bash(pytest *) Bash(python *) Bash(python3 *) \
+Bash(mypy *) Bash(ruff *) Bash(pip *) \
+Bash(ls *) Bash(ls) Bash(pwd) Bash(cd *) \
+Bash(cat *) Bash(head *) Bash(tail *) \
+Bash(grep *) Bash(find *) Bash(wc *) Bash(diff *) \
+Bash(mkdir *) Bash(chmod *) Bash(touch *) \
+Bash(echo *) Bash(printf *)"
+
+DISALLOWED_TOOLS="Bash(rm *) Bash(rmdir *) \
+Bash(curl *) Bash(wget *) \
+Bash(sudo *) Bash(ssh *) Bash(scp *) \
+Bash(npm publish *) Bash(git push --force *)"
 
 # ---------------------------------------------------------------------------
 # Lookups (from RUNTIME_ACTIVATION_PLAN.md sections 2 + 4)
@@ -72,34 +93,15 @@ section_ids_for() {
 # ---------------------------------------------------------------------------
 
 print_allowlist() {
-  cat <<'EOF'
-Add this block to ~/.claude/settings.json (merge with existing keys):
+  cat <<EOF
+=== ALLOWED (passed via --allowedTools) ===
+$ALLOWED_TOOLS
 
-{
-  "permissions": {
-    "allow": [
-      "Read", "Write", "Edit",
-      "Glob", "Grep",
-      "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput",
-      "Bash(git:*)",
-      "Bash(pytest*)", "Bash(python:*)", "Bash(python3:*)",
-      "Bash(mypy:*)", "Bash(ruff:*)", "Bash(pip:*)",
-      "Bash(ls:*)", "Bash(ls)", "Bash(pwd)", "Bash(cd:*)",
-      "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)",
-      "Bash(grep:*)", "Bash(find:*)", "Bash(wc:*)", "Bash(diff:*)",
-      "Bash(mkdir:*)", "Bash(chmod:*)", "Bash(touch:*)",
-      "Bash(echo:*)", "Bash(printf:*)"
-    ],
-    "deny": [
-      "Bash(rm:*)", "Bash(rmdir:*)",
-      "Bash(curl:*)", "Bash(wget:*)",
-      "Bash(sudo:*)", "Bash(ssh:*)", "Bash(scp:*)",
-      "Bash(npm publish:*)", "Bash(git push --force:*)"
-    ]
-  }
-}
+=== DISALLOWED (passed via --disallowedTools) ===
+$DISALLOWED_TOOLS
 
-Then restart any open Claude Code session for the new permissions to load.
+These are passed as CLI flags to claude --print, because settings.json
+permissions are silently ignored in --print mode.
 EOF
 }
 
@@ -149,6 +151,8 @@ if ! command -v claude >/dev/null 2>&1; then
 fi
 echo "OK   claude CLI: $(claude --version 2>&1 | head -1)"
 echo "     model     : $CLAUDE_MODEL"
+echo "     allowed   : $(echo $ALLOWED_TOOLS | wc -w | tr -d ' ') tools"
+echo "     denied    : $(echo $DISALLOWED_TOOLS | wc -w | tr -d ' ') tools"
 
 if [ "$DRY_RUN" -eq 0 ]; then
   if ! git -C "$REPLICA_DIR" diff --quiet HEAD 2>/dev/null \
@@ -158,16 +162,6 @@ if [ "$DRY_RUN" -eq 0 ]; then
     exit 1
   fi
   echo "OK   working tree clean (in $REPLICA_DIR)"
-
-  if ! grep -q 'Bash(pytest' "$HOME/.claude/settings.json" 2>/dev/null; then
-    echo
-    echo "WARN: ~/.claude/settings.json does not appear to have the recommended"
-    echo "      permissions whitelist. Each tool call may prompt you, which"
-    echo "      defeats the autonomous run. Run:"
-    echo "        ./scripts/run_all_milestones.sh --print-allowlist"
-    echo "      to see what to add. Press Ctrl-C to abort, or Enter to continue."
-    read -r _
-  fi
 fi
 
 mkdir -p "$LOGS_DIR"
@@ -207,15 +201,15 @@ for M in "${MILESTONES[@]}"; do
 
   LOG="$LOGS_DIR/${M}.log"
   printf 'Log         : %s\n' "$LOG"
-  printf 'Live view   : tail -f %s   (run in another terminal)\n' "$LOG"
+  printf 'Live view   : tail -f %s   (in another terminal)\n' "$LOG"
   printf 'Model       : %s\n\n' "$CLAUDE_MODEL"
 
-  # Launch a fresh claude session with cwd = $PROJECT_ROOT (we're already there).
-  # NOTE: --remote-control was removed — it is incompatible with --print mode
-  # (--print is headless, --remote-control needs an auth/browser handshake).
-  # For live observation, use `tail -f` on the log file in another terminal.
-  # --model pins to Opus 4.7 (uses your account plan tier, e.g. Max).
+  # The two --allowedTools / --disallowedTools flags are MANDATORY for
+  # --print mode (settings.json is silently ignored — see header comment).
   if ! claude --print --model "$CLAUDE_MODEL" \
+       --remote-control \
+       --allowedTools "$ALLOWED_TOOLS" \
+       --disallowedTools "$DISALLOWED_TOOLS" \
        < "$PROMPT_FILE" 2>&1 | tee "$LOG"; then
     echo
     echo "ERROR: $M's claude invocation exited non-zero. See $LOG."

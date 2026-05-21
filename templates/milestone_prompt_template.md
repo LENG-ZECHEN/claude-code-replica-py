@@ -51,7 +51,7 @@ missing P9-{{MILESTONE}} commit gate, which is the intended fail-safe.
 == Exit ritual (MANDATORY) ==
 The loop's exit-gate check is:
   git -C python-replica log --oneline -1 | grep "P9-{{MILESTONE}}"
-Without this commit, the loop stops and M{{MILESTONE}}+1 onwards will NOT
+Without this commit, the loop stops and subsequent milestones will NOT
 run. Follow these 4 steps exactly:
 
 1. Confirm Milestone {{MILESTONE}}'s exit gate (per plan Section 4) is met.
@@ -61,9 +61,9 @@ run. Follow these 4 steps exactly:
      git add <list each modified/new file>
      git commit -m "P9-{{MILESTONE}}: <one-line summary>"
 
-3. Append a "P9 — M{{MILESTONE}} complete" entry to python-replica/CLAUDE.md
+3. Append a "P9 — {{MILESTONE}} complete" entry to python-replica/CLAUDE.md
    mirroring the existing P1-P9 format, directly below the existing
-   P9-M{prev} entry.
+   most-recent P9-M{N} entry.
 
 4. Append a one-line summary to python-replica/PROGRESS.md (create the
    file if it does not exist).
