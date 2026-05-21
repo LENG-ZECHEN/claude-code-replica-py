@@ -24,15 +24,17 @@ into either ``AgentLoop`` constructor arguments or ``ContextBudget`` fields.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import tempfile
 from pathlib import Path
 
+from .auto_learn import detect_cue, format_hint
 from .claude_md import ClaudeMdLoader
 from .compact import ContextCompactor
 from .context import ContextBudget, ContextBuilder
 from .loop import AgentLoop, LoopStatus
-from .memory import SessionMemory
+from .memory import MemoryEntry, MemoryType, ProjectMemory, SessionMemory
 from .metrics import MetricsCollector
 from .models import ToolCall
 from .provider import MockProvider, ProviderResponse
@@ -49,6 +51,9 @@ from .transcript import Transcript
 
 _SESSION_MEMORY_FILENAME = "session_memory.json"
 _SIMPLE_AGENT_DIR = ".simple-agent"
+_MEMORY_SUBDIR = "memory"
+_VALID_MEMORY_TYPES = tuple(t.value for t in MemoryType)
+_PROJECT_MEMORY_ENV_VAR = "SIMPLE_AGENT_MEMORY_DIR"
 
 # ---------------------------------------------------------------------------
 # Demo-mode constants (preserved from Phase 10)
@@ -87,11 +92,12 @@ _REPL_BANNER: str = (
 _REPL_PROMPT: str = "> "
 _REPL_HELP_TEXT: str = (
     "Commands:\n"
-    "  /help            Show this help.\n"
-    "  /stats           Show per-mechanism counters for this session.\n"
-    "  /save <name>     Persist transcript + last summary to a named session.\n"
-    "  /load <name>     Restore a previously saved session into this REPL.\n"
-    "  /exit, /quit     Leave the REPL.\n"
+    "  /help                          Show this help.\n"
+    "  /stats                         Show per-mechanism counters for this session.\n"
+    "  /save <name>                   Persist transcript + last summary to a named session.\n"
+    "  /load <name>                   Restore a previously saved session into this REPL.\n"
+    "  /remember <type> <id> <body>   Save a project memory entry (auto-learn target).\n"
+    "  /exit, /quit                   Leave the REPL.\n"
 )
 _REPL_DEFAULT_ANSWER: str = (
     "[MockProvider] Acknowledged. (No real LLM is wired in this build.)"
@@ -226,6 +232,31 @@ def _session_memory_path(workspace: Path) -> Path:
     return workspace / _SIMPLE_AGENT_DIR / _SESSION_MEMORY_FILENAME
 
 
+def _resolve_memory_dir(workspace: Path) -> Path:
+    """Resolve the ProjectMemory storage directory for a REPL session.
+
+    Precedence: ``SIMPLE_AGENT_MEMORY_DIR`` env var (absolute path) >
+    ``<workspace>/.simple-agent/memory/``. Mirrors ``memory_cli`` but
+    anchors the workspace-relative fallback to the REPL's workspace
+    (not ``Path.cwd()``) so tests with isolated workspaces stay isolated.
+    """
+    raw = os.environ.get(_PROJECT_MEMORY_ENV_VAR)
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return (workspace / _SIMPLE_AGENT_DIR / _MEMORY_SUBDIR).resolve()
+
+
+def _open_project_memory(workspace: Path) -> ProjectMemory:
+    """Build a ProjectMemory rooted at the resolved storage dir.
+
+    ``ProjectMemory`` already calls ``os.makedirs(..., exist_ok=True)``
+    so we do not need to create the directory ourselves here.
+    """
+    storage = _resolve_memory_dir(workspace)
+    storage.mkdir(parents=True, exist_ok=True)
+    return ProjectMemory(storage_dir=str(storage))
+
+
 def _build_repl_loop(
     workspace: Path,
     *,
@@ -233,8 +264,18 @@ def _build_repl_loop(
     max_context_tokens: int,
     reserved_output_tokens: int,
     session_memory: SessionMemory | None = None,
+    project_memory: ProjectMemory | None = None,
+    provider: MockProvider | None = None,
+    system_prompt: str | None = None,
 ) -> AgentLoop:
-    """Wire one shared AgentLoop for the REPL session."""
+    """Wire one shared AgentLoop for the REPL session.
+
+    ``provider`` and ``system_prompt`` are optional injection points so
+    ``openai_cli`` can reuse this helper while supplying its own
+    ``OpenAIProvider`` (and a coder-style system prompt). When omitted
+    the REPL falls back to the MockProvider hook used by the default
+    ``simple-agent --repl`` mode.
+    """
     registry = build_default_registry(workspace)
     executor = ToolExecutor(registry)
     budget = ContextBudget(
@@ -247,18 +288,22 @@ def _build_repl_loop(
         workspace_path=workspace,
         claude_md_loader=ClaudeMdLoader(),
     )
-    loop = AgentLoop(
-        provider=_make_repl_provider(workspace),
-        tool_executor=executor,
-        transcript=transcript,
-        context_builder=builder,
-        budget=budget,
-        registry=registry,
-        compactor=ContextCompactor(),
-        session_memory=session_memory,
-        metrics=MetricsCollector(),
-        max_steps=max_steps,
-    )
+    loop_kwargs: dict[str, object] = {
+        "provider": provider if provider is not None else _make_repl_provider(workspace),
+        "tool_executor": executor,
+        "transcript": transcript,
+        "context_builder": builder,
+        "budget": budget,
+        "registry": registry,
+        "compactor": ContextCompactor(),
+        "session_memory": session_memory,
+        "project_memory": project_memory,
+        "metrics": MetricsCollector(),
+        "max_steps": max_steps,
+    }
+    if system_prompt is not None:
+        loop_kwargs["system_prompt"] = system_prompt
+    loop = AgentLoop(**loop_kwargs)  # type: ignore[arg-type]
     _LAST_LOOPS.append(loop)
     return loop
 
@@ -289,8 +334,50 @@ def _handle_slash_command(cmd: str, loop: AgentLoop | None = None) -> str:
     if head == "/load":
         _handle_load_command(tokens[1:], loop)
         return "continue"
+    if head == "/remember":
+        _handle_remember_command(tokens[1:], loop)
+        return "continue"
     print(f"Unknown command: {head!r}. Try /help for the command list.")
     return "continue"
+
+
+def _handle_remember_command(args: list[str], loop: AgentLoop | None) -> None:
+    """Implement ``/remember <type> <id> <body...>``.
+
+    Saves a ``MemoryEntry`` into the active loop's ``ProjectMemory``,
+    surfacing the same secret-rejection and path-traversal guards as
+    ``simple-agent memory add``. Bodies span the remainder of the line
+    so users can paste multi-word feedback without quoting.
+    """
+    if loop is None:
+        print("(no active session)")
+        return
+    project_memory = loop._project_memory
+    if project_memory is None:
+        print("(no project memory configured for this REPL)")
+        return
+    if len(args) < 3:
+        print("Usage: /remember <type> <id> <body...>")
+        return
+    type_str, entry_id, *body_parts = args
+    if type_str not in _VALID_MEMORY_TYPES:
+        print(
+            f"Unknown memory type: {type_str!r}. "
+            f"Valid types: {', '.join(_VALID_MEMORY_TYPES)}."
+        )
+        return
+    entry = MemoryEntry(
+        name=entry_id,
+        body=" ".join(body_parts),
+        type=MemoryType(type_str),
+        id=entry_id,
+    )
+    try:
+        project_memory.save(entry)
+    except ValueError as err:
+        print(f"Could not save memory: {err}")
+        return
+    print(f"Remembered {entry.id} ({type_str}).")
 
 
 def _handle_save_command(args: list[str], loop: AgentLoop | None) -> None:
@@ -400,6 +487,57 @@ def _run_turn(loop: AgentLoop, user_input: str, stream: bool) -> None:
     print(result.answer or "(no answer)")
 
 
+def _drive_repl_session(
+    loop: AgentLoop,
+    *,
+    stream: bool,
+    session_memory: SessionMemory,
+    session_mem_path: Path,
+) -> int:
+    """Drive the interactive read-input/run-turn loop on a pre-built loop.
+
+    Pulled out of ``_run_repl`` so ``openai_cli`` can supply its own
+    ``AgentLoop`` (wired to ``OpenAIProvider``) while sharing every
+    slash-command, KeyboardInterrupt, EOF, auto-learn-cue, and
+    session-memory-save behaviour exactly. The function returns 0 on a
+    clean ``/exit`` / EOF and never raises ``KeyboardInterrupt``.
+    """
+
+    def _save_session() -> None:
+        try:
+            session_memory.dump_json(session_mem_path)
+        except OSError as err:
+            print(f"(warning: could not save session memory: {err})")
+
+    while True:
+        line = _read_input_line()
+        if line is None:
+            print()
+            _save_session()
+            return 0
+
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        if stripped.startswith("/"):
+            signal = _handle_slash_command(stripped, loop)
+            if signal == "exit":
+                _save_session()
+                return 0
+            continue
+
+        cue = detect_cue(stripped)
+        if cue is not None:
+            print(format_hint(cue))
+
+        try:
+            _run_turn(loop, stripped, stream)
+        except KeyboardInterrupt:
+            print("\n(interrupted; transcript preserved)")
+            continue
+
+
 def _run_repl(
     *,
     workspace: Path,
@@ -432,12 +570,14 @@ def _run_repl(
     _LAST_LOOPS.clear()
     session_mem_path = _session_memory_path(workspace)
     session_memory = SessionMemory.load_json(session_mem_path)
+    project_memory = _open_project_memory(workspace)
     loop = _build_repl_loop(
         workspace,
         max_steps=max_steps,
         max_context_tokens=max_context_tokens,
         reserved_output_tokens=reserved_output_tokens,
         session_memory=session_memory,
+        project_memory=project_memory,
     )
 
     if resume is not None:
@@ -445,35 +585,12 @@ def _run_repl(
         if resume_rc != 0:
             return resume_rc
 
-    def _save_session() -> None:
-        try:
-            session_memory.dump_json(session_mem_path)
-        except OSError as err:
-            print(f"(warning: could not save session memory: {err})")
-
-    while True:
-        line = _read_input_line()
-        if line is None:
-            print()
-            _save_session()
-            return 0
-
-        stripped = line.strip()
-        if not stripped:
-            continue
-
-        if stripped.startswith("/"):
-            signal = _handle_slash_command(stripped, loop)
-            if signal == "exit":
-                _save_session()
-                return 0
-            continue
-
-        try:
-            _run_turn(loop, stripped, stream)
-        except KeyboardInterrupt:
-            print("\n(interrupted; transcript preserved)")
-            continue
+    return _drive_repl_session(
+        loop,
+        stream=stream,
+        session_memory=session_memory,
+        session_mem_path=session_mem_path,
+    )
 
 
 # ---------------------------------------------------------------------------

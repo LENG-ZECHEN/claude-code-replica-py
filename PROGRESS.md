@@ -69,3 +69,28 @@ test_end_to_end_long_session.py` (2 scenarios from plan 3.5). pytest
 455 → 475 (+20, meeting the M4 target). M5 should pick up Phase A2
 + B4 (openai_cli REPL + auto-learn cues) per RUNTIME_ACTIVATION_PLAN.md
 section 4.
+
+## M5 — done 2026-05-21
+
+Phase A2 + B4 + plan 3.5 scenario 3. New
+`src/simple_coding_agent/auto_learn.py` ships a pure-function
+`detect_cue(text)` that returns the canonical cue label for "记住" /
+"以后" / "don't" (apostrophe variants) / "prefer" (morphological
+siblings), and a `format_hint(cue)` renderer. `cli.py` extracts
+`_drive_repl_session` from `_run_repl` so `openai_cli` can share the
+read-input/run-turn/slash-command/EOF/KeyboardInterrupt machinery
+without duplication; it now wires a `ProjectMemory` (env-overridable
+via `SIMPLE_AGENT_MEMORY_DIR`, default
+`<workspace>/.simple-agent/memory/`) into every REPL loop and adds a
+`/remember <type> <id> <body...>` slash command that uses
+ProjectMemory's existing secret-rejection + path-traversal guards.
+The REPL turn loop scans user input with `detect_cue` and prints
+`format_hint` before invoking the loop. `openai_cli.py` gains
+`--repl`, `--max-steps`, `--max-context-tokens`,
+`--reserved-output-tokens`, `--resume` flags and a `_run_openai_repl`
+that builds an `OpenAIProvider`-backed AgentLoop and delegates to
+`cli._drive_repl_session`. New tests: `tests/test_auto_learn.py` (6),
+`tests/test_repl_slash_remember.py` (8), `tests/test_openai_cli_repl.py`
+(7), `tests/test_end_to_end_long_session.py` (+1 scenario 3). pytest
+475 → 497 (+22, exceeding the M5 ≥485 target). M5 is the final
+RUNTIME_ACTIVATION_PLAN milestone; the initiative is complete.

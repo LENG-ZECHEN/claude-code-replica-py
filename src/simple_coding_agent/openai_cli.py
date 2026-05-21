@@ -1,8 +1,20 @@
 """
-Non-interactive OpenAI-compatible CLI for simple_coding_agent.
+OpenAI-compatible CLI for simple_coding_agent.
 
-Run one task, print the final answer, then exit. This keeps the CLI aligned
-with AgentLoop.run(user_input), which is currently a single-turn task runner.
+Two modes:
+
+  ``simple-agent-openai "<task>"``           one-shot Chat Completions run.
+  ``simple-agent-openai --repl``             multi-turn REPL backed by the
+                                             real provider; reuses every
+                                             slash command (``/help``,
+                                             ``/stats``, ``/save``,
+                                             ``/load``, ``/remember``) and
+                                             the auto-learn cue hook from
+                                             the MockProvider REPL.
+
+The REPL mode (P9-M5, A2) is what makes reactive compact reachable
+against a real provider; with a tight ``--max-context-tokens`` the loop
+will deterministically observe ``PromptTooLongError`` and retry.
 """
 
 from __future__ import annotations
@@ -12,8 +24,10 @@ import os
 import sys
 from pathlib import Path
 
+from . import cli as _cli
 from .context import ContextBudget, ContextBuilder
 from .loop import AgentLoop, LoopResult, LoopStatus
+from .memory import SessionMemory
 from .provider import OpenAIProvider
 from .tool_registry_factory import build_default_registry
 from .tools import ToolExecutor
@@ -22,9 +36,13 @@ from .transcript import Transcript
 _DEFAULT_MAX_TOKENS = 1024
 _DEFAULT_CONTEXT_TOKENS = 200_000
 _DEFAULT_RESERVED_OUTPUT_TOKENS = 8_192
+_DEFAULT_MAX_STEPS = 10
 _DEFAULT_SYSTEM_PROMPT = (
     "You are a coding assistant. Use the provided tools when you need "
     "to inspect or write workspace files."
+)
+_REPL_BANNER = (
+    "simple-agent-openai REPL -- type /help for commands, /exit to quit.\n"
 )
 
 
@@ -76,12 +94,44 @@ def _resolve_workspace(raw: str) -> Path:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="simple-agent-openai",
-        description="Run one simple_coding_agent task with OpenAI Chat Completions.",
+        description=(
+            "Run a simple_coding_agent task with OpenAI Chat Completions. "
+            "Use --repl for an interactive multi-turn session."
+        ),
     )
     parser.add_argument(
         "prompt",
-        nargs="+",
-        help="Task to run. Quote it to pass spaces as one argument.",
+        nargs="*",
+        help="One-shot task. Omitted when --repl is set.",
+    )
+    parser.add_argument(
+        "--repl",
+        action="store_true",
+        help="Start an interactive multi-turn REPL with the OpenAI provider.",
+    )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=_DEFAULT_MAX_STEPS,
+        help="Max tool-using iterations per user turn (REPL only; default: 10).",
+    )
+    parser.add_argument(
+        "--max-context-tokens",
+        type=int,
+        default=_DEFAULT_CONTEXT_TOKENS,
+        help="ContextBudget.max_tokens (REPL only; default: 200_000).",
+    )
+    parser.add_argument(
+        "--reserved-output-tokens",
+        type=int,
+        default=_DEFAULT_RESERVED_OUTPUT_TOKENS,
+        help="ContextBudget.reserved_output_tokens (REPL only; default: 8_192).",
+    )
+    parser.add_argument(
+        "--resume",
+        default=None,
+        metavar="NAME",
+        help="Resume a previously saved REPL session by name (REPL only).",
     )
     parser.add_argument(
         "-w",
@@ -220,6 +270,89 @@ def _run_task(
     return 0 if result.status == LoopStatus.COMPLETED else 1
 
 
+def _build_openai_repl_loop(
+    workspace: Path,
+    *,
+    model: str,
+    max_tokens: int,
+    max_steps: int,
+    max_context_tokens: int,
+    reserved_output_tokens: int,
+    session_memory: SessionMemory,
+) -> AgentLoop:
+    """Wire a real-provider AgentLoop using the cli helper for everything else.
+
+    The provider is the only difference from ``cli._build_repl_loop`` --
+    we pass an ``OpenAIProvider`` instance instead of the MockProvider
+    factory, plus a coder-oriented system prompt.
+    """
+    provider = OpenAIProvider(
+        model=model,
+        max_tokens=max_tokens,
+        api_key=_api_key_from_env(),
+        base_url=os.environ.get("OPENAI_BASE_URL"),
+    )
+    project_memory = _cli._open_project_memory(workspace)
+    return _cli._build_repl_loop(
+        workspace,
+        max_steps=max_steps,
+        max_context_tokens=max_context_tokens,
+        reserved_output_tokens=reserved_output_tokens,
+        session_memory=session_memory,
+        project_memory=project_memory,
+        provider=provider,  # type: ignore[arg-type]
+        system_prompt=_DEFAULT_SYSTEM_PROMPT,
+    )
+
+
+def _run_openai_repl(
+    *,
+    workspace: Path,
+    model: str,
+    max_tokens: int,
+    max_steps: int,
+    max_context_tokens: int,
+    reserved_output_tokens: int,
+    stream: bool,
+    resume: str | None,
+) -> int:
+    """Drive the OpenAI-backed REPL, sharing slash commands with ``cli``.
+
+    Reuses ``cli._drive_repl_session`` for the read/run/exit machinery so
+    the REPL surface is identical between the MockProvider build
+    (``simple-agent --repl``) and the live-provider build here.
+    """
+    print(_REPL_BANNER, end="")
+    print(f"Workspace: {workspace}")
+    print(f"Model:     {model}")
+    print()
+
+    _cli._LAST_LOOPS.clear()
+    session_mem_path = _cli._session_memory_path(workspace)
+    session_memory = SessionMemory.load_json(session_mem_path)
+    loop = _build_openai_repl_loop(
+        workspace,
+        model=model,
+        max_tokens=max_tokens,
+        max_steps=max_steps,
+        max_context_tokens=max_context_tokens,
+        reserved_output_tokens=reserved_output_tokens,
+        session_memory=session_memory,
+    )
+
+    if resume is not None:
+        resume_rc = _cli._apply_resume(resume, loop)
+        if resume_rc != 0:
+            return resume_rc
+
+    return _cli._drive_repl_session(
+        loop,
+        stream=stream,
+        session_memory=session_memory,
+        session_mem_path=session_mem_path,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -236,9 +369,10 @@ def main(argv: list[str] | None = None) -> int:
         print("Set OPENAI_API_KEY or DASHSCOPE_API_KEY.", file=sys.stderr)
         return 2
 
+    repl_mode = bool(args.repl) or args.resume is not None
     prompt = " ".join(str(part) for part in args.prompt).strip()
-    if not prompt:
-        print("Prompt must not be empty.", file=sys.stderr)
+    if not repl_mode and not prompt:
+        print("Prompt must not be empty (or pass --repl).", file=sys.stderr)
         return 2
 
     try:
@@ -248,6 +382,19 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     max_tokens = args.max_tokens or _env_int("SIMPLE_AGENT_MAX_TOKENS", _DEFAULT_MAX_TOKENS)
+
+    if repl_mode:
+        return _run_openai_repl(
+            workspace=workspace,
+            model=model,
+            max_tokens=max_tokens,
+            max_steps=int(args.max_steps),
+            max_context_tokens=int(args.max_context_tokens),
+            reserved_output_tokens=int(args.reserved_output_tokens),
+            stream=not bool(args.no_stream),
+            resume=args.resume,
+        )
+
     return _run_task(
         prompt=prompt,
         workspace=workspace,

@@ -1,4 +1,4 @@
-"""M4 integration matrix — RUNTIME_ACTIVATION_PLAN.md section 3.5 (1, 2).
+"""End-to-end integration matrix — RUNTIME_ACTIVATION_PLAN.md section 3.5.
 
 Scenario 1: a 30-turn scripted REPL session inside a tight context budget
 must (a) flip ``LoopResult.compacted`` to True at least once and
@@ -8,7 +8,11 @@ Scenario 2: cross-process resume — Session A runs to compaction, saves;
 Session B starts with ``--resume`` and the prior summary text must reach
 its very first provider system prompt.
 
-Scenario 3 (memory injection) is intentionally deferred to M5.
+Scenario 3 (P9-M5): pre-seeded ``ProjectMemory`` feedback reaches the
+loop's per-turn ``AgentStep.memory_injected`` AND the assembled
+``built.system`` system prompt — proving that the Jaccard selector +
+``_collect_memory_snippets`` + ``ContextBuilder`` chain is alive in the
+default REPL wiring.
 """
 
 from __future__ import annotations
@@ -162,3 +166,68 @@ def test_cross_session_resume_preserves_summary(
     assert systems, "resumed REPL should have driven at least one provider call"
     assert expected_summary in systems[0]
     assert "## Conversation Summary" in systems[0]
+
+
+# ---------------------------------------------------------------------------
+# Scenario 3 (P9-M5): seeded ProjectMemory snippet reaches built.system
+# ---------------------------------------------------------------------------
+
+
+def test_seeded_project_memory_reaches_built_system_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Seed a feedback entry, drive one REPL turn, then re-run via the
+    same loop to read back ``step.memory_injected``. The three pass
+    criteria from plan 3.5 #3 are: (a) ``step.memory_injected`` non-empty
+    and contains the snippet, (b) the snippet is present in
+    ``built.system``, proven via the provider's recorded system prompt.
+    """
+    from simple_coding_agent.memory import MemoryEntry, MemoryType, ProjectMemory
+
+    memory_root = tmp_path / "project-memory"
+    monkeypatch.setenv("SIMPLE_AGENT_MEMORY_DIR", str(memory_root))
+    seeded_body = "user prefers tabs over spaces in Python files"
+    ProjectMemory(storage_dir=str(memory_root)).save(MemoryEntry(
+        name="tabs_pref",
+        body=seeded_body,
+        type=MemoryType.FEEDBACK,
+        id="tabs_pref",
+    ))
+
+    captured_provider: dict[str, MockProvider] = {}
+    answers = [
+        MockProvider.direct_answer("hello world program acknowledged"),
+        MockProvider.direct_answer("second turn reply"),
+    ]
+
+    def _provider_factory(_ws: Path) -> Any:
+        p = MockProvider(answers)
+        captured_provider["p"] = p
+        return p
+
+    monkeypatch.setattr(cli_mod, "_make_repl_provider", _provider_factory)
+    _set_stdin(monkeypatch, "write a hello world program", "/exit")
+
+    rc = main(["--repl", "--workspace", str(tmp_path / "ws")])
+    assert rc == 0
+
+    loop = _captured_loops()[0]
+    assert loop._project_memory is not None
+
+    # (b) built.system contains the snippet -- read it off the provider's
+    # recorded system prompt for the REPL's only turn.
+    history = captured_provider["p"].history
+    assert history, "expected at least one provider call"
+    first_system = history[0].system
+    assert "## Memory" in first_system
+    assert seeded_body in first_system
+
+    # (a) step.memory_injected non-empty and contains the snippet. Drive
+    # one direct turn on the same loop so we can inspect AgentStep.
+    direct = loop.run("write a hello world program")
+    assert direct.steps, "expected at least one AgentStep from the direct run"
+    injected = direct.steps[0].memory_injected
+    assert injected, "memory_injected should be populated on the first step"
+    assert any(seeded_body in snippet for snippet in injected)
+    assert any(snippet.startswith("[feedback] tabs_pref") for snippet in injected)
