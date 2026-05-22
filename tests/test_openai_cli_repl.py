@@ -297,3 +297,60 @@ def test_openai_repl_default_no_verbose_is_silent(
     captured = capsys.readouterr()
     assert rc == 0
     assert "[trace]" not in captured.err
+
+
+# ---------------------------------------------------------------------------
+# M2 — --aggressive-thresholds preset (openai_cli surface)
+# ---------------------------------------------------------------------------
+
+def test_openai_repl_aggressive_thresholds_wires_preset_into_loop(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``simple-agent-openai --repl --aggressive-thresholds`` lowers every threshold."""
+    monkeypatch.setattr(openai_cli, "OpenAIProvider", _FakeOpenAIProvider)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _set_stdin_openai(monkeypatch, "/exit")
+
+    rc = openai_cli.main([
+        "--no-dotenv",
+        "--repl",
+        "--aggressive-thresholds",
+        "--workspace", str(tmp_path),
+        "--model", "test-model",
+    ])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "[aggressive-thresholds]" in captured.out
+    assert "[aggressive-thresholds]" not in captured.err
+
+    loop = _captured_loops()[0]
+    preset = cli_mod._AGGRESSIVE_THRESHOLDS
+    assert loop._compactor.compact_threshold == preset["compact_threshold"]
+    assert loop._snip_tool._keep_recent == preset["snip_keep_recent"]
+    assert loop._microcompactor._threshold_minutes == preset["microcompact_minutes"]
+
+
+def test_openai_repl_aggressive_thresholds_omitted_keeps_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Without the flag, the openai REPL does NOT emit the banner."""
+    monkeypatch.setattr(openai_cli, "OpenAIProvider", _FakeOpenAIProvider)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _set_stdin_openai(monkeypatch, "/exit")
+
+    rc = openai_cli.main([
+        "--no-dotenv",
+        "--repl",
+        "--workspace", str(tmp_path),
+        "--model", "test-model",
+    ])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "[aggressive-thresholds]" not in captured.out
+    loop = _captured_loops()[0]
+    assert loop._compactor.compact_threshold == 0.8
+    assert loop._snip_tool._keep_recent == 3

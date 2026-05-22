@@ -181,6 +181,16 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--aggressive-thresholds",
+        action="store_true",
+        help=(
+            "Lower every relevant context/memory threshold to demo-friendly "
+            "values so compact / microcompact / snip / externalize actually "
+            "fire in short REPL sessions. Explicit --max-context-tokens / "
+            "--reserved-output-tokens / --max-steps still win per-field."
+        ),
+    )
+    parser.add_argument(
         "--shell-mode",
         choices=("mock", "allowlist"),
         default="mock",
@@ -303,6 +313,7 @@ def _build_openai_repl_loop(
     session_memory: SessionMemory,
     shell_mode: ShellMode = ShellMode.MOCK,
     tracer: Tracer | None = None,
+    aggressive_thresholds: bool = False,
 ) -> AgentLoop:
     """Wire a real-provider AgentLoop using the cli helper for everything else.
 
@@ -328,6 +339,7 @@ def _build_openai_repl_loop(
         system_prompt=_DEFAULT_SYSTEM_PROMPT,
         shell_mode=shell_mode,
         tracer=tracer,
+        aggressive_thresholds=aggressive_thresholds,
     )
 
 
@@ -343,6 +355,7 @@ def _run_openai_repl(
     resume: str | None,
     shell_mode: ShellMode = ShellMode.MOCK,
     verbose: bool = False,
+    aggressive_thresholds: bool = False,
 ) -> int:
     """Drive the OpenAI-backed REPL, sharing slash commands with ``cli``.
 
@@ -353,6 +366,8 @@ def _run_openai_repl(
     print(_REPL_BANNER, end="")
     print(f"Workspace: {workspace}")
     print(f"Model:     {model}")
+    if aggressive_thresholds:
+        print(_cli._format_aggressive_banner())
     print()
 
     _cli._LAST_LOOPS.clear()
@@ -369,6 +384,7 @@ def _run_openai_repl(
         session_memory=session_memory,
         shell_mode=shell_mode,
         tracer=tracer,
+        aggressive_thresholds=aggressive_thresholds,
     )
 
     if resume is not None:
@@ -427,6 +443,7 @@ def main(argv: list[str] | None = None) -> int:
             resume=args.resume,
             shell_mode=shell_mode,
             verbose=bool(args.verbose),
+            aggressive_thresholds=bool(args.aggressive_thresholds),
         )
 
     return _run_task(

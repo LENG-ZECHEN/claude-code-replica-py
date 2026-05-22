@@ -54,6 +54,7 @@ from .session_store import (
 )
 from .snip import SnipTool
 from .tool_registry_factory import build_default_registry
+from .tool_result_store import ToolResultStore
 from .tools import ToolExecutor
 from .trace import NullTracer, StderrTracer, Tracer
 from .transcript import Transcript
@@ -113,6 +114,47 @@ _REPL_HELP_TEXT: str = (
 _REPL_DEFAULT_ANSWER: str = (
     "[MockProvider] Acknowledged. (No real LLM is wired in this build.)"
 )
+
+# ---------------------------------------------------------------------------
+# Aggressive-thresholds preset (M2). Single switch (``--aggressive-thresholds``)
+# that lowers every relevant threshold to demo-friendly values so the context-
+# management mechanisms (compact / microcompact / snip / externalize) actually
+# fire in a short interactive session. Imported by ``visibility_full_demo.py``
+# (M3); the key set is frozen.
+# ---------------------------------------------------------------------------
+
+_AGGRESSIVE_THRESHOLDS: dict[str, int | float] = {
+    "compact_threshold": 0.2,
+    "keep_recent": 2,
+    "microcompact_minutes": 1,
+    "max_inline_chars": 2_000,
+    "total_budget_chars": 8_000,
+    "snip_keep_recent": 1,
+    "context_tokens": 4_000,
+    "reserved_output_tokens": 512,
+}
+
+_AGGRESSIVE_BANNER: str = (
+    "[aggressive-thresholds] compact={compact_threshold}, "
+    "microcompact={microcompact_minutes}min, "
+    "inline={max_inline_chars_k}k, total={total_budget_chars_k}k, "
+    "snip_keep={snip_keep_recent}, ctx={context_tokens_k}k, "
+    "out={reserved_output_tokens}"
+)
+
+
+def _format_aggressive_banner() -> str:
+    """Render the one-line banner from ``_AGGRESSIVE_THRESHOLDS`` values."""
+    return _AGGRESSIVE_BANNER.format(
+        compact_threshold=_AGGRESSIVE_THRESHOLDS["compact_threshold"],
+        microcompact_minutes=_AGGRESSIVE_THRESHOLDS["microcompact_minutes"],
+        max_inline_chars_k=int(_AGGRESSIVE_THRESHOLDS["max_inline_chars"]) // 1_000,
+        total_budget_chars_k=int(_AGGRESSIVE_THRESHOLDS["total_budget_chars"]) // 1_000,
+        snip_keep_recent=_AGGRESSIVE_THRESHOLDS["snip_keep_recent"],
+        context_tokens_k=int(_AGGRESSIVE_THRESHOLDS["context_tokens"]) // 1_000,
+        reserved_output_tokens=_AGGRESSIVE_THRESHOLDS["reserved_output_tokens"],
+    )
+
 
 # Test hooks: REPL records the AgentLoop instances it created so tests can
 # inspect token budget / max_steps without monkeypatching constructors.
@@ -284,6 +326,7 @@ def _build_repl_loop(
     system_prompt: str | None = None,
     shell_mode: ShellMode = ShellMode.MOCK,
     tracer: Tracer | None = None,
+    aggressive_thresholds: bool = False,
 ) -> AgentLoop:
     """Wire one shared AgentLoop for the REPL session.
 
@@ -302,6 +345,39 @@ def _build_repl_loop(
     active_tracer: Tracer = tracer if tracer is not None else NullTracer()
     registry = build_default_registry(workspace, shell_mode=shell_mode)
     executor = ToolExecutor(registry)
+    # When the aggressive preset is on, swap in low thresholds for everything
+    # the caller did NOT pin via an explicit flag. The caller still wins:
+    # an explicit ``--max-context-tokens`` propagates into ``max_context_tokens``
+    # above before this function runs, so the precedence rule is "explicit
+    # flag beats preset on a per-field basis".
+    if aggressive_thresholds:
+        compact_threshold = float(_AGGRESSIVE_THRESHOLDS["compact_threshold"])
+        keep_recent_kept = int(_AGGRESSIVE_THRESHOLDS["keep_recent"])
+        microcompact_minutes = int(_AGGRESSIVE_THRESHOLDS["microcompact_minutes"])
+        max_inline_chars = int(_AGGRESSIVE_THRESHOLDS["max_inline_chars"])
+        total_budget_chars = int(_AGGRESSIVE_THRESHOLDS["total_budget_chars"])
+        snip_keep_recent = int(_AGGRESSIVE_THRESHOLDS["snip_keep_recent"])
+        tool_result_store: ToolResultStore | None = ToolResultStore(
+            max_inline_chars=max_inline_chars,
+            total_budget_chars=total_budget_chars,
+            tracer=active_tracer,
+        )
+        compactor = ContextCompactor(
+            keep_recent=keep_recent_kept,
+            compact_threshold=compact_threshold,
+            tracer=active_tracer,
+        )
+        microcompactor = MicroCompactor(
+            threshold_minutes=microcompact_minutes,
+            tracer=active_tracer,
+        )
+        snip_tool = SnipTool(keep_recent=snip_keep_recent, tracer=active_tracer)
+    else:
+        tool_result_store = None
+        compactor = ContextCompactor(tracer=active_tracer)
+        microcompactor = MicroCompactor(tracer=active_tracer)
+        snip_tool = SnipTool(tracer=active_tracer)
+
     budget = ContextBudget(
         max_tokens=max_context_tokens,
         reserved_output_tokens=reserved_output_tokens,
@@ -309,6 +385,7 @@ def _build_repl_loop(
     transcript = Transcript()
     builder = ContextBuilder(
         budget=budget,
+        tool_result_store=tool_result_store,
         workspace_path=workspace,
         claude_md_loader=ClaudeMdLoader(tracer=active_tracer),
         tracer=active_tracer,
@@ -320,9 +397,9 @@ def _build_repl_loop(
         "context_builder": builder,
         "budget": budget,
         "registry": registry,
-        "compactor": ContextCompactor(tracer=active_tracer),
-        "microcompactor": MicroCompactor(tracer=active_tracer),
-        "snip_tool": SnipTool(tracer=active_tracer),
+        "compactor": compactor,
+        "microcompactor": microcompactor,
+        "snip_tool": snip_tool,
         "session_memory": session_memory,
         "project_memory": project_memory,
         "metrics": MetricsCollector(),
@@ -626,6 +703,7 @@ def _run_repl(
     resume: str | None = None,
     shell_mode: ShellMode = ShellMode.MOCK,
     verbose: bool = False,
+    aggressive_thresholds: bool = False,
 ) -> int:
     """Run the interactive REPL.
 
@@ -644,6 +722,8 @@ def _run_repl(
     """
     print(_REPL_BANNER, end="")
     print(f"Workspace: {workspace}")
+    if aggressive_thresholds:
+        print(_format_aggressive_banner())
     print()
 
     # Each REPL session owns a fresh slot in the per-process loop log.
@@ -661,6 +741,7 @@ def _run_repl(
         project_memory=project_memory,
         shell_mode=shell_mode,
         tracer=tracer,
+        aggressive_thresholds=aggressive_thresholds,
     )
 
     if resume is not None:
@@ -705,6 +786,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "Stream `[trace] [<channel>] k=v ...` lines to stderr for "
             "each compaction, snip, externalize, memory-select, and "
             "auto-learn cue (REPL mode)."
+        ),
+    )
+    parser.add_argument(
+        "--aggressive-thresholds",
+        action="store_true",
+        help=(
+            "Lower every relevant context/memory threshold to demo-friendly "
+            "values so compact / microcompact / snip / externalize actually "
+            "fire in short REPL sessions. Explicit --max-context-tokens / "
+            "--reserved-output-tokens / --max-steps still win per-field."
         ),
     )
     parser.add_argument(
@@ -793,6 +884,7 @@ def main(argv: list[str] | None = None) -> int:
             resume=args.resume,
             shell_mode=shell_mode,
             verbose=bool(args.verbose),
+            aggressive_thresholds=bool(args.aggressive_thresholds),
         )
 
     # One-shot demo (unchanged behavior; default shell_mode is MOCK).

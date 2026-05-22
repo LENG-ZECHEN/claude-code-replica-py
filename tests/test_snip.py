@@ -248,6 +248,50 @@ def test_extract_path_handles_missing_or_malformed_input() -> None:
     ]
 
 
+def test_snip_keep_recent_one_folds_all_but_latest_global_result() -> None:
+    """``keep_recent=1`` keeps only the most recent run_shell / search_text result.
+
+    Default ``keep_recent=3`` would have preserved the last 3 results per tool;
+    the aggressive preset (``snip_keep_recent=1``) drops everything except the
+    very latest. Per-path tools still keep one latest per path independently of
+    the parameter.
+    """
+    messages: list[Message] = []
+    for i in range(4):
+        messages.extend(
+            _exchange(f"shell-{i}", "run_shell", f"shell {i}", {"command": "pwd"})
+        )
+    for i in range(3):
+        messages.extend(
+            _exchange(
+                f"search-{i}",
+                "search_text",
+                f"search {i}",
+                {"pattern": "needle"},
+            )
+        )
+
+    snipped = SnipTool(keep_recent=1).snip(messages)
+
+    assert _result_contents(snipped) == [
+        SNIPPED_CONTENT,
+        SNIPPED_CONTENT,
+        SNIPPED_CONTENT,
+        "shell 3",
+        SNIPPED_CONTENT,
+        SNIPPED_CONTENT,
+        "search 2",
+    ]
+
+
+def test_snip_rejects_invalid_keep_recent() -> None:
+    """``keep_recent=0`` is meaningless (would snip everything) and must error."""
+    import pytest
+
+    with pytest.raises(ValueError):
+        SnipTool(keep_recent=0)
+
+
 def test_list_files_uses_actual_subdir_key_for_path_grouping() -> None:
     messages = [
         *_exchange("list-1", "list_files", "src old", {"subdir": "src"}),

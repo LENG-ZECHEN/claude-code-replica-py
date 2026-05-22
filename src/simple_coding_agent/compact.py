@@ -288,18 +288,34 @@ class LLMSummarizer:
         return result
 
 
+_DEFAULT_MICROCOMPACT_MINUTES = 60
+
+
 class MicroCompactor:
     """Cold-cache cleanup for old compactable tool results."""
 
-    def __init__(self, *, tracer: Tracer | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        threshold_minutes: int = _DEFAULT_MICROCOMPACT_MINUTES,
+        tracer: Tracer | None = None,
+    ) -> None:
+        if threshold_minutes < 1:
+            raise ValueError("threshold_minutes must be >= 1")
+        self._threshold_minutes = threshold_minutes
         self._tracer: Tracer = tracer or NullTracer()
 
     def should_microcompact(
         self,
         messages: list[Message],
-        threshold_minutes: int = 60,
+        threshold_minutes: int | None = None,
         now: datetime | None = None,
     ) -> bool:
+        effective_threshold = (
+            threshold_minutes
+            if threshold_minutes is not None
+            else self._threshold_minutes
+        )
         if not messages:
             return False
 
@@ -320,7 +336,7 @@ class MicroCompactor:
         if latest_assistant_time is None:
             return True
 
-        return current_time - latest_assistant_time > timedelta(minutes=threshold_minutes)
+        return current_time - latest_assistant_time > timedelta(minutes=effective_threshold)
 
     def microcompact(self, messages: list[Message]) -> list[Message]:
         tool_names_by_id = self._tool_names_by_id(messages)

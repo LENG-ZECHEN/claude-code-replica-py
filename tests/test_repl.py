@@ -448,3 +448,93 @@ def test_repl_verbose_threads_tracer_into_components(
     null_loop = _captured_loops()[0]
     assert isinstance(null_loop._tracer, NullTracer)
     assert isinstance(null_loop._microcompactor._tracer, NullTracer)
+
+
+# ---------------------------------------------------------------------------
+# M2 — --aggressive-thresholds preset
+# ---------------------------------------------------------------------------
+
+def test_aggressive_thresholds_flag_lowers_every_component_threshold(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """``--aggressive-thresholds`` wires the preset into every component."""
+    _set_stdin(monkeypatch, "/exit")
+    rc = main([
+        "--repl",
+        "--aggressive-thresholds",
+        "--workspace", str(tmp_path),
+    ])
+    assert rc == 0
+    loop = _captured_loops()[0]
+
+    preset = cli_mod._AGGRESSIVE_THRESHOLDS
+    assert loop._compactor.compact_threshold == preset["compact_threshold"]
+    assert loop._compactor.keep_recent == preset["keep_recent"]
+    assert loop._microcompactor._threshold_minutes == preset["microcompact_minutes"]
+    assert loop._snip_tool._keep_recent == preset["snip_keep_recent"]
+    store = loop._context_builder._store
+    assert store._max_inline_chars == preset["max_inline_chars"]
+    assert store._total_budget_chars == preset["total_budget_chars"]
+
+
+def test_aggressive_thresholds_banner_prints_to_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Banner appears once on stdout (not stderr) when preset is active."""
+    _set_stdin(monkeypatch, "/exit")
+    rc = main([
+        "--repl",
+        "--aggressive-thresholds",
+        "--workspace", str(tmp_path),
+    ])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "[aggressive-thresholds]" in captured.out
+    # Banner content is derived from the preset dict; assert specific tokens
+    # so a future preset typo cannot pass silently.
+    assert "compact=0.2" in captured.out
+    assert "snip_keep=1" in captured.out
+    # The banner is NOT a [trace] line and must not pollute stderr.
+    assert "[aggressive-thresholds]" not in captured.err
+
+
+def test_aggressive_thresholds_omitted_keeps_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Default REPL invocation does NOT emit the banner or apply the preset."""
+    _set_stdin(monkeypatch, "/exit")
+    rc = main(["--repl", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "[aggressive-thresholds]" not in captured.out
+    loop = _captured_loops()[0]
+    # Defaults: ContextCompactor.compact_threshold=0.8, SnipTool keep_recent=3.
+    assert loop._compactor.compact_threshold == 0.8
+    assert loop._snip_tool._keep_recent == 3
+    assert loop._microcompactor._threshold_minutes == 60
+
+
+def test_aggressive_thresholds_explicit_context_flag_overrides_preset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Explicit ``--max-context-tokens`` wins per-field; other preset values apply."""
+    _set_stdin(monkeypatch, "/exit")
+    rc = main([
+        "--repl",
+        "--aggressive-thresholds",
+        "--max-context-tokens", "16000",
+        "--workspace", str(tmp_path),
+    ])
+    assert rc == 0
+    loop = _captured_loops()[0]
+    # Per-field precedence: explicit flag beats preset's 4_000 value.
+    assert loop._context_builder._budget.max_tokens == 16000
+    # Unspecified fields still take the aggressive value.
+    assert loop._snip_tool._keep_recent == 1
+    assert loop._microcompactor._threshold_minutes == 1
+
+

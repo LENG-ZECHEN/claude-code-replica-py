@@ -18,11 +18,16 @@ SNIPPED_CONTENT = "[Snipped: superseded by later call]"
 
 KEEP_LATEST_PER_PATH = frozenset({"read_file", "list_files"})
 
+# Global-quota tools: only the latest ``SnipTool.keep_recent`` results per tool
+# are preserved; older ones are folded into ``SNIPPED_CONTENT``. The dict value
+# (3) is informational and reflects the default; the active count at runtime
+# is the SnipTool instance's ``_keep_recent`` field.
 KEEP_LATEST_GLOBAL: dict[str, int] = {
     "run_shell": 3,
     "search_text": 3,
 }
 
+_DEFAULT_KEEP_RECENT = 3
 _COMPACTABLE_TOOLS = KEEP_LATEST_PER_PATH | frozenset(KEEP_LATEST_GLOBAL)
 _PATH_THRESHOLD = 3
 _TOTAL_PAIR_THRESHOLD = 10
@@ -61,7 +66,15 @@ def _is_already_compacted_result(content: object) -> bool:
 class SnipTool:
     """Fold redundant compactable tool_result bodies without deleting messages."""
 
-    def __init__(self, *, tracer: Tracer | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        keep_recent: int = _DEFAULT_KEEP_RECENT,
+        tracer: Tracer | None = None,
+    ) -> None:
+        if keep_recent < 1:
+            raise ValueError("keep_recent must be >= 1")
+        self._keep_recent = keep_recent
         self._tracer: Tracer = tracer or NullTracer()
 
     def should_snip(self, messages: list[Message]) -> bool:
@@ -100,7 +113,9 @@ class SnipTool:
 
     def snip(self, messages: list[Message]) -> list[Message]:
         tool_infos = self._tool_infos_by_id(messages)
-        positions_to_snip = self._positions_to_snip(messages, tool_infos)
+        positions_to_snip = self._positions_to_snip(
+            messages, tool_infos, keep_recent=self._keep_recent
+        )
 
         snipped: list[Message] = []
         for message_index, msg in enumerate(messages):
@@ -154,6 +169,8 @@ class SnipTool:
     def _positions_to_snip(
         messages: list[Message],
         tool_infos: dict[str, _ToolInfo | None],
+        *,
+        keep_recent: int,
     ) -> set[tuple[int, int]]:
         positions_to_snip: set[tuple[int, int]] = set()
         preserved_paths: set[tuple[str, str]] = set()
@@ -184,11 +201,10 @@ class SnipTool:
                         preserved_paths.add(path_key)
                     continue
 
-                limit = KEEP_LATEST_GLOBAL.get(info.name)
-                if limit is None:
+                if info.name not in KEEP_LATEST_GLOBAL:
                     continue
                 count = preserved_global_counts[info.name]
-                if count >= limit:
+                if count >= keep_recent:
                     positions_to_snip.add((message_index, item_index))
                 else:
                     preserved_global_counts[info.name] = count + 1
