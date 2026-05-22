@@ -6,9 +6,27 @@
 
 ## Active initiative
 
-**None.**
+**Observable Thresholds** — see
+[`initiatives/current/`](./initiatives/current/).
 
-`initiatives/current/` is empty (`.gitkeep` only).
+| | |
+|---|---|
+| Slug | `observable-thresholds` |
+| Bootstrapped | 2026-05-22 |
+| Baseline commit | `2d414d9` |
+| Baseline pytest | 520 passing |
+| Milestones | M1 → M3 |
+| Planned exit | pytest >= 550, `examples/visibility_full_demo.py` produces four artifacts under `--confirm-api-call` |
+| Next command | `./automation/scripts/run_all_milestones.sh` |
+
+**Goal.** Make the context-management subsystem (full-compact,
+micro-compact, snip, reactive-compact, tool-result externalize) and
+the memory subsystem (SessionMemory, ProjectMemory, MemorySelector,
+ClaudeMdLoader, auto-learn cue) visible in real time via a `--verbose`
+tracer flag, easy to trigger via an `--aggressive-thresholds` preset,
+and demonstrable end-to-end through a real-API demo script that
+persists transcript + trace + metrics + summary to a timestamped
+artifact directory.
 
 ## Last completed initiative
 

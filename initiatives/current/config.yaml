@@ -1,0 +1,192 @@
+slug: observable-thresholds
+commit_prefix: obs-thr
+archive_slug: 2026-05-observable-thresholds
+baseline_commit: 2d414d91da65cc5998563e9c63b2d2be7028315d
+
+milestones:
+  M1:
+    name: trace-hooks-and-verbose-flag
+    phase_ids: [V1, V2]
+    exit_gate: |
+      `simple-agent --repl --verbose` after several turns: stderr
+      contains at least one `[trace] [budget]` line and at least one
+      `[trace] [memory_select]` line. Without `--verbose`, stderr is
+      silent. `pytest --tb=no -q` is green with total >= 540. `mypy
+      src` and `ruff check .` are clean.
+    notes: |
+      Create `src/simple_coding_agent/trace.py` exposing a `Tracer`
+      Protocol with two implementations: `NullTracer` (default,
+      no-op, zero overhead) and `StderrTracer` (writes a single
+      line per event to `sys.stderr`).
+
+      Wire `Tracer` via constructor injection into: `AgentLoop`,
+      `ContextBuilder`, `ToolResultStore`, `ProjectMemory`,
+      `ClaudeMdLoader`, `MicroCompactor`, `SnipTool`,
+      `ContextCompactor`. For `auto_learn.detect_cue`, extend the
+      function signature to `detect_cue(text, tracer=None)` and
+      update both call sites (`cli.py` and `openai_cli.py`).
+
+      Trace line format is locked to:
+        [trace] [<channel>] key=value key=value ...
+      Channels (must match `MetricsCollector` counter names where
+      they overlap): `compact`, `reactive`, `microcompact`, `snip`,
+      `externalize`, `memory_select`, `claude_md`, `auto_learn`,
+      `budget`.
+
+      Hard rule: trace lines MUST NOT contain raw user input or
+      raw LLM output text. Only metadata (counts, token estimates,
+      entry names, scores, tool ids). Add at least one test that
+      asserts a sensitive substring fed through the loop does NOT
+      appear in captured stderr.
+
+      Order of operations at each fire site: perform the action ->
+      `tracer.emit(...)` -> `metrics.record_*()`. Tracer is an event
+      stream, MetricsCollector is the post-hoc counter; they coexist
+      rather than replace each other.
+
+      Add `--verbose` flag (argparse `action="store_true"`) to both
+      `cli.py` and `openai_cli.py`. `_build_repl_loop` (cli.py) and
+      `_run_openai_repl` (openai_cli.py) pick `StderrTracer()` when
+      the flag is set, otherwise `NullTracer()`. The default
+      production path constructs `NullTracer()`, so all existing 497
+      tests must remain green with zero regressions.
+
+      New tests: `tests/test_trace.py` (~10 cases covering NullTracer
+      no-op behavior, StderrTracer line format, channel name
+      coverage, and one secret-leak negative test). Add ~5 cases
+      across `tests/test_cli.py`, `tests/test_repl.py`,
+      `tests/test_openai_cli_repl.py` to cover the `--verbose` flag
+      wiring and the default-silent path.
+
+  M2:
+    name: aggressive-thresholds-preset
+    phase_ids: [V3]
+    exit_gate: |
+      `simple-agent --repl --verbose --aggressive-thresholds`
+      running 8 turns that include repeated `read_file` calls
+      produces at least one `[trace] [compact]` line and at least
+      one `[trace] [snip]` line on stderr. Without
+      `--aggressive-thresholds`, the same 8-turn input produces zero
+      `[trace] [compact]` and zero `[trace] [snip]` lines. The REPL
+      startup banner includes a single line summarizing the active
+      preset, prefixed `[aggressive-thresholds]`. `pytest --tb=no -q`
+      total >= 545. `mypy src` and `ruff check .` are clean.
+    notes: |
+      Add a module-level dict `_AGGRESSIVE_THRESHOLDS` at the top of
+      `cli.py`:
+        compact_threshold: 0.2           (default 0.8)
+        keep_recent: 2                   (default 4)
+        microcompact_minutes: 1          (default 60)
+        max_inline_chars: 2_000          (default 50_000)
+        total_budget_chars: 8_000        (default 200_000)
+        snip_keep_recent: 1              (default 3)
+        context_tokens: 4_000            (default 200_000)
+        reserved_output_tokens: 512      (default 8_192)
+
+      Add `--aggressive-thresholds` flag (argparse `store_true`) to
+      both `cli.py` and `openai_cli.py`. When set, `_build_repl_loop`
+      passes these values into `ContextBudget`, `ContextCompactor`,
+      `MicroCompactor`, `ToolResultStore`, and `SnipTool` at
+      construction time.
+
+      Precedence rule: an explicit `--max-context-tokens` /
+      `--reserved-output-tokens` / `--max-steps` from the user
+      always overrides the preset value for that single field. Only
+      the unspecified fields take the aggressive value. Test this
+      explicitly.
+
+      `snip.py` needs a small refactor first: extract `keep_recent`
+      as a constructor parameter on `SnipTool` with default value 3
+      so existing behavior is unchanged. Internal algorithm uses
+      `self._keep_recent` instead of the current hard-coded
+      constants. Existing `tests/test_snip.py` cases must remain
+      green at default; add 1-2 new cases for `keep_recent=1`.
+
+      Banner format (printed once at REPL start when the preset is
+      active):
+        [aggressive-thresholds] compact=0.2, microcompact=1min,
+          inline=2k, total=8k, snip_keep=1, ctx=4k, out=512
+
+      New example: `examples/aggressive_thresholds_demo.py` (~80
+      LoC) -- MockProvider-based, deterministic, demonstrates the
+      flag wiring without a network call.
+
+      New tests: ~5 cases across `tests/test_repl.py` and
+      `tests/test_openai_cli_repl.py` covering flag wiring,
+      banner emission, precedence rule (explicit flags override
+      preset), and `examples/aggressive_thresholds_demo.py`
+      end-to-end behavior.
+
+  M3:
+    name: real-api-visibility-demo-and-guard
+    phase_ids: [V4, V5]
+    exit_gate: |
+      Running `python examples/visibility_full_demo.py
+      --confirm-api-call` with `OPENAI_API_KEY` or
+      `DASHSCOPE_API_KEY` set produces a directory
+      `examples/_artifacts/visibility-demo-YYYYMMDD-HHMMSS/`
+      containing four non-empty files: `transcript.txt`,
+      `trace.stderr`, `metrics.json`, `summary.md`. Without
+      `--confirm-api-call`, the script exits with code 2 and prints
+      an explanatory message. With `--confirm-api-call` but no API
+      key in env, the script exits with code 3 and prints an
+      explanatory message. `tests/test_visibility_full_demo.py`
+      (key-less path, using the `_ExplodingProvider` pattern from
+      `tests/test_openai_chat_demo.py`) verifies the script never
+      constructs a real provider in its safe-by-default
+      configuration. `pytest --tb=no -q` total >= 550. `mypy src`
+      and `ruff check .` are clean.
+    notes: |
+      Main script: `examples/visibility_full_demo.py` (~200 LoC).
+      Structure:
+
+      1. `argparse` requires `--confirm-api-call`; missing flag ->
+         print explanation -> `sys.exit(2)`.
+      2. Check `OPENAI_API_KEY` or `DASHSCOPE_API_KEY` is set;
+         missing -> print explanation -> `sys.exit(3)`.
+      3. Create artifact directory
+         `examples/_artifacts/visibility-demo-<ISO-timestamp>/`.
+      4. Instantiate `StderrTracer(stream=open(.../trace.stderr,
+         "w"))` plus `OpenAIProvider` plus `AgentLoop`, all wired
+         with the `cli._AGGRESSIVE_THRESHOLDS` preset values.
+      5. Drive a 3-turn scripted conversation designed to exercise
+         as many mechanisms as possible:
+            turn 1: read a fixed ~10KB file in the repo (triggers
+                    `externalize`)
+            turn 2: read the same file again (triggers `snip`)
+            turn 3: "Please remember I prefer Python from now on"
+                    (mixed Chinese/English text triggers
+                    `auto_learn` cue + `ProjectMemory` write +
+                    `memory_select` on the next provider call)
+      6. After the loop exits, write four artifacts:
+            - `metrics.json` -- `LoopResult.metrics` serialized
+            - `transcript.txt` -- `Transcript.to_jsonable` rendered
+              human-readable
+            - `trace.stderr` -- already written live by StderrTracer
+            - `summary.md` -- generated from metrics + tracer events,
+              one row per channel showing trigger count and first
+              fire site, plus a tokens-per-turn line
+      7. Add `examples/_artifacts/*/` to `.gitignore` so artifacts
+         do NOT enter version control. The `.gitignore` change MUST
+         land in the same M3 commit; otherwise RUNBOOK Phase 1
+         pre-flight will reject the next initiative because of a
+         dirty working tree.
+
+      Test file: `tests/test_visibility_full_demo.py` reuses the
+      `_ExplodingProvider` + `monkeypatch` pattern from
+      `tests/test_openai_chat_demo.py`. About 6 cases covering:
+         (a) missing `--confirm-api-call` -> exit code 2 AND no
+             provider constructed
+         (b) missing API key -> exit code 3
+         (c) with `--confirm-api-call` and mocked `OpenAIProvider`,
+             all four artifact files exist and are non-empty
+         (d) trace.stderr contains at least one `[trace] [budget]`
+             line and one `[trace] [externalize]` line
+         (e) summary.md is well-formed markdown with one row per
+             channel
+         (f) `.gitignore` contains `examples/_artifacts/`
+
+      After M3 commits, append one row to README.md's "Examples"
+      section describing `visibility_full_demo`. Phase 2C Tier A
+      auto-apply may also catch this, but call it out explicitly in
+      the M3 prompt to avoid relying on the auto-apply.

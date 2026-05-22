@@ -12,7 +12,7 @@ For the active-initiative pointer and the bootstrap procedure, see
 
 | Slug | Status | Started | Goal |
 |---|---|---|---|
-| _(none)_ | — | — | `initiatives/current/` is empty |
+| [observable-thresholds](./current/) | bootstrapped | 2026-05-22 | Make context/memory pipeline visible via `--verbose` + `--aggressive-thresholds` flags and a real-API demo |
 
 ## Archived
 
