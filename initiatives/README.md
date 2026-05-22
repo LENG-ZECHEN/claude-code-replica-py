@@ -12,13 +12,14 @@ For the active-initiative pointer and the bootstrap procedure, see
 
 | Slug | Status | Started | Goal |
 |---|---|---|---|
-| [observable-thresholds](./current/) | bootstrapped | 2026-05-22 | Make context/memory pipeline visible via `--verbose` + `--aggressive-thresholds` flags and a real-API demo |
+| _(none)_ | — | — | — |
 
 ## Archived
 
 | Slug | Status | Period | Milestones | Final commit |
 |---|---|---|---|---|
 | [2026-05-runtime-activation](./_archive/2026-05-runtime-activation/) | complete | 2026-05-21 | M1 → M5 | `de3ecad` |
+| [2026-05-observable-thresholds](./_archive/2026-05-observable-thresholds/) | complete | 2026-05-22 – 2026-05-23 | M1 → M3 | `026db2e` |
 
 ## Folder shape (per initiative)
 

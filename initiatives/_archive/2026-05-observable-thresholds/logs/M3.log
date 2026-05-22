@@ -1,0 +1,12 @@
+All 6 exit-gate checks verified:
+
+| # | check | result |
+|---|---|---|
+| 1 | commit subject contains `[obs-thr/M3]` | ✓ `026db2e` |
+| 2 | HANDOFF.md in commit | ✓ |
+| 3 | `## M3 — done 2026-05-22` in PROGRESS.md | ✓ |
+| 4 | `pytest --tb=no -q` green | ✓ 557 passed |
+| 5 | 5-section HANDOFF structure (substring match per `run_all_milestones.sh:274`) | ✓ all 5 present |
+| 6 | append-only (M1/M2 verbatim preserved) | ✓ `### M1`/`### M2`/`### M3` and `## M1 — done`/`## M2 — done`/`## M3 — done` |
+
+**M3 shipped — initiative complete.** Commit `026db2e [obs-thr/M3] visibility_full_demo.py + artifact guard + .gitignore`. Tests 551 → 557 (+6). `examples/visibility_full_demo.py` (~270 LoC) drives a 3-turn scripted REPL under `OpenAIProvider` + `aggressive_thresholds`, persists `transcript.txt` / `trace.stderr` / `metrics.json` / `summary.md` to `examples/_artifacts/visibility-demo-<UTC-timestamp>/`. Exit code 2 (missing `--confirm-api-call`) and exit code 3 (missing API key) both verified via CLI smoke and `_ExplodingProvider` tripwire. `.gitignore` and PLAN.md `STATUS: complete` landed in the same commit. The autonomous loop's review session can now start.

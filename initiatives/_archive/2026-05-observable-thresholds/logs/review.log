@@ -1,0 +1,14 @@
+Phase 2B + 2C complete. Summary:
+
+- **All 3 milestones verified**: `[obs-thr/M1]` (`063d5d9`), `[obs-thr/M2]` (`43e6ee8`), `[obs-thr/M3]` (`026db2e`) — all present in `2d414d91..HEAD`.
+- **Quality gates green**: pytest 557 (+37 from 520), mypy clean (21 files), ruff clean.
+- **REVIEW.md written** with 8-dim prompt scorecard, 9-dim execution scorecard, and 3 Tier C proposals.
+- **Tier A auto-applied**: appended `### trace.py` per-file summary to `CLAUDE.md` (the new module exporting `Tracer`/`NullTracer`/`StderrTracer`).
+- **Tier B did not fire**: trace.py is 86 LOC (< 150 LOC subsystem-doc threshold); no divergence matched the architectural-keyword list for an ADR.
+- **Archive committed** as `aeae1d8 [obs-thr/wrap]`: `git mv initiatives/current → initiatives/_archive/2026-05-observable-thresholds/`, recreated empty `current/.gitkeep`, rewrote `NOW.md` (no active initiative), moved row in `initiatives/README.md` from Active to Archived.
+- **All 6 wrap-gate checks pass**: commit subject, archive exists, REVIEW.md exists, `.gitkeep` present, `current/` clean, working tree clean.
+
+Key audit findings flagged in REVIEW.md:
+- M1/M2 HANDOFF SHAs are stale (recorded `a052056`/`14299af`, actual `063d5d9`/`43e6ee8`) due to interleaved harness commits — Tier C proposal #1.
+- M2 had no `design decisions (deviations from PLAN)` subsection yet added `MicroCompactor.threshold_minutes` constructor param outside its prompt's expected-files list — scored 3/5 on divergence discipline.
+- Both M1 and M2 sessions terminated before §5 exit ritual (thrash-loop protection / API quota); manual collation was applied per RUNBOOK recovery path. M1/M2 logs near-empty as a known artifact — not penalized.
