@@ -177,7 +177,68 @@ After the last milestone's exit gate passes, the script spawns ONE more
 | 3 | **Review prompts.** Open each `initiatives/current/prompts/M{N}.md` and score on 5 dimensions: clarity, completeness, scope alignment with PLAN, constraint specificity, exit-ritual correctness. Produce a per-prompt scorecard. |
 | 4 | **Review execution.** For each milestone, look at: commit message quality, test count delta, mypy/ruff status delta, number of divergences in HANDOFF Section 3, anomalies in the milestone log. Produce a per-milestone scorecard. |
 | 5 | Write `initiatives/current/REVIEW.md` containing both scorecards plus a lessons-learned section that future Phase 1 bootstraps can read. |
-| 6 | **Diff-driven project doc proposals.** `git diff <bootstrap-commit>..HEAD -- src/ pyproject.toml`. Detect: new public symbols, new CLI flags, new entry points, new dependencies, new env vars. Propose specific edits to `CLAUDE.md` (architecture / per-file summary) and `README.md` (commands / setup) as a numbered list inside `REVIEW.md`. Do NOT apply automatically. |
+| 6 | **Three-tier doc update.** Diff `<bootstrap-commit>..HEAD -- src/ pyproject.toml` then act per the **Doc-update tiers** subsection below: A-tier safe edits applied automatically, B-tier judged-creations applied automatically when triggers match, C-tier rewrites only proposed in REVIEW.md. Every applied edit is logged in REVIEW.md's `## Auto-applied edits` section. |
+
+### Doc-update tiers (used by Step 6)
+
+The review agent classifies every doc-change candidate into one of three
+tiers and acts differently per tier. The bias is **moderately
+aggressive**: when a trigger is reasonably close to one of the rules
+below, prefer to act over propose. The wrap-up commit is one atomic
+unit, so an over-eager edit is easy to revert in one `git revert`.
+
+#### Tier A — safe auto-apply (always apply when triggered)
+
+Mechanical, append-only operations on existing files. The review agent
+applies these without asking and logs each in REVIEW.md `## Auto-applied
+edits`.
+
+| Trigger | Action |
+|---|---|
+| `src/` has a new `.py` file with at least one public symbol that is not yet in `CLAUDE.md`'s per-file summary table | Append a new "### `<filename>`" section to CLAUDE.md per-file summaries, mirroring the existing format. |
+| `pyproject.toml` `[project.scripts]` has a new entry not in `README.md`'s Console scripts table | Append a row to that table. |
+| `pyproject.toml` `[project] dependencies` has a new entry | Append a one-line note under README.md Setup. |
+| A new CLI flag is added to an existing entry-point CLI (visible in `--help`) | Append it to README.md's relevant flag list. |
+
+Hard rules for Tier A:
+- **APPEND only** — never edit existing rows / paragraphs / bullets.
+- **Never delete** any line.
+- **Never touch** the first 10 lines of README.md (elevator pitch) or the
+  "Implementation Roadmap (Completed P1–P8)" section of CLAUDE.md.
+
+#### Tier B — judged auto-apply (apply when triggers match, with moderate aggression)
+
+Creating new files. Requires a clear trigger but is acceptable to apply
+without human approval because new files are easier to delete than edits
+to existing files are to revert.
+
+| Trigger | Action |
+|---|---|
+| `src/` gains a new **subdirectory**, OR a new top-level module that is **>150 LOC** AND exports **≥3 public symbols** (non-underscored functions/classes/dataclasses) | Create `docs/<slug>.md` using `automation/templates/subsystem_doc.md`. If `docs/<slug>.md` already exists, **append** a "## Recent changes" bullet instead. |
+| HANDOFF.md Section 3 has **≥2 divergences** AND at least one is architectural (keywords: `renamed module`, `new abstraction`, `dropped feature`, `protocol change`, `inverted dependency`), OR a single divergence touches **>2 source files** | Create `docs/DECISIONS/<NNNN>-<slug>.md` using `automation/templates/adr.md`. If `docs/DECISIONS/` doesn't exist yet, create it with a `README.md` index file too. NNNN = (max existing) + 1, zero-padded to 4 digits, starting at 0001. |
+
+Hard rules for Tier B:
+- **Never overwrite** an existing file at the target path. If it exists,
+  fall back to Tier A append (or, if the file is not append-friendly,
+  drop to Tier C propose).
+- Every B-tier creation is logged in REVIEW.md `## Auto-applied edits`
+  with the exact trigger that fired.
+- If unsure whether a trigger has fired, **prefer to apply** (moderate
+  aggression). Over-eager B-tier writes are reversible by deleting the
+  one new file.
+
+#### Tier C — propose only (never auto-apply)
+
+Anything that would rewrite existing prose, change existing rows in
+tables, delete content, or reorganize file structure. These go into
+REVIEW.md `## Proposed edits (need human review)` as a numbered list.
+
+| Trigger | Why Tier C |
+|---|---|
+| An existing CLAUDE.md per-file summary needs paraphrasing because the module's behavior fundamentally changed | Rewrites risk losing carefully chosen wording |
+| README.md Setup section needs reorganization | Affects elevator pitch + first-impression |
+| Existing ADR superseded by this initiative | Requires Status-line edit on the old ADR — human should confirm reasoning |
+| Existing `docs/<subsystem>.md` overview section appears stale | "Stale" judgment is subjective; let human decide |
 
 ### Phase 2C — Wrap-up (same review session, after producing REVIEW.md)
 

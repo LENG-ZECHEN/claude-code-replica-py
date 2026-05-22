@@ -114,34 +114,103 @@ Use this structure:
 ## Phase 2B-4: Execution quality scorecards
 <markdown table from Step 4>
 
-## Phase 2B-6: Proposed project-doc edits
-<numbered list from Step 6, with concrete file + line + diff>
+## Auto-applied edits
+<Tier A + Tier B entries from Step 6. One bullet per edit:
+ - Tier A | <file> | <one-line summary> | trigger: <which row>
+ - Tier B | <new file path> | <one-line summary> | trigger: <which row>
+ If none were applied, write "(none — diff did not match any A/B trigger)">
+
+## Proposed edits (need human review)
+<Tier C entries from Step 6. Numbered list with file:line + suggested diff.
+ If none, write "(none)">
 
 ## Phase 2C: Wrap-up actions taken
 <list what you did in Phase 2C, with commands>
 ```
 
-### Step 6: Propose project-doc edits
+### Step 6: Three-tier doc update
 
-Run:
+Read `automation/RUNBOOK.md` section "Doc-update tiers (used by Step 6)"
+in full before starting this step. The tier definitions live there; this
+section just tells you how to execute them.
+
+Run the diff once at the top of this step:
+
 ```
-git -C python-replica diff <bootstrap-commit>..HEAD -- src/ pyproject.toml
+git -C python-replica log --oneline | grep -F "[{{COMMIT_PREFIX}}/M1]"  # find bootstrap-commit
+BOOTSTRAP_PARENT=<the commit immediately before the [{{COMMIT_PREFIX}}/M1] commit>
+git -C python-replica diff $BOOTSTRAP_PARENT..HEAD --stat -- src/ pyproject.toml
+git -C python-replica diff $BOOTSTRAP_PARENT..HEAD --name-only -- src/ pyproject.toml
 ```
 
-(`<bootstrap-commit>` is the commit immediately BEFORE the first
-`[{{COMMIT_PREFIX}}/M1]` commit. Use `git log` to locate it.)
+Then walk each tier in order:
 
-Detect:
-- New public symbols (classes, functions, CLI flags, slash commands,
-  env vars, entry points) → propose `CLAUDE.md` edit (per-file summary
-  update).
-- New dependency in `pyproject.toml` → propose `README.md` Setup edit.
-- New `simple-agent <subcommand>` surface → propose `README.md` Console
-  scripts edit.
+#### Tier A — apply automatically (append only)
 
-DO NOT apply these edits. Present them as a numbered list in REVIEW.md
-"Proposed project-doc edits". The human reviewer applies (or rejects)
-them after reading the review.
+For each change-candidate that matches a Tier A trigger (see RUNBOOK):
+
+1. Locate the target file + insertion point.
+2. Use Edit to APPEND a row / bullet / section. Do not modify existing
+   content. Do not touch the first 10 lines of README.md or the
+   Implementation Roadmap section of CLAUDE.md.
+3. Record what you did in REVIEW.md `## Auto-applied edits` with:
+   ```
+   - Tier A | <file> | <one-line summary> | trigger: <which Tier A row>
+   ```
+
+If you are unsure whether a candidate is mechanical-enough for Tier A,
+downgrade it to Tier C (propose only).
+
+#### Tier B — judged auto-apply (create new files)
+
+Be **moderately aggressive**: when a trigger is close to firing, prefer
+to act over propose. New files are reversible with a single `git rm`.
+
+For each candidate matching a Tier B trigger:
+
+1. **Subsystem doc** (`docs/<slug>.md`): copy
+   `automation/templates/subsystem_doc.md` into place, fill every
+   `{{placeholder}}`. The slug = new subdir name OR new module basename
+   (kebab-case). If the file already exists, do NOT overwrite — append
+   a `- {{TODAY}} — {{INITIATIVE_SLUG}} — ...` bullet to the file's
+   `## Recent changes` section instead.
+
+2. **ADR** (`docs/DECISIONS/<NNNN>-<slug>.md`):
+   - If `docs/DECISIONS/` does not exist, create it AND write a
+     `README.md` index with a one-line table (Number / Date / Title /
+     Status / Initiative).
+   - NNNN = `ls docs/DECISIONS/ | grep -E '^[0-9]{4}' | sort | tail -1
+     | cut -c1-4` + 1, zero-padded to 4. Starts at `0001` for the first
+     ADR ever.
+   - slug = kebab-case of the divergence title (≤6 words).
+   - Copy `automation/templates/adr.md` into place, fill every
+     `{{placeholder}}`. Source the Context / Decision / Consequences
+     fields from HANDOFF.md Section 3 verbatim where possible.
+   - After creating, **append** a row to `docs/DECISIONS/README.md`'s
+     index table.
+
+3. Record EVERY B-tier creation in REVIEW.md `## Auto-applied edits`:
+   ```
+   - Tier B | <new file path> | <one-line summary> | trigger: <which Tier B row>
+   ```
+
+#### Tier C — propose only
+
+For every candidate that does NOT fit Tier A or B (anything requiring a
+rewrite, deletion, reorganization, or subjective "staleness" judgment),
+write a numbered entry in REVIEW.md `## Proposed edits (need human review)`:
+
+```
+1. <file>:<line-or-section> — <what to change> — why: <reason>
+   Suggested diff:
+   ```diff
+   - old line
+   + new line
+   ```
+```
+
+DO NOT apply Tier C edits. The human reviewer applies them after reading
+the review.
 
 ## Phase 2C — Wrap-up steps
 
