@@ -139,7 +139,7 @@ cd python-replica && ruff check .
 
 All three must be green before you commit.
 
-## §5 Exit ritual (MANDATORY — the script verifies all 4 checks below)
+## §5 Exit ritual (MANDATORY — the script verifies all 5 checks below)
 
 After your milestone work passes the exit gate in §2, before stopping,
 perform these steps **in order**:
@@ -225,9 +225,16 @@ verifies:
 
 1. The commit subject contains `[{{COMMIT_PREFIX}}/{{MILESTONE_ID}}]`.
 2. `initiatives/current/HANDOFF.md` was modified in your commit.
-3. `initiatives/current/PROGRESS.md` contains a `{{MILESTONE_ID}}` entry.
+3. `initiatives/current/PROGRESS.md` contains a heading matching the
+   regex `^## {{MILESTONE_ID}} — done YYYY-MM-DD` (anchored — a stray
+   `{{MILESTONE_ID}}` substring in a notes line does NOT satisfy this).
 4. `pytest --tb=no -q` is still green.
+5. `initiatives/current/HANDOFF.md` contains the required 5-section
+   structure (verbatim headers: `## 1. Current initiative`, `## 2.
+   Completed milestones`, `## 3. Current repo state`, `## 4. Important
+   constraints`, `## 5. Next milestone guidance`). A free-form HANDOFF
+   fails this check even if the file was modified.
 
-Any of those four failing halts the loop. The final review session will
+Any of those five failing halts the loop. The final review session will
 also audit whether you stayed in scope and whether your HANDOFF accurately
 describes your diff.

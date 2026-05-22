@@ -144,14 +144,25 @@ for each milestone M{N} in milestones (in declaration order):
            --allowedTools "<whitelist>" --disallowedTools "<denylist>" \
            < $prompt 2>&1 | tee $log_file
 
-    # 4-check exit gate (ALL must pass or the loop halts):
+    # 5-check exit gate (ALL must pass or the loop halts):
     1. git log -1 subject matches [<commit_prefix>/M{N}]
     2. initiatives/current/HANDOFF.md was modified in that commit
        (proves exit ritual step 4 ran)
-    3. initiatives/current/PROGRESS.md contains "M{N}"
-       (proves exit ritual step 3 ran)
+    3. initiatives/current/PROGRESS.md contains a milestone heading
+       matching the regex: ^## M{N} — done YYYY-MM-DD
+       (proves exit ritual step 3 ran; anchored regex so M1 does not
+       match M10/M11 and a stray "M1" string in notes does not pass)
     4. pytest --tb=no -q is green (trust-but-verify; skippable with
        --skip-quality)
+    5. initiatives/current/HANDOFF.md contains the required 5-section
+       structure (verbatim header match for all 5):
+         ## 1. Current initiative
+         ## 2. Completed milestones
+         ## 3. Current repo state
+         ## 4. Important constraints
+         ## 5. Next milestone guidance
+       (proves the agent used the structured handoff_milestone.md
+       template rather than a free-form HANDOFF)
 ```
 
 Each milestone prompt (written in Phase 1) ends with a §5 Exit Ritual
@@ -169,7 +180,7 @@ that REQUIRES the agent to:
 5. (last milestone only) Mark `initiatives/current/PLAN.md` STATUS as
    `complete`.
 
-If a milestone agent fails any of the 4 exit-gate checks above, the
+If a milestone agent fails any of the 5 exit-gate checks above, the
 loop halts and subsequent milestones do NOT run. The failure message
 names which check failed so you can fix and resume with
 `./automation/scripts/run_next.sh M{N}`.
