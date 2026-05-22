@@ -292,6 +292,13 @@ Final pytest: <count>. mypy + ruff clean.
 "
 ```
 
+Do NOT try to stage `logs/review.log` here. The outer shell script writes
+your live stdout to ignored scratch path
+`automation/logs/{{ARCHIVE_SLUG}}-review.log` while this process is still
+running. After you exit, the shell script copies the finalized log into
+`initiatives/_archive/{{ARCHIVE_SLUG}}/logs/review.log` and amends the
+wrap commit when the log produced a staged diff.
+
 **Verify the working tree is clean after the commit.** If anything
 remains unstaged or untracked, a Tier A/B edit slipped through — the
 loop's wrap-gate Check 6 will halt:

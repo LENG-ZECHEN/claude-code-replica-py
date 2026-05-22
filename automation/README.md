@@ -122,6 +122,8 @@ milestone.
 ### While the loop runs
 
 - **Live view from another terminal**: `tail -f initiatives/current/logs/M*.log`
+- **Review live log**: during wrap-up, `tail -f automation/logs/<archive-slug>-review.log`
+  (the script copies the finalized log into the archive and amends the wrap commit).
 - **Abort**: Ctrl-C in the terminal running the script. Prior commits are intact.
   Resume with `./automation/scripts/run_all_milestones.sh M{N} M{N+1} ...`
   for a narrow debug pass, or rerun `./automation/scripts/run_all_milestones.sh`
@@ -136,7 +138,7 @@ The quick reference here covers script-level issues only:
 |---|---|---|
 | Script halts: `config not found` | Phase 1 not run yet | Run Phase 1 first (see RUNBOOK) |
 | Script halts: `M{N} failed exit-gate check N` | Milestone agent skipped a ritual step | Read which check name failed; inspect `initiatives/current/logs/M{N}.log` |
-| Script halts: `review wrap-gate check N failed` | Review session missed part of archive / clean-tree ritual | Inspect `initiatives/current/logs/review.log` or `initiatives/_archive/<slug>/logs/review.log` |
+| Script halts: `review wrap-gate check N failed` | Review session missed part of archive / clean-tree ritual | Inspect `automation/logs/<archive-slug>-review.log` and any archived `initiatives/_archive/<slug>/logs/review.log` |
 | `working tree dirty` pre-flight | Uncommitted changes | `git stash` or `git commit` before retry |
 | Tool calls prompt for permission | You ran `claude` directly instead of the script | Use the script — it passes `--allowedTools` as CLI flags |
 

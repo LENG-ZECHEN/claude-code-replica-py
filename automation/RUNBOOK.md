@@ -312,10 +312,19 @@ wrap gate**:
 6. `git status --short` is empty, proving Tier A/B edits were staged
    into the wrap commit rather than left behind
 
+The review session's live stdout is written to ignored scratch path
+`automation/logs/<archive_slug>-review.log`, not to
+`initiatives/current/logs/review.log`. After the 6-check wrap gate passes,
+the shell script copies that finalized scratch log to
+`initiatives/_archive/<archive_slug>/logs/review.log`, stages that one
+file, and amends the `[<commit_prefix>/wrap]` commit when the log produced
+a staged diff. It then verifies the latest commit still has the wrap
+subject and that `git status --short` is empty.
+
 ### Phase 2 report
 
-The script tails the archived final review session log's last 60 lines
-when that log exists, then exits with status 0 on success. The user reads
+The script tails the archived final review session log's last 60 lines,
+then exits with status 0 on success. The user reads
 `initiatives/_archive/<slug>/REVIEW.md`
 to see what passed, what scored low, **which Tier A/B doc edits were
 auto-applied**, and which Tier C edits still need human review.

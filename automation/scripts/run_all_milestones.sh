@@ -38,6 +38,7 @@ CURRENT_DIR="$REPLICA_DIR/initiatives/current"
 CONFIG="$CURRENT_DIR/config.yaml"
 PROMPTS_DIR="$CURRENT_DIR/prompts"
 LOGS_DIR="$CURRENT_DIR/logs"
+SCRATCH_LOGS_DIR="$REPLICA_DIR/automation/logs"
 REVIEW_TEMPLATE="$REPLICA_DIR/automation/templates/review.md"
 
 CLAUDE_MODEL="claude-opus-4-7"
@@ -346,7 +347,13 @@ printf '\n================================================================\n'
 printf '=== Phase 2B + 2C: review + wrap-up at %s ===\n' "$(date)"
 printf '================================================================\n'
 
-REVIEW_LOG="$LOGS_DIR/review.log"
+mkdir -p "$SCRATCH_LOGS_DIR"
+
+# Keep the live review stdout outside initiatives/current. The review agent
+# moves current/ into _archive/ and commits while claude --print is still
+# streaming; writing the live tee directly into the archive would dirty the
+# just-created wrap commit after it lands.
+REVIEW_LOG="$SCRATCH_LOGS_DIR/${ARCHIVE_SLUG}-review.log"
 REVIEW_PROMPT="$LOGS_DIR/review_prompt.md"
 
 # Substitute initiative-specific tokens into the review template.
@@ -395,13 +402,34 @@ if [ -n "$(git -C "$REPLICA_DIR" status --short)" ]; then
   die "review wrap-gate check 6 failed: working tree dirty after wrap commit (Tier A/B edits may not have been staged)"
 fi
 
+ARCHIVED_REVIEW_LOG="$REPLICA_DIR/initiatives/_archive/$ARCHIVE_SLUG/logs/review.log"
+if [ ! -f "$REVIEW_LOG" ]; then
+  die "review log archival failed: scratch review log missing at $REVIEW_LOG"
+fi
+
+mkdir -p "$(dirname "$ARCHIVED_REVIEW_LOG")"
+cp "$REVIEW_LOG" "$ARCHIVED_REVIEW_LOG"
+git -C "$REPLICA_DIR" add "initiatives/_archive/$ARCHIVE_SLUG/logs/review.log"
+if ! git -C "$REPLICA_DIR" diff --cached --quiet -- "initiatives/_archive/$ARCHIVE_SLUG/logs/review.log"; then
+  git -C "$REPLICA_DIR" commit --amend --no-edit
+fi
+
+if ! git -C "$REPLICA_DIR" log --oneline -1 | grep -qF "[${COMMIT_PREFIX}/wrap]"; then
+  git -C "$REPLICA_DIR" log --oneline -5
+  die "review log archival failed: amended commit no longer has '[${COMMIT_PREFIX}/wrap]' subject"
+fi
+
+if [ -n "$(git -C "$REPLICA_DIR" status --short)" ]; then
+  git -C "$REPLICA_DIR" status --short
+  die "review log archival failed: working tree dirty after adding archived review.log"
+fi
+
 printf '\n================================================================\n'
 printf '=== Initiative %s complete at %s ===\n' "$INITIATIVE_SLUG" "$(date)"
 printf '================================================================\n'
 git -C "$REPLICA_DIR" log --oneline -10
 printf '\nREVIEW.md : initiatives/_archive/%s/REVIEW.md\n' "$ARCHIVE_SLUG"
 
-ARCHIVED_REVIEW_LOG="$REPLICA_DIR/initiatives/_archive/$ARCHIVE_SLUG/logs/review.log"
 if [ -f "$ARCHIVED_REVIEW_LOG" ]; then
   printf '\n=== Review log tail (last 60 lines) ===\n'
   tail -60 "$ARCHIVED_REVIEW_LOG"
