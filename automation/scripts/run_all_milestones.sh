@@ -45,6 +45,33 @@ REVIEW_TEMPLATE="$REPLICA_DIR/automation/templates/review.md"
 CLAUDE_MODEL="claude-opus-4-7"
 
 # ---------------------------------------------------------------------------
+# Notification config (ntfy.sh)
+# ---------------------------------------------------------------------------
+# Push notifications are ON by default (topic 'lengzechen' is hard-coded
+# below). Override or silence per-run via the NTFY_TOPIC env var:
+#   ./run_all_milestones.sh                          -> push to 'lengzechen'
+#   NTFY_TOPIC= ./run_all_milestones.sh              -> silence this run
+#   NTFY_TOPIC=other ./run_all_milestones.sh         -> push to 'other'
+# The `-` (no colon) in ${NTFY_TOPIC-lengzechen} is deliberate: it lets an
+# explicitly-empty env var (NTFY_TOPIC=) silence the run, while an unset
+# var falls back to the default. NTFY_URL can be overridden if you
+# self-host ntfy.
+#
+# Privacy note: ntfy.sh topics are public read+write. Anyone who guesses
+# 'lengzechen' can subscribe to (read) AND publish (spam) this topic.
+# If this repo becomes public or you start using the topic for sensitive
+# content, switch to a harder-to-guess name (e.g., 'lzc-agent-<random>').
+NTFY_URL="${NTFY_URL:-https://ntfy.sh}"
+NTFY_TOPIC="${NTFY_TOPIC-lengzechen}"
+
+# Mutable run context referenced by failure notifications so die() can show
+# which stage / log / milestone was in flight when the failure happened.
+RUN_STARTED_AT="$(date +%s)"
+CURRENT_STAGE="pre-flight"
+CURRENT_LOG=""
+MILESTONE_STARTED_AT=""
+
+# ---------------------------------------------------------------------------
 # Permission whitelist (passed as CLI flags; settings.json is ignored
 # by `claude --print`).
 # ---------------------------------------------------------------------------
@@ -72,8 +99,115 @@ show_help() {
   sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
 }
 
+# ---------------------------------------------------------------------------
+# Notification helpers (used by die() and the 5 per-stage notify points).
+# All helpers are total: they never fail under `set -euo pipefail`.
+# ---------------------------------------------------------------------------
+
+# Format an elapsed-seconds delta as Hh Mm Ss / Mm Ss / Ss.
+duration_since() {
+  local start="$1"
+  local now elapsed
+  now="$(date +%s)"
+  elapsed=$((now - start))
+
+  if [ "$elapsed" -ge 3600 ]; then
+    printf '%dh %dm %ds' "$((elapsed / 3600))" "$(((elapsed % 3600) / 60))" "$((elapsed % 60))"
+  elif [ "$elapsed" -ge 60 ]; then
+    printf '%dm %ds' "$((elapsed / 60))" "$((elapsed % 60))"
+  else
+    printf '%ds' "$elapsed"
+  fi
+}
+
+git_head_summary() {
+  git -C "${REPLICA_DIR:-.}" log --oneline -1 2>/dev/null || printf 'unknown'
+}
+
+git_branch_name() {
+  git -C "${REPLICA_DIR:-.}" branch --show-current 2>/dev/null || printf 'unknown'
+}
+
+git_dirty_summary() {
+  local dirty
+  dirty="$(git -C "${REPLICA_DIR:-.}" status --short 2>/dev/null | head -20 || true)"
+  if [ -n "$dirty" ]; then
+    printf '%s' "$dirty"
+  else
+    printf 'clean'
+  fi
+}
+
+log_tail_summary() {
+  local log_path="${1:-}"
+  local lines="${2:-20}"
+
+  if [ -n "$log_path" ] && [ -f "$log_path" ]; then
+    tail -"$lines" "$log_path" 2>/dev/null || true
+  else
+    printf 'no log file yet'
+  fi
+}
+
+# Send a notification via ntfy.sh.
+# Silent no-op if NTFY_TOPIC is empty or curl is missing. curl failures
+# (timeout, DNS, ntfy outage) are also swallowed so push problems never
+# break the automation. --max-time 5 prevents push outages from hanging
+# the loop.
+notify() {
+  local title="$1"
+  local text="$2"
+  local tags="${3:-robot}"
+  local priority="${4:-default}"
+
+  [ -n "${NTFY_TOPIC:-}" ] || return 0
+  command -v curl >/dev/null 2>&1 || return 0
+
+  curl -sS --max-time 5 \
+    -H "Title: ${title}" \
+    -H "Tags: ${tags}" \
+    -H "Priority: ${priority}" \
+    -H "Markdown: yes" \
+    --data-binary "$text" \
+    "${NTFY_URL}/${NTFY_TOPIC}" \
+    >/dev/null 2>&1 || true
+}
+
+# Run-context block reused as the prefix of every notification body.
+notify_run_context() {
+  cat <<EOF
+Project: $(basename "${REPLICA_DIR:-unknown}")
+Initiative: ${INITIATIVE_SLUG:-unknown}
+Prefix: ${COMMIT_PREFIX:-unknown}
+Model: ${CLAUDE_MODEL:-unknown}
+Branch: $(git_branch_name)
+HEAD: $(git_head_summary)
+Elapsed: $(duration_since "$RUN_STARTED_AT")
+EOF
+}
+
 die() {
-  echo "ERROR: $*" >&2
+  local msg="$*"
+  echo "ERROR: $msg" >&2
+
+  notify "❌ Claude automation failed" \
+"$(notify_run_context)
+
+Stage: ${CURRENT_STAGE:-unknown}
+Milestone: ${M:-none}
+Error: ${msg}
+
+Git status:
+$(git_dirty_summary)
+
+Log: ${CURRENT_LOG:-none}
+
+Last log lines:
+$(log_tail_summary "${CURRENT_LOG:-}" 25)
+
+Time: $(date)" \
+    "x,rotating_light" "high"
+
   exit 1
 }
 
@@ -331,6 +465,16 @@ fi
 
 mkdir -p "$LOGS_DIR"
 
+# Notify: pre-flight passed, milestone loop is about to start.
+notify "🚀 Initiative started" \
+"$(notify_run_context)
+
+Milestones queued: ${#MILESTONES[@]}
+  ${MILESTONES[*]}
+
+Started: $(date)" \
+  "rocket" "low"
+
 # ---------------------------------------------------------------------------
 # Execute milestones (Phase 2A)
 # ---------------------------------------------------------------------------
@@ -358,6 +502,24 @@ for M in "${MILESTONES[@]}"; do
   printf 'Prompt     : %s\n' "$PROMPT"
   printf 'Log        : %s\n' "$LOG"
   printf 'Live view  : tail -f %s\n\n' "$LOG"
+
+  MILESTONE_STARTED_AT="$(date +%s)"
+  CURRENT_STAGE="milestone ${M}: running claude"
+  CURRENT_LOG="$LOG"
+
+  notify "🚀 Started ${M}" \
+"$(notify_run_context)
+
+Milestone: ${M}
+Queue: ${MILESTONES[*]}
+Prompt: ${PROMPT}
+Log: ${LOG}
+
+Git status before run:
+$(git_dirty_summary)
+
+Started: $(date)" \
+    "rocket" "default"
 
   if ! claude --print --model "$CLAUDE_MODEL" \
        --allowedTools "$ALLOWED_TOOLS" \
@@ -405,6 +567,28 @@ for M in "${MILESTONES[@]}"; do
   check_prior_milestones_preserved "$M"
 
   printf '\n=== %s done at %s ===\n' "$M" "$(date)"
+
+  CURRENT_STAGE="milestone ${M}: completed"
+
+  LAST_COMMIT="$(git -C "$REPLICA_DIR" log --oneline -1 2>/dev/null || true)"
+  CHANGED_FILES="$(git -C "$REPLICA_DIR" show --name-only --pretty=format: HEAD 2>/dev/null | sed '/^$/d' | head -30 || true)"
+
+  notify "✅ Completed ${M}" \
+"$(notify_run_context)
+
+Milestone: ${M}
+Milestone elapsed: $(duration_since "$MILESTONE_STARTED_AT")
+Commit: ${LAST_COMMIT}
+Log: ${LOG}
+
+Changed files:
+${CHANGED_FILES:-none}
+
+Last log lines:
+$(log_tail_summary "$LOG" 12)
+
+Completed: $(date)" \
+    "white_check_mark,git" "default"
 done
 
 # ---------------------------------------------------------------------------
@@ -448,6 +632,19 @@ sed \
 
 printf 'Review prompt : %s\n' "$REVIEW_PROMPT"
 printf 'Review log    : %s\n\n' "$REVIEW_LOG"
+
+CURRENT_STAGE="review: running claude"
+CURRENT_LOG="$REVIEW_LOG"
+
+notify "🔍 Started final review" \
+"$(notify_run_context)
+
+Review prompt: ${REVIEW_PROMPT}
+Review log: ${REVIEW_LOG}
+Archive target: initiatives/_archive/${ARCHIVE_SLUG}
+
+Started: $(date)" \
+  "mag" "default"
 
 if ! claude --print --model "$CLAUDE_MODEL" \
      --allowedTools "$ALLOWED_TOOLS" \
@@ -510,6 +707,30 @@ fi
 printf '\n================================================================\n'
 printf '=== Initiative %s complete at %s ===\n' "$INITIATIVE_SLUG" "$(date)"
 printf '================================================================\n'
+
+CURRENT_STAGE="initiative complete"
+
+FINAL_COMMIT="$(git -C "$REPLICA_DIR" log --oneline -1 2>/dev/null || true)"
+RECENT_COMMITS="$(git -C "$REPLICA_DIR" log --oneline -8 2>/dev/null || true)"
+
+notify "🎉 Initiative complete: ${INITIATIVE_SLUG}" \
+"$(notify_run_context)
+
+Total elapsed: $(duration_since "$RUN_STARTED_AT")
+Final commit: ${FINAL_COMMIT}
+Archive: initiatives/_archive/${ARCHIVE_SLUG}
+Review: initiatives/_archive/${ARCHIVE_SLUG}/REVIEW.md
+Review log: initiatives/_archive/${ARCHIVE_SLUG}/logs/review.log
+
+Recent commits:
+${RECENT_COMMITS}
+
+Last review log lines:
+$(log_tail_summary "$REVIEW_LOG" 20)
+
+Completed: $(date)" \
+  "tada,package" "high"
+
 git -C "$REPLICA_DIR" log --oneline -10
 printf '\nREVIEW.md : initiatives/_archive/%s/REVIEW.md\n' "$ARCHIVE_SLUG"
 
