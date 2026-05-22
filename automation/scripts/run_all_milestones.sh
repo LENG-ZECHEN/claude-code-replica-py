@@ -18,8 +18,8 @@
 # permission). See automation/README.md for the full explanation.
 #
 # Usage:
-#   ./automation/scripts/run_all_milestones.sh          # run every milestone in config
-#   ./automation/scripts/run_all_milestones.sh M3 M4    # run a subset (debug)
+#   ./automation/scripts/run_all_milestones.sh          # run every milestone in config (skips completed ones)
+#   ./automation/scripts/run_all_milestones.sh M3 M4    # run a subset (debug; skips completed ones)
 #   ./automation/scripts/run_all_milestones.sh --dry-run
 #   ./automation/scripts/run_all_milestones.sh --skip-review
 #   ./automation/scripts/run_all_milestones.sh --help
@@ -97,6 +97,77 @@ list_milestones_from_prompts() {
 # Matches keys shaped like "  M{digits}:" under the milestones: block.
 list_milestones_from_config() {
   awk '/^  M[0-9]+:/ { sub(/^  /, ""); sub(/:.*$/, ""); print }' "$CONFIG"
+}
+
+find_milestone_commit() {
+  local m="$1"
+  git -C "$REPLICA_DIR" log --format='%H%x09%s' \
+    | awk -F '\t' -v marker="[${COMMIT_PREFIX}/${m}]" '
+        index($2, marker) { print $1; exit }
+      '
+}
+
+check_handoff_structure() {
+  local handoff_path="$REPLICA_DIR/initiatives/current/HANDOFF.md"
+  local section
+
+  for section in "## 1. Current initiative" \
+                 "## 2. Completed milestones" \
+                 "## 3. Current repo state" \
+                 "## 4. Important constraints" \
+                 "## 5. Next milestone guidance"; do
+    if ! grep -qF "$section" "$handoff_path"; then
+      die "$1 failed exit-gate check 5: HANDOFF.md is missing section header '$section' (agent did not use automation/templates/handoff_milestone.md)"
+    fi
+  done
+}
+
+check_pytest_green() {
+  local m="$1"
+
+  if [ "$SKIP_QUALITY" -eq 0 ]; then
+    if ! PYTEST_OUT="$(cd "$REPLICA_DIR" && pytest --tb=no -q 2>&1)"; then
+      echo "---- pytest output (last 20 lines) ----" >&2
+      echo "$PYTEST_OUT" | tail -20 >&2
+      echo "---- end pytest output ----" >&2
+      die "$m failed exit-gate check 4: pytest is now red (rerun: cd python-replica && pytest)"
+    fi
+  fi
+}
+
+check_progress_block() {
+  local m="$1"
+
+  if ! grep -qE "^## ${m} — done [0-9]{4}-[0-9]{2}-[0-9]{2}" \
+       "$REPLICA_DIR/initiatives/current/PROGRESS.md" 2>/dev/null; then
+    die "$m failed exit-gate check 3: no '## $m — done YYYY-MM-DD' block found in initiatives/current/PROGRESS.md (exit ritual step 3 skipped or format wrong)"
+  fi
+}
+
+check_handoff_touched_in_commit() {
+  local m="$1"
+  local commit="$2"
+
+  if ! git -C "$REPLICA_DIR" log -1 --name-only --pretty=format: "$commit" \
+       | grep -qx "initiatives/current/HANDOFF.md"; then
+    die "$m failed exit-gate check 2: initiatives/current/HANDOFF.md was not modified in commit $commit (exit ritual step 4 skipped)"
+  fi
+}
+
+milestone_already_complete() {
+  local m="$1"
+  local commit
+
+  commit="$(find_milestone_commit "$m")"
+  [ -n "$commit" ] || return 1
+
+  check_handoff_touched_in_commit "$m" "$commit"
+  check_progress_block "$m"
+  check_pytest_green "$m"
+  check_handoff_structure "$m"
+
+  printf '=== %s already complete at %s; skipping ===\n' "$m" "${commit:0:7}"
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -193,6 +264,10 @@ for M in "${MILESTONES[@]}"; do
   PROMPT="$PROMPTS_DIR/$M.md"
   [ -f "$PROMPT" ] || die "prompt missing for $M: $PROMPT"
 
+  if [ "$DRY_RUN" -eq 0 ] && milestone_already_complete "$M"; then
+    continue
+  fi
+
   printf '\n================================================================\n'
   printf '=== Starting %s at %s ===\n' "$M" "$(date)"
   printf '================================================================\n'
@@ -228,45 +303,23 @@ for M in "${MILESTONES[@]}"; do
   fi
 
   # Check 2: HANDOFF.md was modified in that commit (exit ritual step 4)
-  if ! git -C "$REPLICA_DIR" log -1 --name-only --pretty=format: \
-       | grep -qx "initiatives/current/HANDOFF.md"; then
-    die "$M failed exit-gate check 2: initiatives/current/HANDOFF.md was not modified in the commit (exit ritual step 4 skipped)"
-  fi
+  check_handoff_touched_in_commit "$M" "HEAD"
 
   # Check 3: PROGRESS.md contains a '## M{N} — done YYYY-MM-DD' block
   # (exit ritual step 3). Use anchored regex so e.g. M1 does NOT match
   # M10 / M11 / etc., and so a bare "M1" appearing in a notes line does
   # not satisfy the gate.
-  if ! grep -qE "^## ${M} — done [0-9]{4}-[0-9]{2}-[0-9]{2}" \
-       "$REPLICA_DIR/initiatives/current/PROGRESS.md" 2>/dev/null; then
-    die "$M failed exit-gate check 3: no '## $M — done YYYY-MM-DD' block found in initiatives/current/PROGRESS.md (exit ritual step 3 skipped or format wrong)"
-  fi
+  check_progress_block "$M"
 
   # Check 4: pytest still green (unless --skip-quality). The agent already
   # runs pytest before commit per §4, but we trust-but-verify here so a
   # skipped or flaky agent run does not propagate to the next milestone.
-  if [ "$SKIP_QUALITY" -eq 0 ]; then
-    if ! PYTEST_OUT="$(cd "$REPLICA_DIR" && pytest --tb=no -q 2>&1)"; then
-      echo "---- pytest output (last 20 lines) ----" >&2
-      echo "$PYTEST_OUT" | tail -20 >&2
-      echo "---- end pytest output ----" >&2
-      die "$M failed exit-gate check 4: pytest is now red (rerun: cd python-replica && pytest)"
-    fi
-  fi
+  check_pytest_green "$M"
 
   # Check 5: HANDOFF.md has the 5-section structure (proves the agent
   # used automation/templates/handoff_milestone.md, not a free-form
   # HANDOFF). Each section header must be present verbatim.
-  HANDOFF_PATH="$REPLICA_DIR/initiatives/current/HANDOFF.md"
-  for section in "## 1. Current initiative" \
-                 "## 2. Completed milestones" \
-                 "## 3. Current repo state" \
-                 "## 4. Important constraints" \
-                 "## 5. Next milestone guidance"; do
-    if ! grep -qF "$section" "$HANDOFF_PATH"; then
-      die "$M failed exit-gate check 5: HANDOFF.md is missing section header '$section' (agent did not use automation/templates/handoff_milestone.md)"
-    fi
-  done
+  check_handoff_structure "$M"
 
   printf '\n=== %s done at %s ===\n' "$M" "$(date)"
 done
@@ -313,15 +366,33 @@ if ! claude --print --model "$CLAUDE_MODEL" \
   die "review session exited non-zero (see $REVIEW_LOG)"
 fi
 
-# Exit gate for the review session: it must have committed
-# [<prefix>/wrap] AND moved current/ into _archive/<archive_slug>/.
+# Exit gate for the review session. ALL checks must pass.
 if ! git -C "$REPLICA_DIR" log --oneline -1 | grep -qF "[${COMMIT_PREFIX}/wrap]"; then
   git -C "$REPLICA_DIR" log --oneline -5
-  die "review session did not produce a '[${COMMIT_PREFIX}/wrap]' commit"
+  die "review wrap-gate check 1 failed: no '[${COMMIT_PREFIX}/wrap]' commit at HEAD"
 fi
 
 if [ ! -d "$REPLICA_DIR/initiatives/_archive/$ARCHIVE_SLUG" ]; then
-  die "review session did not archive initiative to initiatives/_archive/$ARCHIVE_SLUG"
+  die "review wrap-gate check 2 failed: archive dir missing at initiatives/_archive/$ARCHIVE_SLUG"
+fi
+
+if [ ! -f "$REPLICA_DIR/initiatives/_archive/$ARCHIVE_SLUG/REVIEW.md" ]; then
+  die "review wrap-gate check 3 failed: REVIEW.md missing from initiatives/_archive/$ARCHIVE_SLUG"
+fi
+
+if [ ! -f "$CURRENT_DIR/.gitkeep" ]; then
+  die "review wrap-gate check 4 failed: initiatives/current/.gitkeep was not recreated"
+fi
+
+CURRENT_CONTENTS=$(find "$CURRENT_DIR" -mindepth 1 -maxdepth 1 ! -name .gitkeep -print)
+if [ -n "$CURRENT_CONTENTS" ]; then
+  printf '%s\n' "$CURRENT_CONTENTS" >&2
+  die "review wrap-gate check 5 failed: initiatives/current contains files other than .gitkeep"
+fi
+
+if [ -n "$(git -C "$REPLICA_DIR" status --short)" ]; then
+  git -C "$REPLICA_DIR" status --short
+  die "review wrap-gate check 6 failed: working tree dirty after wrap commit (Tier A/B edits may not have been staged)"
 fi
 
 printf '\n================================================================\n'
@@ -329,3 +400,9 @@ printf '=== Initiative %s complete at %s ===\n' "$INITIATIVE_SLUG" "$(date)"
 printf '================================================================\n'
 git -C "$REPLICA_DIR" log --oneline -10
 printf '\nREVIEW.md : initiatives/_archive/%s/REVIEW.md\n' "$ARCHIVE_SLUG"
+
+ARCHIVED_REVIEW_LOG="$REPLICA_DIR/initiatives/_archive/$ARCHIVE_SLUG/logs/review.log"
+if [ -f "$ARCHIVED_REVIEW_LOG" ]; then
+  printf '\n=== Review log tail (last 60 lines) ===\n'
+  tail -60 "$ARCHIVED_REVIEW_LOG"
+fi

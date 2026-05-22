@@ -62,11 +62,14 @@ do **not** blanket-allow.
 
 ```bash
 cd /Users/leng/my-cc-py/python-replica
+command -v claude
+claude --version
 ./automation/scripts/run_all_milestones.sh --help
 ```
 
-Should print the script's usage block. If you see `claude CLI not on
-PATH` instead, install / PATH-fix Claude Code first.
+The first two commands verify Claude Code is installed and visible on
+PATH. The final command prints the script's usage block without launching
+pre-flight or any milestone sessions.
 
 ## Running
 
@@ -94,8 +97,8 @@ git commit -m "[<commit_prefix>/bootstrap] ..."
 ### Script flags — `run_all_milestones.sh`
 
 ```
-./automation/scripts/run_all_milestones.sh                  run every milestone in config
-./automation/scripts/run_all_milestones.sh M3 M4            run a subset (skips review)
+./automation/scripts/run_all_milestones.sh                  run every milestone in config, skipping completed ones
+./automation/scripts/run_all_milestones.sh M3 M4            run a subset, skipping completed ones (skips review)
 ./automation/scripts/run_all_milestones.sh --dry-run        print prompts only
 ./automation/scripts/run_all_milestones.sh --skip-review    run milestones, skip wrap-up session
 ./automation/scripts/run_all_milestones.sh --skip-quality   skip the pytest exit-gate check (faster, less safe)
@@ -112,14 +115,17 @@ git commit -m "[<commit_prefix>/bootstrap] ..."
 
 `run_next.sh` is for when the main loop halts and you need to retry one
 milestone. It does **NOT** enforce the 5-check exit gate — re-run the
-full loop afterward to continue.
+full loop afterward. The full loop re-checks already-completed milestones,
+skips the ones that still pass, and continues at the next incomplete
+milestone.
 
 ### While the loop runs
 
 - **Live view from another terminal**: `tail -f initiatives/current/logs/M*.log`
 - **Abort**: Ctrl-C in the terminal running the script. Prior commits are intact.
   Resume with `./automation/scripts/run_all_milestones.sh M{N} M{N+1} ...`
-  (subset mode skips review; rerun full once all milestones present to trigger review).
+  for a narrow debug pass, or rerun `./automation/scripts/run_all_milestones.sh`
+  with no milestone filter to skip completed milestones and trigger review.
 
 ## Failure modes
 
@@ -130,7 +136,7 @@ The quick reference here covers script-level issues only:
 |---|---|---|
 | Script halts: `config not found` | Phase 1 not run yet | Run Phase 1 first (see RUNBOOK) |
 | Script halts: `M{N} failed exit-gate check N` | Milestone agent skipped a ritual step | Read which check name failed; inspect `initiatives/current/logs/M{N}.log` |
-| Script halts: `review session did not produce a '[<prefix>/wrap]' commit` | Review session failed mid-way | Inspect `initiatives/current/logs/review.log` |
+| Script halts: `review wrap-gate check N failed` | Review session missed part of archive / clean-tree ritual | Inspect `initiatives/current/logs/review.log` or `initiatives/_archive/<slug>/logs/review.log` |
 | `working tree dirty` pre-flight | Uncommitted changes | `git stash` or `git commit` before retry |
 | Tool calls prompt for permission | You ran `claude` directly instead of the script | Use the script — it passes `--allowedTools` as CLI flags |
 

@@ -274,14 +274,36 @@ table. Fill final commit, period, milestone count.
 
 ### Step 10: Commit
 
+Stage **every path** Phase 2C wrap + Step 6 Tier A/B might have
+touched (explicit paths — project convention: no `git add -A`):
+
 ```
 cd python-replica
-git add initiatives/ NOW.md
+
+git add initiatives/                  # archived initiative + new current/.gitkeep + index
+git add NOW.md                        # rewritten by Step 8
+git add CLAUDE.md README.md           # Tier A may have appended (no-op if untouched)
+git add docs/                         # Tier B may have created subsystem docs / ADRs / DECISIONS dir
+
 git commit -m "[{{COMMIT_PREFIX}}/wrap] post-execution review + archive
 
 REVIEW: initiatives/_archive/{{ARCHIVE_SLUG}}/REVIEW.md
 Final pytest: <count>. mypy + ruff clean.
 "
+```
+
+**Verify the working tree is clean after the commit.** If anything
+remains unstaged or untracked, a Tier A/B edit slipped through — the
+loop's wrap-gate Check 6 will halt:
+
+```
+if [ -n "$(git status --short)" ]; then
+  echo "ERROR: working tree dirty after wrap commit:"
+  git status --short
+  echo "Some Tier A/B edits were not staged. Add them and amend, or"
+  echo "investigate which Step 6 action produced unstaged changes."
+  exit 1
+fi
 ```
 
 ### Step 11: Report

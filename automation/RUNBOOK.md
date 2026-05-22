@@ -141,11 +141,16 @@ read initiatives/current/config.yaml
 for each milestone M{N} in milestones (in declaration order):
     log_file = initiatives/current/logs/M{N}.log
     prompt   = initiatives/current/prompts/M{N}.md
+    if an existing [<commit_prefix>/M{N}] commit already passes the
+       resumability checks (HANDOFF touched in that commit, PROGRESS
+       block present, pytest green, HANDOFF has the 5-section structure):
+        skip M{N} and continue
+
     claude --print --model claude-opus-4-7 \
            --allowedTools "<whitelist>" --disallowedTools "<denylist>" \
            < $prompt 2>&1 | tee $log_file
 
-    # 5-check exit gate (ALL must pass or the loop halts):
+    # 5-check exit gate for freshly run milestones (ALL must pass):
     1. git log -1 subject matches [<commit_prefix>/M{N}]
     2. initiatives/current/HANDOFF.md was modified in that commit
        (proves exit ritual step 4 ran)
@@ -184,7 +189,10 @@ that REQUIRES the agent to:
 If a milestone agent fails any of the 5 exit-gate checks above, the
 loop halts and subsequent milestones do NOT run. The failure message
 names which check failed so you can fix and resume with
-`./automation/scripts/run_next.sh M{N}`.
+`./automation/scripts/run_next.sh M{N} --run`, then rerun
+`./automation/scripts/run_all_milestones.sh`. The full loop skips
+already-completed milestones that still pass the resumability checks and
+continues at the next incomplete milestone.
 
 ### HANDOFF vs PROGRESS — responsibility split
 
@@ -291,12 +299,24 @@ REVIEW.md `## Proposed edits (need human review)` as a numbered list.
 | 8 | `mkdir initiatives/current && touch initiatives/current/.gitkeep` (recreate empty active slot) |
 | 9 | Rewrite `NOW.md` to: no active initiative, most recent archive = this one with final numbers. |
 | 10 | Update `initiatives/README.md`: move the row from Active to Archived; set final commit + period. |
-| 11 | Commit everything (review report + archive move + NOW/README updates) as a single `[<commit_prefix>/wrap] post-execution review + archive` commit. |
+| 11 | Commit everything (review report + archive move + NOW/README updates + any Tier A/B doc edits) as a single `[<commit_prefix>/wrap] post-execution review + archive` commit. |
+
+After the review session exits, the shell script enforces a **6-check
+wrap gate**:
+
+1. latest commit subject contains `[<commit_prefix>/wrap]`
+2. `initiatives/_archive/<archive_slug>/` exists
+3. `initiatives/_archive/<archive_slug>/REVIEW.md` exists
+4. `initiatives/current/.gitkeep` exists
+5. `initiatives/current/` contains no files other than `.gitkeep`
+6. `git status --short` is empty, proving Tier A/B edits were staged
+   into the wrap commit rather than left behind
 
 ### Phase 2 report
 
-The script tails the final review session's last 60 lines and exits with
-status 0 on success. The user reads `initiatives/_archive/<slug>/REVIEW.md`
+The script tails the archived final review session log's last 60 lines
+when that log exists, then exits with status 0 on success. The user reads
+`initiatives/_archive/<slug>/REVIEW.md`
 to see what passed, what scored low, **which Tier A/B doc edits were
 auto-applied**, and which Tier C edits still need human review.
 
