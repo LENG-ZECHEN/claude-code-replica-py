@@ -32,8 +32,9 @@ What the review session may do automatically:
   a new `src/` subdirectory or a substantial new module. The template
   is [`../automation/templates/subsystem_doc.md`](../automation/templates/subsystem_doc.md).
 - **Create** `docs/DECISIONS/<NNNN>-<slug>.md` (ADR) when the initiative's
-  `HANDOFF.md` Section 3 records architectural divergences. The template
-  is [`../automation/templates/adr.md`](../automation/templates/adr.md).
+  `HANDOFF.md` Section 2 (per-milestone "design decisions") records
+  architectural divergences. The template is
+  [`../automation/templates/adr.md`](../automation/templates/adr.md).
 - **Append** a `## Recent changes` bullet to an existing `docs/<slug>.md`
   when a later initiative touches the same subsystem.
 

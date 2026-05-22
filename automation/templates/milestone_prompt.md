@@ -24,7 +24,7 @@ only if) you have honored the exit ritual in §5 below.
 
 ## §1 Baseline (verify before any code change)
 
-<!-- Phase 1 reads these from HANDOFF.md Section 3 at write-time -->
+<!-- Phase 1 reads these from HANDOFF.md Section 3 ("Current repo state" = the baseline) at write-time -->
 - Last commit: `{{BASELINE_COMMIT}}`
 - pytest: {{BASELINE_PYTEST}} passing
 - mypy: {{BASELINE_MYPY}}

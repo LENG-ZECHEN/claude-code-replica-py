@@ -65,7 +65,8 @@ reason for rejection. If none recorded, write "(not recorded)".
 
 This ADR was auto-generated because **{{TRIGGER_REASON}}**. The full
 divergence record is in `initiatives/_archive/{{ARCHIVE_SLUG}}/HANDOFF.md`
-Section 3, items: {{DIVERGENCE_REFS}}.
+Section 2's per-milestone "design decisions (deviations from PLAN)"
+subsections, items: {{DIVERGENCE_REFS}}.
 
 Code reference (changes that this ADR explains):
 ```
