@@ -105,7 +105,7 @@ If any check fails, stop and report. Do not proceed.
 | 5 | **Generate `config.yaml`** from PLAN's YAML front-matter. Include `slug`, `commit_prefix`, `archive_slug`, and the full `milestones` table. | `initiatives/current/config.yaml` |
 | 6 | **Write `HANDOFF.md`** using `automation/templates/handoff_initial.md`. Fill `slug`, baseline commit/pytest/mypy/ruff, first milestone's name. | `initiatives/current/HANDOFF.md` |
 | 7 | **Write `PROGRESS.md`** using `automation/templates/progress_entry.md` as the file header (no milestone entries yet). | `initiatives/current/PROGRESS.md` |
-| 8 | **Write per-milestone prompts.** For every M{N} in PLAN's `milestones` block, write `initiatives/current/prompts/M{N}.md` using `automation/templates/milestone_prompt.md` as a skeleton. Customize every section using PLAN content, INBOX `notes`, and CLAUDE.md execution rules. Each prompt MUST include sections §1 Baseline, §2 Scope, §3 Mandatory reading, §4 Implementation requirements, §5 Exit ritual. | N files |
+| 8 | **Write per-milestone prompts.** For every M{N} in PLAN's `milestones` block, write `initiatives/current/prompts/M{N}.md` using `automation/templates/milestone_prompt.md` as a skeleton. Customize every section using PLAN content, INBOX `notes`, and CLAUDE.md execution rules. Each prompt MUST include sections **§1 Baseline, §2 Scope, §2.5 Out of scope, §3 Mandatory reading, §4 Implementation requirements, §5 Exit ritual** (§2.5 is REQUIRED — the template fails open if missing). | N files |
 | 9 | **Reset `automation/INBOX.md`** to the blank template (`automation/templates/inbox.md`). This is the file you'll edit next time. | reset INBOX |
 | 10 | **Rewrite `NOW.md`** to reflect the new active initiative (slug, milestone count, planned exit, recent archive entries). | rewritten `NOW.md` |
 | 11 | **Append index row** to `initiatives/README.md` Active table. | updated index |
@@ -199,8 +199,8 @@ After the last milestone's exit gate passes, the script spawns ONE more
 |---|---|
 | 1 | Verify every M{N} in config.yaml has a matching commit. |
 | 2 | Run `pytest --tb=no -q`, `mypy src`, `ruff check .` — record final numbers. |
-| 3 | **Review prompts.** Open each `initiatives/current/prompts/M{N}.md` and score on 5 dimensions: clarity, completeness, scope alignment with PLAN, constraint specificity, exit-ritual correctness. Produce a per-prompt scorecard. |
-| 4 | **Review execution.** For each milestone, look at: commit message quality, test count delta, mypy/ruff status delta, number of divergences in HANDOFF Section 3, anomalies in the milestone log. Produce a per-milestone scorecard. |
+| 3 | **Review prompts.** Open each `initiatives/current/prompts/M{N}.md` and score on **8 dimensions** (clarity, completeness, scope alignment with PLAN, constraint specificity, exit-ritual correctness, out-of-scope enumeration, mandatory-reading completeness, exit-gate objectivity) — see `automation/templates/review.md` Step 3 for the full table. Produce a per-prompt scorecard. |
+| 4 | **Review execution.** For each milestone, look at: commit message quality, test count delta, mypy/ruff status delta, **design decisions in the milestone's HANDOFF Section 2 subsection**, anomalies in the milestone log, plus 4 audit dimensions (implementation matches PLAN, scope discipline, HANDOFF accuracy, failure-path coverage) — see `automation/templates/review.md` Step 4 for the full table. Produce a per-milestone scorecard with **9 dimensions**. |
 | 5 | Write `initiatives/current/REVIEW.md` containing both scorecards plus a lessons-learned section that future Phase 1 bootstraps can read. |
 | 6 | **Three-tier doc update.** Diff `<bootstrap-commit>..HEAD -- src/ pyproject.toml` then act per the **Doc-update tiers** subsection below: A-tier safe edits applied automatically, B-tier judged-creations applied automatically when triggers match, C-tier rewrites only proposed in REVIEW.md. Every applied edit is logged in REVIEW.md's `## Auto-applied edits` section. |
 
@@ -279,10 +279,14 @@ REVIEW.md `## Proposed edits (need human review)` as a numbered list.
 
 The script tails the final review session's last 60 lines and exits with
 status 0 on success. The user reads `initiatives/_archive/<slug>/REVIEW.md`
-to see what passed, what scored low, and the proposed CLAUDE/README edits.
+to see what passed, what scored low, **which Tier A/B doc edits were
+auto-applied**, and which Tier C edits still need human review.
 
-The user applies (or rejects) those proposed edits themselves — Phase 2
-intentionally does NOT modify CLAUDE.md/README.md without human review.
+Tier A/B edits may already have been applied by the review session (per
+"Doc-update tiers" above). Tier C edits are NEVER applied automatically;
+the user applies or rejects them after reading `REVIEW.md`. The
+distinction is enforced by the review session's behavior, not by Phase 2C
+itself — Phase 2C only handles archive + NOW.md + index updates.
 
 ---
 

@@ -22,7 +22,8 @@ to audit prompt quality + execution quality, write a single REVIEW.md,
 propose project-level doc edits, and archive the initiative folder.
 
 There is no user available. Follow every step. Stop only on a clear
-quality failure (pytest red, mypy red).
+quality failure (pytest red, mypy red, **or ruff red** — consistent with
+Step 2 below).
 
 ## Mandatory reading
 
@@ -83,8 +84,9 @@ Produce a markdown table inside REVIEW.md.
 
 For each milestone, inspect: the commit subject, the commit body, the
 test count delta (from PROGRESS.md), the mypy/ruff status delta, the
-divergences listed in HANDOFF.md Section 3 across iterations, and any
-anomalies in the milestone log.
+design decisions listed in each milestone's HANDOFF Section 2
+"Completed milestones" subsection (look for the "design decisions
+(deviations from PLAN)" field), and any anomalies in the milestone log.
 
 Score on 5 dimensions:
 
@@ -192,7 +194,8 @@ For each candidate matching a Tier B trigger:
    - slug = kebab-case of the divergence title (≤6 words).
    - Copy `automation/templates/adr.md` into place, fill every
      `{{placeholder}}`. Source the Context / Decision / Consequences
-     fields from HANDOFF.md Section 3 verbatim where possible.
+     fields from each milestone's HANDOFF Section 2 "design decisions
+     (deviations from PLAN)" subsection verbatim where possible.
    - After creating, **append** a row to `docs/DECISIONS/README.md`'s
      index table.
 
