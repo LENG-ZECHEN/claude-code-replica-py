@@ -364,3 +364,87 @@ def test_repl_reserved_output_tokens_flag_propagates(
     assert rc == 0
     loops = _captured_loops()
     assert loops[0]._budget.reserved_output_tokens == 1234
+
+
+# ---------------------------------------------------------------------------
+# M1: --verbose threads StderrTracer through the loop and fire sites
+# ---------------------------------------------------------------------------
+
+def test_repl_verbose_emits_budget_trace_line(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """One turn under ``--verbose`` produces at least one ``[trace] [budget]``."""
+    _set_stdin(monkeypatch, "hello", "/exit")
+    rc = main(["--repl", "--verbose", "--workspace", str(tmp_path)])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "[trace] [budget]" in captured.err
+
+
+def test_repl_verbose_emits_memory_select_when_project_memory_has_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Saving a memory entry then sending a query emits ``memory_select``."""
+    _set_stdin(
+        monkeypatch,
+        "/remember feedback test_entry user prefers Python tests",
+        "tell me about python testing",
+        "/exit",
+    )
+    rc = main(["--repl", "--verbose", "--workspace", str(tmp_path)])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "[trace] [memory_select]" in captured.err
+
+
+def test_repl_default_silent_no_trace_lines(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Without ``--verbose``, several turns yield zero ``[trace]`` lines."""
+    _set_stdin(monkeypatch, "first", "second", "third", "/exit")
+    rc = main(["--repl", "--workspace", str(tmp_path)])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "[trace]" not in captured.err
+
+
+def test_repl_verbose_threads_tracer_into_components(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The loop built under ``--verbose`` carries a StderrTracer everywhere.
+
+    Verifies the constructor-injection path (not just the CLI flag): the
+    loop's tracer is the same StderrTracer that was threaded into the
+    builder, claude_md_loader, compactor, microcompactor, snip_tool, and
+    project_memory.
+    """
+    from simple_coding_agent.trace import NullTracer, StderrTracer
+
+    _set_stdin(monkeypatch, "/exit")
+    rc = main(["--repl", "--verbose", "--workspace", str(tmp_path)])
+    assert rc == 0
+    loops = _captured_loops()
+    loop = loops[0]
+    assert isinstance(loop._tracer, StderrTracer)
+    assert isinstance(loop._microcompactor._tracer, StderrTracer)
+    assert isinstance(loop._snip_tool._tracer, StderrTracer)
+    assert isinstance(loop._compactor._tracer, StderrTracer)
+    assert isinstance(loop._context_builder._tracer, StderrTracer)
+    assert isinstance(
+        loop._context_builder._claude_md_loader._tracer, StderrTracer,
+    )
+    assert isinstance(loop._project_memory._tracer, StderrTracer)
+    # Sanity: when --verbose is absent the default is NullTracer everywhere.
+    _set_stdin(monkeypatch, "/exit")
+    rc = main(["--repl", "--workspace", str(tmp_path)])
+    assert rc == 0
+    null_loop = _captured_loops()[0]
+    assert isinstance(null_loop._tracer, NullTracer)
+    assert isinstance(null_loop._microcompactor._tracer, NullTracer)

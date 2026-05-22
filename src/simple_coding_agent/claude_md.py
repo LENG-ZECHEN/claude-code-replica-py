@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .trace import NullTracer, Tracer
+
 _DEFAULT_USER_CLAUDE_MD = Path.home() / ".claude" / "CLAUDE.md"
 
 
@@ -25,9 +27,11 @@ class ClaudeMdLoader:
         self,
         *,
         user_claude_path: Path | None = None,
+        tracer: Tracer | None = None,
     ) -> None:
         self._user_claude_path = user_claude_path
         self._cache: dict[Path, str] = {}
+        self._tracer: Tracer = tracer or NullTracer()
 
     def load(self, workspace_path: Path) -> str:
         """Return combined CLAUDE.md content for *workspace_path*.
@@ -37,7 +41,9 @@ class ClaudeMdLoader:
         Returns an empty string when neither file exists or is readable.
         """
         if workspace_path in self._cache:
-            return self._cache[workspace_path]
+            cached = self._cache[workspace_path]
+            self._tracer.emit("claude_md", cached=1, chars=len(cached))
+            return cached
 
         parts: list[str] = []
         read_error = False
@@ -63,6 +69,13 @@ class ClaudeMdLoader:
         result = "\n\n".join(parts)
         if not read_error:
             self._cache[workspace_path] = result
+        self._tracer.emit(
+            "claude_md",
+            cached=0,
+            chars=len(result),
+            read_error=int(read_error),
+            sections=len(parts),
+        )
         return result
 
 

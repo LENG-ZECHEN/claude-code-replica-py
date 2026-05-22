@@ -49,6 +49,7 @@ from .provider import STOP_MAX_TOKENS, PromptTooLongError, Provider
 from .snip import SnipTool
 from .tool_result_store import ToolResultStore
 from .tools import ToolExecutor, ToolRegistry, UnknownToolError
+from .trace import NullTracer, Tracer
 from .transcript import Transcript
 
 # ---------------------------------------------------------------------------
@@ -162,6 +163,7 @@ class AgentLoop:
         project_memory: ProjectMemory | None = None,
         tool_result_store: ToolResultStore | None = None,
         metrics: MetricsCollector | None = None,
+        tracer: Tracer | None = None,
         system_prompt: str = _DEFAULT_SYSTEM_PROMPT,
         max_steps: int = _DEFAULT_MAX_STEPS,
     ) -> None:
@@ -174,6 +176,7 @@ class AgentLoop:
         self._budget = budget
         self._registry = registry
         self._compactor = compactor
+        self._tracer: Tracer = tracer or NullTracer()
         self._microcompactor = microcompactor or MicroCompactor()
         # Track the uuid of the latest assistant message at the time of
         # the most recent microcompact. ``None`` means "never microcompacted
@@ -245,6 +248,7 @@ class AgentLoop:
                         )
                     reactive_compact_attempted = True
                     compacted_this_turn = self._force_compact()
+                    self._tracer.emit("reactive", turn=turn)
                     self._metrics.record_reactive_compact()
                     compacted_overall = True
 
@@ -393,6 +397,7 @@ class AgentLoop:
                         return
                     reactive_compact_attempted = True
                     compacted_this_turn = self._force_compact()
+                    self._tracer.emit("reactive", turn=turn)
                     self._metrics.record_reactive_compact()
                     compacted_overall = True
 

@@ -12,6 +12,7 @@ from typing import Any
 
 from .compact import CLEARED_TOOL_RESULT_CONTENT
 from .models import Message, Role, ToolCall, ToolResult
+from .trace import NullTracer, Tracer
 
 SNIPPED_CONTENT = "[Snipped: superseded by later call]"
 
@@ -59,6 +60,9 @@ def _is_already_compacted_result(content: object) -> bool:
 
 class SnipTool:
     """Fold redundant compactable tool_result bodies without deleting messages."""
+
+    def __init__(self, *, tracer: Tracer | None = None) -> None:
+        self._tracer: Tracer = tracer or NullTracer()
 
     def should_snip(self, messages: list[Message]) -> bool:
         path_counts: dict[str, int] = {}
@@ -117,6 +121,11 @@ class SnipTool:
 
             snipped.append(replace(msg, content=new_content))
 
+        self._tracer.emit(
+            "snip",
+            messages=len(snipped),
+            snipped=len(positions_to_snip),
+        )
         return snipped
 
     @staticmethod

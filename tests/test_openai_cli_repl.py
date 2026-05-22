@@ -243,3 +243,57 @@ def test_openai_repl_one_shot_still_requires_prompt(
 
     assert rc == 2
     assert "Prompt must not be empty" in err
+
+
+# ---------------------------------------------------------------------------
+# M1: --verbose flag also reaches the OpenAI-backed REPL
+# ---------------------------------------------------------------------------
+
+def _set_stdin_openai(monkeypatch: pytest.MonkeyPatch, *lines: str) -> None:
+    buf = "\n".join(lines)
+    if buf and not buf.endswith("\n"):
+        buf += "\n"
+    monkeypatch.setattr("sys.stdin", io.StringIO(buf))
+
+
+def test_openai_repl_verbose_flag_streams_budget_trace(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--verbose`` in the openai REPL must emit ``[trace] [budget]`` lines."""
+    monkeypatch.setattr(openai_cli, "OpenAIProvider", _FakeOpenAIProvider)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _set_stdin_openai(monkeypatch, "what is testing", "/exit")
+
+    rc = openai_cli.main([
+        "--no-dotenv",
+        "--repl",
+        "--verbose",
+        "--workspace", str(tmp_path),
+        "--model", "test-model",
+    ])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "[trace] [budget]" in captured.err
+
+
+def test_openai_repl_default_no_verbose_is_silent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Without ``--verbose``, the openai REPL emits no ``[trace]`` lines."""
+    monkeypatch.setattr(openai_cli, "OpenAIProvider", _FakeOpenAIProvider)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _set_stdin_openai(monkeypatch, "say hi", "/exit")
+
+    rc = openai_cli.main([
+        "--no-dotenv",
+        "--repl",
+        "--workspace", str(tmp_path),
+        "--model", "test-model",
+    ])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "[trace]" not in captured.err

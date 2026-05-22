@@ -32,6 +32,7 @@ from .memory import SessionMemory
 from .provider import OpenAIProvider
 from .tool_registry_factory import build_default_registry
 from .tools import ToolExecutor
+from .trace import NullTracer, StderrTracer, Tracer
 from .transcript import Transcript
 
 _DEFAULT_MAX_TOKENS = 1024
@@ -171,6 +172,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable streaming and wait for each provider response before printing.",
     )
     parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help=(
+            "Stream `[trace] [<channel>] k=v ...` lines to stderr for "
+            "each compaction, snip, externalize, memory-select, and "
+            "auto-learn cue (REPL mode)."
+        ),
+    )
+    parser.add_argument(
         "--shell-mode",
         choices=("mock", "allowlist"),
         default="mock",
@@ -292,6 +302,7 @@ def _build_openai_repl_loop(
     reserved_output_tokens: int,
     session_memory: SessionMemory,
     shell_mode: ShellMode = ShellMode.MOCK,
+    tracer: Tracer | None = None,
 ) -> AgentLoop:
     """Wire a real-provider AgentLoop using the cli helper for everything else.
 
@@ -305,7 +316,7 @@ def _build_openai_repl_loop(
         api_key=_api_key_from_env(),
         base_url=os.environ.get("OPENAI_BASE_URL"),
     )
-    project_memory = _cli._open_project_memory(workspace)
+    project_memory = _cli._open_project_memory(workspace, tracer=tracer)
     return _cli._build_repl_loop(
         workspace,
         max_steps=max_steps,
@@ -316,6 +327,7 @@ def _build_openai_repl_loop(
         provider=provider,  # type: ignore[arg-type]
         system_prompt=_DEFAULT_SYSTEM_PROMPT,
         shell_mode=shell_mode,
+        tracer=tracer,
     )
 
 
@@ -330,6 +342,7 @@ def _run_openai_repl(
     stream: bool,
     resume: str | None,
     shell_mode: ShellMode = ShellMode.MOCK,
+    verbose: bool = False,
 ) -> int:
     """Drive the OpenAI-backed REPL, sharing slash commands with ``cli``.
 
@@ -345,6 +358,7 @@ def _run_openai_repl(
     _cli._LAST_LOOPS.clear()
     session_mem_path = _cli._session_memory_path(workspace)
     session_memory = SessionMemory.load_json(session_mem_path)
+    tracer: Tracer = StderrTracer() if verbose else NullTracer()
     loop = _build_openai_repl_loop(
         workspace,
         model=model,
@@ -354,6 +368,7 @@ def _run_openai_repl(
         reserved_output_tokens=reserved_output_tokens,
         session_memory=session_memory,
         shell_mode=shell_mode,
+        tracer=tracer,
     )
 
     if resume is not None:
@@ -411,6 +426,7 @@ def main(argv: list[str] | None = None) -> int:
             stream=not bool(args.no_stream),
             resume=args.resume,
             shell_mode=shell_mode,
+            verbose=bool(args.verbose),
         )
 
     return _run_task(

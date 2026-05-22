@@ -144,6 +144,7 @@ class _RecordingProjectMemory:
 
 class _AlwaysMicroCompactor(MicroCompactor):
     def __init__(self) -> None:
+        super().__init__()
         self.microcompact_calls = 0
 
     def should_microcompact(

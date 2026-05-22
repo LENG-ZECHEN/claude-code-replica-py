@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import re
 
+from .trace import NullTracer, Tracer
+
 # (label, compiled pattern). Order matters: CJK markers checked first
 # because they are unambiguous; English cues use word boundaries so they
 # do not match inside unrelated tokens (e.g. ``preference`` matches,
@@ -34,16 +36,20 @@ _CUE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
-def detect_cue(text: str) -> str | None:
+def detect_cue(text: str, tracer: Tracer | None = None) -> str | None:
     """Return the canonical cue label found in ``text``, or ``None``.
 
     The function never raises and never mutates ``text``. An empty string
-    yields ``None``.
+    yields ``None``. When a cue is found and ``tracer`` is provided, an
+    ``auto_learn`` event is emitted carrying only the canonical cue label
+    (one of a fixed vocabulary), never the input text itself.
     """
     if not text:
         return None
+    active_tracer: Tracer = tracer or NullTracer()
     for label, pattern in _CUE_PATTERNS:
         if pattern.search(text):
+            active_tracer.emit("auto_learn", cue=label)
             return label
     return None
 

@@ -28,6 +28,7 @@ from dataclasses import dataclass
 
 from .tools import PREVIEW_CHARS as _PREVIEW_CHARS
 from .tools import preview_result
+from .trace import NullTracer, Tracer
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -106,12 +107,15 @@ class ToolResultStore:
         max_inline_chars: int = DEFAULT_MAX_INLINE_CHARS,
         total_budget_chars: int = DEFAULT_TOTAL_BUDGET_CHARS,
         storage_dir: str | None = None,
+        *,
+        tracer: Tracer | None = None,
     ) -> None:
         self._max_inline_chars = max_inline_chars
         self._total_budget_chars = total_budget_chars
         self._storage_dir = storage_dir or tempfile.gettempdir()
         self._stored: dict[str, StoredResult] = {}
         self._replacement_state = ContentReplacementState()
+        self._tracer: Tracer = tracer or NullTracer()
 
     def should_externalize(self, content: str) -> bool:
         return len(content) > self._max_inline_chars
@@ -143,6 +147,11 @@ class ToolResultStore:
         self._stored[tool_use_id] = stored
         pointer = self.make_pointer(path, len(content), preview)
         self._replacement_state.record(tool_use_id, pointer)
+        self._tracer.emit(
+            "externalize",
+            bytes=len(content),
+            tool_use_id=tool_use_id,
+        )
         return pointer, stored
 
     # ------------------------------------------------------------------

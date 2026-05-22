@@ -29,6 +29,7 @@ from typing import Protocol
 from .context import ContextBudget, _estimate_messages_tokens, _normalize_messages
 from .models import CompactSummary, Message, MessageType, Role, ToolCall, ToolResult
 from .provider import PromptTooLongError, Provider
+from .trace import NullTracer, Tracer
 from .transcript import Transcript
 
 logger = logging.getLogger(__name__)
@@ -290,6 +291,9 @@ class LLMSummarizer:
 class MicroCompactor:
     """Cold-cache cleanup for old compactable tool results."""
 
+    def __init__(self, *, tracer: Tracer | None = None) -> None:
+        self._tracer: Tracer = tracer or NullTracer()
+
     def should_microcompact(
         self,
         messages: list[Message],
@@ -321,6 +325,7 @@ class MicroCompactor:
     def microcompact(self, messages: list[Message]) -> list[Message]:
         tool_names_by_id = self._tool_names_by_id(messages)
         compacted: list[Message] = []
+        cleared = 0
 
         for msg in messages:
             if not isinstance(msg.content, list):
@@ -338,10 +343,16 @@ class MicroCompactor:
                         item,
                         content=CLEARED_TOOL_RESULT_CONTENT,
                     ))
+                    cleared += 1
                 else:
                     new_content.append(replace(item))
             compacted.append(replace(msg, content=new_content))
 
+        self._tracer.emit(
+            "microcompact",
+            cleared=cleared,
+            messages=len(compacted),
+        )
         return compacted
 
     @staticmethod
@@ -390,6 +401,8 @@ class ContextCompactor:
         compact_threshold: float = 0.8,
         summary_max_result_chars: int = _DEFAULT_SUMMARY_MAX_RESULT_CHARS,
         summarizer: Summarizer | None = None,
+        *,
+        tracer: Tracer | None = None,
     ) -> None:
         self.keep_recent = keep_recent
         self.compact_threshold = compact_threshold
@@ -397,6 +410,7 @@ class ContextCompactor:
         self.summarizer = summarizer or RuleBasedSummarizer(
             summary_max_result_chars=summary_max_result_chars,
         )
+        self._tracer: Tracer = tracer or NullTracer()
 
     # ------------------------------------------------------------------
     # Public API
@@ -425,6 +439,13 @@ class ContextCompactor:
         if n == 0:
             boundary = Message.compact_boundary()
             transcript.append(boundary)
+            self._tracer.emit(
+                "compact",
+                messages=0,
+                post_tokens=0,
+                pre_tokens=0,
+                summarized=0,
+            )
             return CompactSummary(
                 boundary_uuid=boundary.uuid,
                 summary_text="",
@@ -448,6 +469,13 @@ class ContextCompactor:
         for msg in to_keep:
             transcript.append(msg)
 
+        self._tracer.emit(
+            "compact",
+            messages=n,
+            post_tokens=post_tokens,
+            pre_tokens=pre_tokens,
+            summarized=len(to_summarize),
+        )
         return CompactSummary(
             boundary_uuid=boundary.uuid,
             summary_text=summary_text,

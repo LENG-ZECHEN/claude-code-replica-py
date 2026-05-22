@@ -26,6 +26,8 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
+from .trace import NullTracer, Tracer
+
 logger = logging.getLogger(__name__)
 
 _MANIFEST_FILENAME = "MEMORY.md"
@@ -296,9 +298,15 @@ class ProjectMemory:
     MEMORY.md is maintained as a one-line-per-entry manifest.
     """
 
-    def __init__(self, storage_dir: str) -> None:
+    def __init__(
+        self,
+        storage_dir: str,
+        *,
+        tracer: Tracer | None = None,
+    ) -> None:
         self._dir = str(Path(storage_dir).resolve())
         os.makedirs(self._dir, exist_ok=True)
+        self._tracer: Tracer = tracer or NullTracer()
 
     def save(self, entry: MemoryEntry) -> None:
         """Persist entry to disk.  Raises ValueError if body looks like a secret."""
@@ -341,8 +349,14 @@ class ProjectMemory:
 
     def to_snippets(self, query: str | None = None) -> list[str]:
         entries = self.all()
+        total = len(entries)
         if query is not None:
             entries = MemorySelector().select_top_n(query, entries, n=5)
+            self._tracer.emit(
+                "memory_select",
+                selected=len(entries),
+                total=total,
+            )
         return [e.to_snippet() for e in entries]
 
     def _update_manifest(self) -> None:

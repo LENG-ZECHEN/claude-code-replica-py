@@ -118,3 +118,56 @@ def test_cli_shell_mode_flag_threads_to_registry(
     assert "[mock]" not in output
     assert "returncode=0" in output
     assert str(tmp_path.resolve()) in output
+
+
+# ---------------------------------------------------------------------------
+# M1: --verbose flag wiring
+# ---------------------------------------------------------------------------
+
+def test_cli_verbose_flag_parses_without_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Argparse must accept `--verbose` in REPL mode."""
+    import simple_coding_agent.claude_md as cm
+    monkeypatch.setattr(cm, "_DEFAULT_USER_CLAUDE_MD", tmp_path / "no_claude.md")
+    monkeypatch.setattr("sys.stdin", io.StringIO("/exit\n"))
+    rc = main(["--repl", "--verbose", "--workspace", str(tmp_path)])
+    assert rc == 0
+
+
+def test_cli_verbose_flag_threads_to_run_repl(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """`--verbose` must reach ``_run_repl(verbose=True)``."""
+    import simple_coding_agent.claude_md as cm
+    monkeypatch.setattr(cm, "_DEFAULT_USER_CLAUDE_MD", tmp_path / "no_claude.md")
+    monkeypatch.setattr("sys.stdin", io.StringIO("/exit\n"))
+
+    seen: dict[str, object] = {}
+
+    def _spy(**kwargs: object) -> int:
+        seen.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(cli_mod, "_run_repl", _spy)
+    rc = main(["--repl", "--verbose", "--workspace", str(tmp_path)])
+    assert rc == 0
+    assert seen.get("verbose") is True
+
+
+def test_cli_default_no_verbose_keeps_stderr_silent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Without ``--verbose``, no ``[trace]`` lines hit stderr."""
+    import simple_coding_agent.claude_md as cm
+    monkeypatch.setattr(cm, "_DEFAULT_USER_CLAUDE_MD", tmp_path / "no_claude.md")
+    monkeypatch.setattr("sys.stdin", io.StringIO("hello world\n/exit\n"))
+
+    rc = main(["--repl", "--workspace", str(tmp_path)])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "[trace]" not in captured.err

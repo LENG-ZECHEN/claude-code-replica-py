@@ -32,7 +32,7 @@ from pathlib import Path
 from .auto_learn import detect_cue, format_hint
 from .claude_md import ClaudeMdLoader
 from .coding_tools import ShellMode
-from .compact import ContextCompactor
+from .compact import ContextCompactor, MicroCompactor
 from .context import ContextBudget, ContextBuilder
 from .loop import AgentLoop, LoopStatus
 from .memory import (
@@ -52,8 +52,10 @@ from .session_store import (
     save_session,
     session_path_for,
 )
+from .snip import SnipTool
 from .tool_registry_factory import build_default_registry
 from .tools import ToolExecutor
+from .trace import NullTracer, StderrTracer, Tracer
 from .transcript import Transcript
 
 _SESSION_MEMORY_FILENAME = "session_memory.json"
@@ -255,7 +257,11 @@ def _resolve_memory_dir(workspace: Path) -> Path:
     return (workspace / _SIMPLE_AGENT_DIR / _MEMORY_SUBDIR).resolve()
 
 
-def _open_project_memory(workspace: Path) -> ProjectMemory:
+def _open_project_memory(
+    workspace: Path,
+    *,
+    tracer: Tracer | None = None,
+) -> ProjectMemory:
     """Build a ProjectMemory rooted at the resolved storage dir.
 
     ``ProjectMemory`` already calls ``os.makedirs(..., exist_ok=True)``
@@ -263,7 +269,7 @@ def _open_project_memory(workspace: Path) -> ProjectMemory:
     """
     storage = _resolve_memory_dir(workspace)
     storage.mkdir(parents=True, exist_ok=True)
-    return ProjectMemory(storage_dir=str(storage))
+    return ProjectMemory(storage_dir=str(storage), tracer=tracer)
 
 
 def _build_repl_loop(
@@ -277,6 +283,7 @@ def _build_repl_loop(
     provider: MockProvider | None = None,
     system_prompt: str | None = None,
     shell_mode: ShellMode = ShellMode.MOCK,
+    tracer: Tracer | None = None,
 ) -> AgentLoop:
     """Wire one shared AgentLoop for the REPL session.
 
@@ -285,7 +292,14 @@ def _build_repl_loop(
     ``OpenAIProvider`` (and a coder-style system prompt). When omitted
     the REPL falls back to the MockProvider hook used by the default
     ``simple-agent --repl`` mode.
+
+    The optional ``tracer`` is threaded into every component that owns
+    a fire site (``ContextBuilder``, ``ClaudeMdLoader``,
+    ``ContextCompactor``, ``MicroCompactor``, ``SnipTool``,
+    ``ToolResultStore``, ``ProjectMemory``, ``AgentLoop``) so a single
+    ``--verbose`` flag activates trace output across the whole pipeline.
     """
+    active_tracer: Tracer = tracer if tracer is not None else NullTracer()
     registry = build_default_registry(workspace, shell_mode=shell_mode)
     executor = ToolExecutor(registry)
     budget = ContextBudget(
@@ -296,7 +310,8 @@ def _build_repl_loop(
     builder = ContextBuilder(
         budget=budget,
         workspace_path=workspace,
-        claude_md_loader=ClaudeMdLoader(),
+        claude_md_loader=ClaudeMdLoader(tracer=active_tracer),
+        tracer=active_tracer,
     )
     loop_kwargs: dict[str, object] = {
         "provider": provider if provider is not None else _make_repl_provider(workspace),
@@ -305,10 +320,13 @@ def _build_repl_loop(
         "context_builder": builder,
         "budget": budget,
         "registry": registry,
-        "compactor": ContextCompactor(),
+        "compactor": ContextCompactor(tracer=active_tracer),
+        "microcompactor": MicroCompactor(tracer=active_tracer),
+        "snip_tool": SnipTool(tracer=active_tracer),
         "session_memory": session_memory,
         "project_memory": project_memory,
         "metrics": MetricsCollector(),
+        "tracer": active_tracer,
         "max_steps": max_steps,
     }
     if system_prompt is not None:
@@ -587,7 +605,7 @@ def _drive_repl_session(
                 return 0
             continue
 
-        cue = detect_cue(stripped)
+        cue = detect_cue(stripped, tracer=loop._tracer)
         if cue is not None:
             print(format_hint(cue))
 
@@ -607,6 +625,7 @@ def _run_repl(
     stream: bool,
     resume: str | None = None,
     shell_mode: ShellMode = ShellMode.MOCK,
+    verbose: bool = False,
 ) -> int:
     """Run the interactive REPL.
 
@@ -631,7 +650,8 @@ def _run_repl(
     _LAST_LOOPS.clear()
     session_mem_path = _session_memory_path(workspace)
     session_memory = SessionMemory.load_json(session_mem_path)
-    project_memory = _open_project_memory(workspace)
+    tracer: Tracer = StderrTracer() if verbose else NullTracer()
+    project_memory = _open_project_memory(workspace, tracer=tracer)
     loop = _build_repl_loop(
         workspace,
         max_steps=max_steps,
@@ -640,6 +660,7 @@ def _run_repl(
         session_memory=session_memory,
         project_memory=project_memory,
         shell_mode=shell_mode,
+        tracer=tracer,
     )
 
     if resume is not None:
@@ -676,6 +697,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--stream",
         action="store_true",
         help="Stream assistant text as it arrives (REPL mode).",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help=(
+            "Stream `[trace] [<channel>] k=v ...` lines to stderr for "
+            "each compaction, snip, externalize, memory-select, and "
+            "auto-learn cue (REPL mode)."
+        ),
     )
     parser.add_argument(
         "--workspace",
@@ -762,6 +792,7 @@ def main(argv: list[str] | None = None) -> int:
             stream=bool(args.stream),
             resume=args.resume,
             shell_mode=shell_mode,
+            verbose=bool(args.verbose),
         )
 
     # One-shot demo (unchanged behavior; default shell_mode is MOCK).

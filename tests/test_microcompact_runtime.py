@@ -100,6 +100,7 @@ class _CallCountingMicroCompactor(MicroCompactor):
     """Wraps MicroCompactor to count microcompact() invocations."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.microcompact_calls = 0
 
     def microcompact(self, messages: list[Message]) -> list[Message]:

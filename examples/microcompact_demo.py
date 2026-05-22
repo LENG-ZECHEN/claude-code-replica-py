@@ -52,6 +52,7 @@ class _CallCountingMicroCompactor(MicroCompactor):
     """
 
     def __init__(self) -> None:
+        super().__init__()
         self.microcompact_calls = 0
         self.results_cleared = 0
 

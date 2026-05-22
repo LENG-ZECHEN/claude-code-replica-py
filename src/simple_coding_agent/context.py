@@ -21,6 +21,7 @@ from typing import Any
 from .claude_md import ClaudeMdLoader
 from .models import CompactSummary, Message, MessageType, Role, ToolCall, ToolResult
 from .tool_result_store import ToolResultStore
+from .trace import NullTracer, Tracer
 from .transcript import Transcript
 
 # ---------------------------------------------------------------------------
@@ -186,11 +187,14 @@ class ContextBuilder:
         tool_result_store: ToolResultStore | None = None,
         workspace_path: Path | None = None,
         claude_md_loader: ClaudeMdLoader | None = None,
+        *,
+        tracer: Tracer | None = None,
     ) -> None:
         self._budget = budget
         self._store = tool_result_store or ToolResultStore()
         self._workspace_path = workspace_path
         self._claude_md_loader = claude_md_loader
+        self._tracer: Tracer = tracer or NullTracer()
 
     # ------------------------------------------------------------------
     # Public API
@@ -220,6 +224,15 @@ class ContextBuilder:
 
         estimated = system_tokens + _estimate_messages_tokens(api_messages)
 
+        self._tracer.emit(
+            "budget",
+            available=self._budget.available_tokens,
+            dropped=dropped,
+            estimated_tokens=estimated,
+            externalized=externalized,
+            messages=len(api_messages),
+            system_tokens=system_tokens,
+        )
         return BuiltContext(
             system=system_prompt,
             messages=api_messages,
