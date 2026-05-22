@@ -65,7 +65,7 @@ with just a "BLOCKED" section quoting the failing output.
 
 ### Step 3: Prompt quality scorecard (per milestone)
 
-For each `prompts/M{N}.md` score on 5 dimensions (1-5 each):
+For each `prompts/M{N}.md` score on the following 8 dimensions (1-5 each):
 
 | Dimension | What to look for |
 |---|---|
@@ -88,7 +88,7 @@ design decisions listed in each milestone's HANDOFF Section 2
 "Completed milestones" subsection (look for the "design decisions
 (deviations from PLAN)" field), and any anomalies in the milestone log.
 
-Score on 5 dimensions:
+Score on the following 9 dimensions (1-5 each):
 
 | Dimension | What to look for |
 |---|---|

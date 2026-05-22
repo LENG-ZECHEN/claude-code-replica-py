@@ -240,7 +240,7 @@ to existing files are to revert.
 | Trigger | Action |
 |---|---|
 | `src/` gains a new **subdirectory**, OR a new top-level module that is **>150 LOC** AND exports **≥3 public symbols** (non-underscored functions/classes/dataclasses) | Create `docs/<slug>.md` using `automation/templates/subsystem_doc.md`. If `docs/<slug>.md` already exists, **append** a "## Recent changes" bullet instead. |
-| HANDOFF.md Section 3 has **≥2 divergences** AND at least one is architectural (keywords: `renamed module`, `new abstraction`, `dropped feature`, `protocol change`, `inverted dependency`), OR a single divergence touches **>2 source files** | Create `docs/DECISIONS/<NNNN>-<slug>.md` using `automation/templates/adr.md`. If `docs/DECISIONS/` doesn't exist yet, create it with a `README.md` index file too. NNNN = (max existing) + 1, zero-padded to 4 digits, starting at 0001. |
+| HANDOFF.md Section 2's per-milestone "design decisions (deviations from PLAN)" subsections **collectively contain ≥2 divergences** AND at least one is architectural (keywords: `renamed module`, `new abstraction`, `dropped feature`, `protocol change`, `inverted dependency`), OR a single divergence touches **>2 source files** | Create `docs/DECISIONS/<NNNN>-<slug>.md` using `automation/templates/adr.md`. If `docs/DECISIONS/` doesn't exist yet, create it with a `README.md` index file too. NNNN = (max existing) + 1, zero-padded to 4 digits, starting at 0001. |
 
 Hard rules for Tier B:
 - **Never overwrite** an existing file at the target path. If it exists,
