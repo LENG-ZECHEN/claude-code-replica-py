@@ -1,107 +1,154 @@
 #!/usr/bin/env bash
-# scripts/run_next.sh — prepare and (optionally) launch the next milestone session.
+# automation/scripts/run_next.sh
+#
+# Single-milestone debug runner. Re-launches ONE milestone session
+# without running the full loop or the final review. Use this when
+# run_all_milestones.sh halted at M{N} and you want to retry that
+# specific milestone after fixing whatever caused the halt.
+#
+# This is the recovery path documented in RUNBOOK Failure modes.
 #
 # Usage:
-#   ./scripts/run_next.sh              show pre-flight + next prompt (default)
-#   ./scripts/run_next.sh --run        ... and pipe the prompt to `claude --print`
-#   ./scripts/run_next.sh --copy       ... and copy the prompt to the macOS clipboard
+#   ./automation/scripts/run_next.sh M3            show pre-flight + prompt path
+#   ./automation/scripts/run_next.sh M3 --run      pre-flight + invoke claude --print
+#   ./automation/scripts/run_next.sh --help        this header
 #
-# Pre-flight verifies:
-#   - HANDOFF.md exists at project root
-#   - working tree is clean (no uncommitted changes)
-#   - pytest is green at the current HEAD
+# Pre-flight matches run_all_milestones.sh:
+#   - initiatives/current/config.yaml exists
+#   - initiatives/current/prompts/M{N}.md exists
+#   - claude CLI on PATH
+#   - working tree in python-replica/ is clean
 #
-# Exits non-zero on pre-flight failure.
+# IMPORTANT: this script does NOT enforce the 5-check exit gate that
+# run_all_milestones.sh enforces (commit subject / HANDOFF modified /
+# PROGRESS entry / pytest green / HANDOFF 5-section structure). It is
+# strictly a debug runner. After verifying the milestone manually, re-run
+# `./automation/scripts/run_all_milestones.sh` to continue the loop —
+# the 5-check gate there will skip already-good milestones and pick up
+# from the next undone one.
 
 set -euo pipefail
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$PROJECT_ROOT"
+# ---------------------------------------------------------------------------
+# Paths (matches run_all_milestones.sh layout — script lives 2 dirs deep)
+# ---------------------------------------------------------------------------
 
-HANDOFF="$PROJECT_ROOT/HANDOFF.md"
-MODE="${1:-show}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPLICA_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"        # python-replica/
+PROJECT_ROOT="$(cd "$REPLICA_DIR/.." && pwd)"         # /Users/leng/my-cc-py
+
+CURRENT_DIR="$REPLICA_DIR/initiatives/current"
+CONFIG="$CURRENT_DIR/config.yaml"
+PROMPTS_DIR="$CURRENT_DIR/prompts"
+LOGS_DIR="$CURRENT_DIR/logs"
+
+CLAUDE_MODEL="claude-opus-4-7"
+
+# ---------------------------------------------------------------------------
+# Permission whitelist — IDENTICAL to run_all_milestones.sh.
+# claude --print silently ignores ~/.claude/settings.json, so these
+# CLI flags are MANDATORY (without them claude --print hangs when a
+# tool needs permission).
+# ---------------------------------------------------------------------------
+
+ALLOWED_TOOLS="Read Write Edit Glob Grep \
+TaskCreate TaskUpdate TaskList TaskGet TaskOutput \
+Bash(git *) Bash(pytest *) Bash(python *) Bash(python3 *) \
+Bash(mypy *) Bash(ruff *) Bash(pip *) \
+Bash(ls *) Bash(ls) Bash(pwd) Bash(cd *) \
+Bash(cat *) Bash(head *) Bash(tail *) \
+Bash(grep *) Bash(find *) Bash(wc *) Bash(diff *) \
+Bash(mkdir *) Bash(chmod *) Bash(touch *) \
+Bash(echo *) Bash(printf *)"
+
+DISALLOWED_TOOLS="Bash(rm *) Bash(rmdir *) \
+Bash(curl *) Bash(wget *) \
+Bash(sudo *) Bash(ssh *) Bash(scp *) \
+Bash(npm publish *) Bash(git push --force *)"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+
+show_help() {
+  sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
+}
+
+# ---------------------------------------------------------------------------
+# Arg parsing
+# ---------------------------------------------------------------------------
+
+MILESTONE=""
+RUN=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --help|-h)       show_help; exit 0 ;;
+    --run)           RUN=1 ;;
+    M[0-9])          MILESTONE="$arg" ;;
+    M[0-9][0-9])     MILESTONE="$arg" ;;
+    *)               die "Unknown arg: $arg (expected 'M{N}' or '--run'; try --help)" ;;
+  esac
+done
+
+[ -n "$MILESTONE" ] || die "milestone ID required, e.g. './run_next.sh M3' (try --help)"
 
 # ---------------------------------------------------------------------------
 # Pre-flight
 # ---------------------------------------------------------------------------
 
-printf '=== Project: %s ===\n\n' "$PROJECT_ROOT"
+cd "$PROJECT_ROOT"
 
-if [ ! -f "$HANDOFF" ]; then
-  printf 'ERROR: HANDOFF.md not found at %s\n' "$HANDOFF"
-  printf '       The previous milestone session should have generated it\n'
-  printf '       using templates/handoff_template.md.\n'
-  exit 1
+PROMPT="$PROMPTS_DIR/${MILESTONE}.md"
+
+[ -f "$CONFIG" ]    || die "config not found: $CONFIG (run Phase 1 first)"
+[ -f "$PROMPT" ]    || die "prompt missing for $MILESTONE: $PROMPT"
+command -v claude >/dev/null 2>&1 || die "claude CLI not on PATH"
+
+if ! git -C "$REPLICA_DIR" diff --quiet HEAD 2>/dev/null \
+   || ! git -C "$REPLICA_DIR" diff --cached --quiet 2>/dev/null; then
+  git -C "$REPLICA_DIR" status --short
+  die "working tree in $REPLICA_DIR is dirty (commit or stash, then retry)"
 fi
-printf 'OK   HANDOFF.md present\n'
 
-if ! git diff --quiet HEAD 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-  printf 'ERROR: working tree has uncommitted changes:\n'
-  git status --short
-  printf '\n       Commit or stash before starting the next milestone.\n'
-  exit 1
-fi
-printf 'OK   working tree clean\n\n'
+printf '=== Pre-flight ===\n'
+printf 'milestone : %s\n' "$MILESTONE"
+printf 'prompt    : %s\n' "$PROMPT"
+printf 'config    : %s\n' "$CONFIG"
+printf 'model     : %s\n' "$CLAUDE_MODEL"
+printf 'last 3 commits:\n'
+git -C "$REPLICA_DIR" log --oneline -3 | sed 's/^/  /'
 
-printf '=== Latest commit ===\n'
-git log -1 --pretty=format:'  %h %s%n  (%ar by %an)%n'
-printf '\n'
-
-printf '=== Pytest baseline ===\n'
-if pytest --tb=no -q 2>&1 | tail -3; then
-  printf 'OK   pytest passed\n'
-else
-  printf 'WARN pytest output above — verify before proceeding\n'
+if [ "$RUN" -eq 0 ]; then
+  printf '\n=== Next steps ===\n'
+  printf '1. Inspect the prompt: less %s\n' "$PROMPT"
+  printf '2. To actually run:     %s %s --run\n' "$0" "$MILESTONE"
+  exit 0
 fi
 
 # ---------------------------------------------------------------------------
-# Extract Section 5 prompt
+# Run single milestone
 # ---------------------------------------------------------------------------
 
-NEXT_PROMPT=$(awk '
-  /^## 5\./        { in_section = 1; next }
-  in_section && /^## /    { in_section = 0 }
-  in_section && /^```/    { in_block = 1 - in_block; next }
-  in_section && in_block  { print }
-' "$HANDOFF")
+mkdir -p "$LOGS_DIR"
+LOG="$LOGS_DIR/${MILESTONE}.log"
 
-if [ -z "$NEXT_PROMPT" ]; then
-  printf '\nERROR: Could not extract prompt from HANDOFF.md Section 5\n'
-  printf '       Make sure Section 5 contains a fenced code block.\n'
-  exit 1
+printf '\n=== Launching %s at %s ===\n' "$MILESTONE" "$(date)"
+printf 'Log: %s\n' "$LOG"
+printf 'Live view: tail -f %s\n\n' "$LOG"
+
+if ! claude --print --model "$CLAUDE_MODEL" \
+     --allowedTools "$ALLOWED_TOOLS" \
+     --disallowedTools "$DISALLOWED_TOOLS" \
+     < "$PROMPT" 2>&1 | tee "$LOG"; then
+  die "$MILESTONE: claude invocation exited non-zero (see $LOG)"
 fi
 
-printf '\n=== Next session prompt (from HANDOFF.md Section 5) ===\n\n'
-printf '%s\n' "$NEXT_PROMPT"
-
-# ---------------------------------------------------------------------------
-# Dispatch
-# ---------------------------------------------------------------------------
-
-printf '\n=== Next steps ===\n'
-case "$MODE" in
-  --run)
-    printf 'Launching: claude --print (log -> logs/)\n'
-    mkdir -p logs
-    TS=$(date +%Y%m%d-%H%M%S)
-    LOG="logs/run-${TS}.log"
-    printf '%s\n' "$NEXT_PROMPT" | claude --print 2>&1 | tee "$LOG"
-    printf '\nLog written to: %s\n' "$LOG"
-    ;;
-  --copy)
-    if command -v pbcopy >/dev/null 2>&1; then
-      printf '%s\n' "$NEXT_PROMPT" | pbcopy
-      printf 'Prompt copied to clipboard. Open a fresh claude session and paste.\n'
-    else
-      printf 'pbcopy not found (this flag is macOS-only).\n'
-      exit 1
-    fi
-    ;;
-  show|*)
-    printf '1. Open a new Claude Code session: cd %s && claude\n' "$PROJECT_ROOT"
-    printf '2. Paste the prompt above.\n\n'
-    printf 'Shortcuts:\n'
-    printf '  ./scripts/run_next.sh --copy   copy prompt to clipboard (macOS)\n'
-    printf '  ./scripts/run_next.sh --run    invoke claude --print autonomously\n'
-    ;;
-esac
+printf '\n=== %s session ended at %s ===\n' "$MILESTONE" "$(date)"
+printf 'NOTE: run_next.sh does NOT enforce the 5-check exit gate.\n'
+printf '      Verify the milestone manually (commit / HANDOFF / PROGRESS /\n'
+printf '      pytest / HANDOFF structure), then re-run\n'
+printf '      ./automation/scripts/run_all_milestones.sh\n'
+printf '      to continue the full loop.\n'

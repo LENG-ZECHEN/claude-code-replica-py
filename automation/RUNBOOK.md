@@ -81,9 +81,10 @@ Risks, Out-of-scope, etc.). Phase 1 preserves it verbatim into PLAN.md.
 - "Bootstrap a new initiative."
 - "按 RUNBOOK Phase 1 引导。" (Chinese)
 
-The session SHOULD verify it is in `/Users/leng/my-cc-py/python-replica`
-and that `automation/INBOX.md` has content beyond the placeholder header.
-If either fails, refuse and explain.
+The session MUST verify it is in `/Users/leng/my-cc-py/python-replica`
+(or that `python-replica/` exists relative to the cwd) and that
+`automation/INBOX.md` has content beyond the placeholder `> placeholder:`
+line. If either fails, refuse and explain — do NOT proceed to Step 1.
 
 ### Pre-flight checks
 
@@ -100,7 +101,7 @@ If any check fails, stop and report. Do not proceed.
 |---|---|---|
 | 1 | **Validate INBOX.** Parse YAML front-matter. Check `slug` matches `^[a-z0-9-]+$`, `commit_prefix` is non-empty, every milestone has `name + phase_ids + exit_gate`. | pass/fail |
 | 2 | **Derive archive slug** = `<YYYY-MM>-<slug>` from today's date. | `archive_slug` |
-| 3 | **Decide if `run_all_milestones.sh` needs updating** (it currently reads `config.yaml` so most changes need no script edit; only edit if your INBOX needs a feature the script doesn't yet support — extremely rare). | edit or noop |
+| 3 | **Decide if `run_all_milestones.sh` needs updating.** Edit ONLY if (a) the INBOX YAML schema introduces a field the script must parse (e.g., a new `before_first_milestone` hook), OR (b) the script's hard-coded `CLAUDE_MODEL` / `ALLOWED_TOOLS` / `DISALLOWED_TOOLS` need changing for this initiative. Otherwise: noop. | edit or noop |
 | 4 | **Move INBOX into the initiative.** `git mv automation/INBOX.md initiatives/current/PLAN.md`. Edit `PLAN.md` to prepend a provenance header above the original `---` YAML block: `> Bootstrapped on YYYY-MM-DD. Baseline commit: <SHA>. Baseline pytest: <N> passing.` | `initiatives/current/PLAN.md` |
 | 5 | **Generate `config.yaml`** from PLAN's YAML front-matter. Include `slug`, `commit_prefix`, `archive_slug`, and the full `milestones` table. | `initiatives/current/config.yaml` |
 | 6 | **Write `HANDOFF.md`** using `automation/templates/handoff_initial.md`. Fill `slug`, baseline commit/pytest/mypy/ruff, first milestone's name. | `initiatives/current/HANDOFF.md` |
@@ -223,6 +224,12 @@ aggressive**: when a trigger is reasonably close to one of the rules
 below, prefer to act over propose. The wrap-up commit is one atomic
 unit, so an over-eager edit is easy to revert in one `git revert`.
 
+**Important exception — Tier A is NOT subject to the moderately-aggressive
+bias.** For Tier A, "unsure whether this is mechanical enough" means
+the edit is not actually mechanical and should be downgraded to Tier C
+(propose only). The bias applies to Tier B only (where the action is
+"create a new file", which is cheap to revert by `git rm`).
+
 #### Tier A — safe auto-apply (always apply when triggered)
 
 Mechanical, append-only operations on existing files. The review agent
@@ -308,7 +315,8 @@ itself — Phase 2C only handles archive + NOW.md + index updates.
 | Phase 1 refuses with "INBOX is the bare template" | You forgot to fill in INBOX | Edit `automation/INBOX.md`, retry |
 | Phase 1 refuses with "working tree dirty" | Uncommitted changes | `git stash` or commit; retry |
 | Phase 1 refuses with "initiatives/current/ not empty" | Previous initiative wasn't wrapped up | Either resume by running the script, or manually run Phase 2C steps |
-| Script halts: "M{N} did not produce expected commit" | The milestone agent skipped its exit ritual | Read `initiatives/current/logs/M{N}.log`, fix manually or restart from M{N} with `./automation/scripts/run_next.sh M{N}` |
+| Phase 1 crashed mid-bootstrap (partial state: INBOX moved but PLAN/config/HANDOFF/prompts incomplete) | Phase 1 Step 4+ failed after `git mv automation/INBOX.md initiatives/current/PLAN.md` succeeded | **Recovery (do not retry blindly — pre-flight will refuse both ways):** (1) inspect: `ls initiatives/current/`; (2) restore INBOX: `git -C python-replica restore --source=HEAD --staged --worktree automation/INBOX.md` (assumes the `git mv` was never committed — if it was, use `git show HEAD~1:automation/INBOX.md > automation/INBOX.md` against the bootstrap parent); (3) clear partial initiative: `git -C python-replica restore --staged initiatives/current/` then remove anything other than `.gitkeep`; (4) re-run Phase 1 from a clean slate |
+| Script halts: "M{N} failed exit-gate check N" | The milestone agent skipped its exit ritual (check name says which step) | Read `initiatives/current/logs/M{N}.log`, fix manually or restart from M{N} with `./automation/scripts/run_next.sh M{N} --run` |
 | Script finishes but no REVIEW.md | Review session failed | Read last log; manually invoke the review prompt against `initiatives/current/` |
 | `pytest` regression at review time | A milestone introduced a real bug | Stop, investigate, fix on a branch; do NOT proceed to wrap-up until green |
 

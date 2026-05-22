@@ -83,12 +83,20 @@ read_config_scalar() {
 }
 
 # List milestone IDs by scanning prompts/M*.md (sorted naturally).
+# Used only for pre-flight cross-check against config.yaml.
 list_milestones_from_prompts() {
   local f
   for f in "$PROMPTS_DIR"/M*.md; do
     [ -f "$f" ] || continue
     basename "$f" .md
   done | sort -V
+}
+
+# List milestone IDs from initiatives/current/config.yaml in DECLARATION
+# ORDER (this is what RUNBOOK Phase 2A specifies as the execution order).
+# Matches keys shaped like "  M{digits}:" under the milestones: block.
+list_milestones_from_config() {
+  awk '/^  M[0-9]+:/ { sub(/^  /, ""); sub(/:.*$/, ""); print }' "$CONFIG"
 }
 
 # ---------------------------------------------------------------------------
@@ -143,9 +151,20 @@ printf 'model      : %s\n' "$CLAUDE_MODEL"
 ALL_MILESTONES=()
 while IFS= read -r m; do
   [ -n "$m" ] && ALL_MILESTONES+=("$m")
-done < <(list_milestones_from_prompts)
+done < <(list_milestones_from_config)
 
-[ ${#ALL_MILESTONES[@]} -gt 0 ] || die "no prompts/M*.md found under $PROMPTS_DIR"
+[ ${#ALL_MILESTONES[@]} -gt 0 ] || die "no milestones found in $CONFIG (expected '  M{N}:' entries under 'milestones:')"
+
+# Pre-flight cross-check: every M{N} in config.yaml must have a matching
+# prompts/M{N}.md file, and vice versa. Catches Phase 1 partial-bootstrap
+# state and INBOX/config drift before we waste a milestone session.
+CONFIG_SET=$(list_milestones_from_config | sort | tr '\n' ' ')
+PROMPT_SET=$(list_milestones_from_prompts | sort | tr '\n' ' ')
+if [ "$CONFIG_SET" != "$PROMPT_SET" ]; then
+  printf 'config.yaml milestones : %s\n' "$CONFIG_SET" >&2
+  printf 'prompts/M*.md files    : %s\n' "$PROMPT_SET" >&2
+  die "config.yaml milestones != prompts/M*.md files (Phase 1 may have failed mid-way; see RUNBOOK Failure modes)"
+fi
 
 if [ ${#MILESTONE_FILTER[@]} -gt 0 ]; then
   MILESTONES=("${MILESTONE_FILTER[@]}")
@@ -198,7 +217,7 @@ for M in "${MILESTONES[@]}"; do
   fi
 
   # ------------------------------------------------------------------------
-  # Exit-gate: 4 independent checks. ALL must pass or the loop halts.
+  # Exit-gate: 5 independent checks. ALL must pass or the loop halts.
   # See automation/RUNBOOK.md Phase 2A for the full spec.
   # ------------------------------------------------------------------------
 
@@ -227,7 +246,10 @@ for M in "${MILESTONES[@]}"; do
   # runs pytest before commit per §4, but we trust-but-verify here so a
   # skipped or flaky agent run does not propagate to the next milestone.
   if [ "$SKIP_QUALITY" -eq 0 ]; then
-    if ! (cd "$REPLICA_DIR" && pytest --tb=no -q > /dev/null 2>&1); then
+    if ! PYTEST_OUT="$(cd "$REPLICA_DIR" && pytest --tb=no -q 2>&1)"; then
+      echo "---- pytest output (last 20 lines) ----" >&2
+      echo "$PYTEST_OUT" | tail -20 >&2
+      echo "---- end pytest output ----" >&2
       die "$M failed exit-gate check 4: pytest is now red (rerun: cd python-replica && pytest)"
     fi
   fi

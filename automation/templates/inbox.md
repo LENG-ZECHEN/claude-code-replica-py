@@ -41,23 +41,26 @@ milestones:                       # required, at least one entry
 
 # Background / motivation
 
-(Optional.)
+(Optional. What changed in the project or world that makes this the right
+time. Tickets, conversations, prior incidents that triggered this work.)
 
 # Design sketch
 
 (Optional. Key architectural choices, named classes/modules to add or
-modify, data flow.)
+modify, data flow. NOT a complete spec — milestone prompts will fill in
+detail.)
 
 # Risks / known unknowns
 
-(Optional.)
+(Optional. What might break, what the agent might trip over, what to
+verify manually before declaring done.)
 
 # Out of scope (this initiative)
 
 (Optional. List things adjacent observers might expect to see but you've
-explicitly decided to defer.)
+explicitly decided to defer. Helps the milestone agent not to drift.)
 
 # Anything else
 
 (Optional. Free-form. Phase 1 preserves everything below the YAML verbatim
-into PLAN.md.)
+into PLAN.md, so you can add any sections you like.)

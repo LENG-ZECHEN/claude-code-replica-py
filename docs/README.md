@@ -43,8 +43,11 @@ What the review session will NEVER do automatically:
 - Overwrite an existing file's body (only append to a `## Recent changes`
   section).
 - Delete any file in `docs/`.
-- Rewrite an existing ADR (only mark it `superseded by` and create a new
-  one).
+- Rewrite an existing ADR's body. Even marking an old ADR as
+  `superseded by` is **Tier C** (the review session proposes the
+  status-line diff in REVIEW.md; a human applies it after confirming
+  the supersedes reasoning). The review session DOES auto-create the
+  new ADR file (Tier B) — but it never touches the old file.
 - Edit `reports/` files (those are frozen artifacts).
 
 Anything outside the above — rewrites, reorganizations, structural

@@ -1,124 +1,142 @@
-# AUTONOMOUS_RUN_SETUP
+# automation/ — setup and runner reference
 
-One-time setup before running `scripts/run_all_milestones.sh`.
+> Operating guide for the initiative automation harness in this repo.
+> For the actual workflow (Phase 1 bootstrap, Phase 2 execute + review),
+> see [`RUNBOOK.md`](./RUNBOOK.md). This README covers one-time setup
+> and what the scripts here do.
 
----
+## What lives here
 
-## 1. Verify Claude Code version (need >= 2.1.51 for `--remote-control`)
-
-```bash
-claude --version
-# Expected: 2.1.51 or higher. You are on 2.1.146 — OK.
+```
+automation/
+├── README.md             # this file — one-time setup + runner reference
+├── RUNBOOK.md            # the actual workflow (Phase 1 / Phase 2)
+├── INBOX.md              # where you write the next initiative brief
+├── scripts/
+│   ├── run_all_milestones.sh   # Phase 2 entry point — full loop + review
+│   └── run_next.sh             # single-milestone debug runner
+├── templates/            # 8 skeletons used by Phase 1 + 2
+└── logs/                 # gitignored scratch; per-initiative logs live
+                          #   under initiatives/current/logs/
 ```
 
-## 2. Verify Claude account plan
+## One-time setup
 
-`--remote-control` requires a **Pro / Max / Team / Enterprise** plan on
-claude.ai. Free-tier API keys alone are not enough. Confirm by visiting
-claude.ai/account.
+### 1. Claude Code CLI
 
-## 3. Install the allowedTools whitelist
+Both scripts call `claude --print --model claude-opus-4-7`. You need:
 
-Open `~/.claude/settings.json` and add the `permissions` block below.
-**Merge** with your existing keys (do not delete `enabledPlugins`,
-`theme`, etc.).
+- Claude Code CLI v2.1.51 or later (`claude --version`)
+- A claude.ai account on Pro / Max / Team / Enterprise plan
+- The model `claude-opus-4-7` accessible to your account
 
-```json
-{
-  "permissions": {
-    "allow": [
-      "Read", "Write", "Edit",
-      "Glob", "Grep",
-      "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput",
-      "Bash(git:*)",
-      "Bash(pytest*)", "Bash(python:*)", "Bash(python3:*)",
-      "Bash(mypy:*)", "Bash(ruff:*)", "Bash(pip:*)",
-      "Bash(ls:*)", "Bash(ls)", "Bash(pwd)", "Bash(cd:*)",
-      "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)",
-      "Bash(grep:*)", "Bash(find:*)", "Bash(wc:*)", "Bash(diff:*)",
-      "Bash(mkdir:*)", "Bash(chmod:*)", "Bash(touch:*)",
-      "Bash(echo:*)", "Bash(printf:*)"
-    ],
-    "deny": [
-      "Bash(rm:*)", "Bash(rmdir:*)",
-      "Bash(curl:*)", "Bash(wget:*)",
-      "Bash(sudo:*)", "Bash(ssh:*)", "Bash(scp:*)",
-      "Bash(npm publish:*)", "Bash(git push --force:*)"
-    ]
-  }
-}
-```
+### 2. allowedTools / disallowedTools
 
-### Why this set
+`claude --print` **silently ignores** `~/.claude/settings.json`
+permissions and hangs when it wants to use an unapproved tool. The
+scripts in this folder pass the permission whitelist as CLI flags
+(`--allowedTools` / `--disallowedTools`) on every invocation, so you do
+**NOT** need to configure `settings.json` for the automation to work.
+
+The whitelist is hard-coded near the top of both `run_all_milestones.sh`
+and `run_next.sh` — they share the exact same list:
 
 | Category | Why included |
 |---|---|
 | `Read` / `Write` / `Edit` | TDD: write tests, implement, refactor |
-| `Glob` / `Grep` | Cross-file searches the model relies on |
-| `Task*` | Milestone task tracking |
-| `Bash(git:*)` | commits, log, diff, status |
-| `Bash(pytest* / mypy:* / ruff:* / python*)` | Quality gates |
-| `Bash(pip:*)` | Editable install or new test deps |
-| `Bash(ls/cat/head/tail/grep/find/wc/diff)` | File inspection |
-| `Bash(mkdir/chmod/touch)` | Scaffolding |
-| **Denied: rm / curl / wget / sudo / ssh / force-push** | Eliminates the worst non-recoverable mistakes |
+| `Glob` / `Grep` | Cross-file searches |
+| `Task*` | Milestone progress tracking |
+| `Bash(git *)` | commits, log, diff, status |
+| `Bash(pytest *)` / `Bash(mypy *)` / `Bash(ruff *)` / `Bash(python *)` | Quality gates |
+| `Bash(pip *)` | Editable install or new test deps |
+| `Bash(ls/cat/head/tail/grep/find/wc/diff *)` | File inspection |
+| `Bash(mkdir/chmod/touch *)` | Scaffolding |
+| **Denied** | `rm` / `rmdir` / `curl` / `wget` / `sudo` / `ssh` / `git push --force` |
 
-The denylist is non-negotiable. Even with `permissions.allow`, anything in
-`deny` will block. If a future milestone genuinely needs network access,
-edit this file explicitly — never blanket-allow.
+The deny list is non-negotiable: these stop the worst non-recoverable
+mistakes (mass delete, network exfil, force-push). If a future
+initiative genuinely needs network access, edit the script explicitly —
+do **not** blanket-allow.
 
-## 4. Restart any open Claude Code session
-
-Permissions are loaded at session start. After editing
-`~/.claude/settings.json`, kill and restart any open `claude` window for
-the new rules to take effect.
-
-## 5. Pre-flight test
+### 3. Verify
 
 ```bash
 cd /Users/leng/my-cc-py/python-replica
-
-# Inspect what each milestone's prompt will look like:
-./scripts/run_all_milestones.sh --dry-run M2
-
-# When happy, launch the real run (M2 -> M3 -> M4 -> M5):
-./scripts/run_all_milestones.sh
+./automation/scripts/run_all_milestones.sh --help
 ```
 
-## 6. While it runs
+Should print the script's usage block. If you see `claude CLI not on
+PATH` instead, install / PATH-fix Claude Code first.
 
-- **Watch from mobile**: open Claude iOS/Android app. Each milestone
-  spawns its own session — you'll see them appear as the loop advances.
-- **Watch from desktop**: open claude.ai/code in any browser, log in;
-  the running session appears in the sidebar.
-- **Watch from another terminal**: `tail -f logs/M*.log`
-- **Intervene**: type into the remote-controlled session at any point.
-  The local `claude --print` process reflects your input.
-- **Abort**: Ctrl-C in the terminal running the loop kills the current
-  milestone but leaves prior commits intact. Restart with
-  `./scripts/run_all_milestones.sh M3 M4 M5` to resume from where it
-  stopped.
+## Running
 
-## 7. Failure modes
-
-| Symptom | Cause | Action |
-|---|---|---|
-| Loop stops with "did not produce a P9-MN commit" | Milestone session exited without committing | Check `logs/MN.log` for why; commit manually if work is salvageable, then resume |
-| Each tool call still prompts | Whitelist not loaded | Restart the claude session; re-check `~/.claude/settings.json` JSON validity |
-| Remote control not appearing on phone | Plan tier insufficient, or `--remote-control` flag rejected | Check plan; check `claude --remote-control --help` |
-| `working tree dirty` pre-flight error | Uncommitted changes from manual edits | `git stash` or `git commit` before re-launching |
-
-## 8. Cost reality check
-
-Each milestone session runs ~1-3 hours and processes thousands of tokens
-per turn. Expect **$10-30 per milestone** at Opus pricing. The 4-milestone
-loop (M2-M5) total: **roughly $40-120**.
-
-Before launching the full loop, run M2 alone first, observe actual cost,
-then decide whether to chain the rest:
+The full workflow lives in [`RUNBOOK.md`](./RUNBOOK.md). The TL;DR:
 
 ```bash
-./scripts/run_all_milestones.sh M2
-# inspect cost via Claude usage dashboard, then:
-./scripts/run_all_milestones.sh M3 M4 M5
+# 0. Write your brief in automation/INBOX.md (delete placeholder block).
+$EDITOR automation/INBOX.md
+
+# 1. Bootstrap (one prompt to a Claude session — Phase 1 in RUNBOOK).
+#    Say to any Claude session:  "Run RUNBOOK Phase 1."
+#    The session creates initiatives/current/ and generates per-milestone prompts.
+#    It does NOT commit. You review and commit.
+
+# 2. Review the bootstrap diff + commit.
+cd python-replica
+git status && git diff
+git add automation/INBOX.md NOW.md initiatives/
+git commit -m "[<commit_prefix>/bootstrap] ..."
+
+# 3. Run the loop — one session per milestone + one review session.
+./automation/scripts/run_all_milestones.sh
 ```
+
+### Script flags — `run_all_milestones.sh`
+
+```
+./automation/scripts/run_all_milestones.sh                  run every milestone in config
+./automation/scripts/run_all_milestones.sh M3 M4            run a subset (skips review)
+./automation/scripts/run_all_milestones.sh --dry-run        print prompts only
+./automation/scripts/run_all_milestones.sh --skip-review    run milestones, skip wrap-up session
+./automation/scripts/run_all_milestones.sh --skip-quality   skip the pytest exit-gate check (faster, less safe)
+./automation/scripts/run_all_milestones.sh --help           usage
+```
+
+### Script flags — `run_next.sh` (debug runner)
+
+```
+./automation/scripts/run_next.sh M3            show pre-flight + prompt path for M3
+./automation/scripts/run_next.sh M3 --run      launch a single-milestone session for M3
+./automation/scripts/run_next.sh --help        usage
+```
+
+`run_next.sh` is for when the main loop halts and you need to retry one
+milestone. It does **NOT** enforce the 5-check exit gate — re-run the
+full loop afterward to continue.
+
+### While the loop runs
+
+- **Live view from another terminal**: `tail -f initiatives/current/logs/M*.log`
+- **Abort**: Ctrl-C in the terminal running the script. Prior commits are intact.
+  Resume with `./automation/scripts/run_all_milestones.sh M{N} M{N+1} ...`
+  (subset mode skips review; rerun full once all milestones present to trigger review).
+
+## Failure modes
+
+Most failure cases live in [`RUNBOOK.md`](./RUNBOOK.md) "Failure modes".
+The quick reference here covers script-level issues only:
+
+| Symptom | Likely cause | Action |
+|---|---|---|
+| Script halts: `config not found` | Phase 1 not run yet | Run Phase 1 first (see RUNBOOK) |
+| Script halts: `M{N} failed exit-gate check N` | Milestone agent skipped a ritual step | Read which check name failed; inspect `initiatives/current/logs/M{N}.log` |
+| Script halts: `review session did not produce a '[<prefix>/wrap]' commit` | Review session failed mid-way | Inspect `initiatives/current/logs/review.log` |
+| `working tree dirty` pre-flight | Uncommitted changes | `git stash` or `git commit` before retry |
+| Tool calls prompt for permission | You ran `claude` directly instead of the script | Use the script — it passes `--allowedTools` as CLI flags |
+
+## Cost reality
+
+Each milestone session runs ~25-45 minutes and costs roughly $15-30 at
+Opus pricing. The final review session adds ~$5-15. A 5-milestone
+initiative is roughly $80-160 total. Run a single `M1` first to
+calibrate before chaining the rest.
