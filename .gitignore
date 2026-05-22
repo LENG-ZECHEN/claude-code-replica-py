@@ -21,3 +21,9 @@ dist/
 #                              wrap-up time (where they ARE tracked).
 automation/logs/
 initiatives/current/logs/
+
+# Visibility demo artifacts (M3).
+# examples/_artifacts/<run-id>/  — per-run trace/transcript/metrics/summary
+#                                  bundles written by visibility_full_demo.py.
+#                                  Local-only; never committed.
+examples/_artifacts/

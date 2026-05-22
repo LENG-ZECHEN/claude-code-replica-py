@@ -1,9 +1,7 @@
-# HANDOFF — Next: M3 (real-api-visibility-demo-and-guard)
+# HANDOFF — Initiative complete (M3 was the last milestone)
 
-> Updated by: M2 (manual exit-ritual collation — agent session was
-> terminated by API usage exhaustion before reaching §5; source work was
-> complete, this collation closes the bookkeeping)
-> Date: 2026-05-23
+> Updated by: `M3` session
+> Date: 2026-05-22
 > Re-verify Section 3 numbers before starting work — do not trust this
 > file blindly.
 
@@ -12,9 +10,9 @@
 ## 1. Current initiative
 
 - **slug**: `observable-thresholds`
-- **current milestone**: _(none in flight — M2 just landed)_
-- **next milestone**: `M3` — real-api-visibility-demo-and-guard
-- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [next]
+- **current milestone**: just-completed `M3` — real-api-visibility-demo-and-guard
+- **next milestone**: _(none — initiative complete; PLAN.md marked `STATUS: complete`)_
+- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [done]
 
 ## 2. Completed milestones
 
@@ -51,12 +49,32 @@
   - Agent session terminated by API usage exhaustion before reaching §5 exit ritual. Source work verified complete by manual audit (pytest 551, mypy clean, ruff clean, banner smoke test, demo run). This commit is the manual exit-ritual collation per RUNBOOK recovery path.
   - The 8-turn REPL smoke test with `--verbose --aggressive-thresholds` producing `[trace] [compact]` + `[trace] [snip]` on stderr was verified via the demo script (`full_compacts=1, snip_runs=6`), not via the literal CLI pipe invocation in §5, because MockProvider's default scripted responses don't generate tool calls. The demo's `_build_repl_loop(aggressive_thresholds=True)` call path is identical to the CLI's.
 
+### M3
+
+- **commit**: `TBD` `[obs-thr/M3] visibility_full_demo.py + artifact guard + .gitignore`
+- **files changed**:
+  - new: `examples/visibility_full_demo.py` (~270 LoC; runs `OpenAIProvider` under `_build_repl_loop(aggressive_thresholds=True)`, drives 3 scripted turns, writes `transcript.txt` / `trace.stderr` / `metrics.json` / `summary.md` to `examples/_artifacts/visibility-demo-<UTC-timestamp>/` — operator overrides the parent via `--output-root`)
+  - new: `tests/test_visibility_full_demo.py` (+6 cases — missing-confirm-flag exit 2, missing-API-key exit 3, four artifacts non-empty, `[trace] [budget]` + `[trace] [externalize]` lines present, summary.md row-per-channel, `.gitignore` guard)
+  - modified: `.gitignore` (adds `examples/_artifacts/` so per-run artifact directories never enter version control; required by the same-commit invariant in M3 prompt §4)
+  - modified: `README.md` (one new row in the `examples/` listing pointing operators at `visibility_full_demo.py`)
+  - modified: `initiatives/current/PLAN.md` (added `> STATUS: complete (M1 + M2 + M3 shipped 2026-05-22)` between the provenance line and the `# Goal` heading)
+  - modified: `initiatives/current/HANDOFF.md` (this file)
+  - modified: `initiatives/current/PROGRESS.md` (appended `## M3 — done 2026-05-22` block; M1 and M2 blocks preserved verbatim)
+- **tests added**: `tests/test_visibility_full_demo.py` (+6 cases). Total: 551 → 557 (+6)
+- **behavior implemented**: `examples/visibility_full_demo.py` exposes an operator-facing demo that exercises every public observability surface introduced by M1 and M2 end-to-end against a real OpenAI-compatible endpoint. Argparse exposes three flags: `--confirm-api-call` (required; missing → print explanation, exit 2 — `OpenAIProvider` is **not** constructed on this path), `--model` (defaults to `$SIMPLE_AGENT_MODEL` or `gpt-4o-mini`), and `--output-root` (defaults to `examples/_artifacts/`; tests redirect to `tmp_path`). API-key check (`OPENAI_API_KEY` or `DASHSCOPE_API_KEY`) gates the happy path; missing → exit 3 with a stderr explanation, still without constructing a provider. The happy path opens `<run_dir>/trace.stderr` for write, wires `StderrTracer(stream=...)`, builds the loop via `cli._build_repl_loop(..., provider=OpenAIProvider(...), tracer=tracer, aggressive_thresholds=True)`, drives three scripted user turns (read `seed.txt`, read it again, leave a Chinese/English preference cue), then writes `transcript.txt` (human-readable rendering of `Transcript.to_jsonable(include_virtual=True)`), `metrics.json` (the six `MetricsCollector` fields), and `summary.md` (one row per locked channel + tokens-per-turn + counter dump). Channels are parsed back out of `trace.stderr` so the summary's "first fire site" column is grounded in real on-disk evidence.
+- **design decisions (deviations from PLAN)**:
+  - **`--output-root` flag was added beyond the PLAN sketch.** PLAN.md fixed the artifact root at `examples/_artifacts/`; the test surface needs the directory to be redirectable so unit tests do not write inside the repo. The flag defaults to `examples/_artifacts/` so the operator-facing behavior matches PLAN exactly. Visible in: `examples/visibility_full_demo.py:_build_parser`. Impact on later work: none — initiative is complete.
+  - **Exit-code-3 semantics follow the M3 prompt, not the M2 HANDOFF.** The M2 HANDOFF §5 suggested exit 3 should mean "no compact/snip fired"; the M3 prompt explicitly redefined exit 3 as "missing API key" (and test case (b) in the prompt is built around that). Per the prompt's §3 rule that HANDOFF is advisory and the prompt is source of truth, exit 3 = missing API key. The "did compact/snip actually fire" signal lives in `summary.md` instead.
+- **known limitations**:
+  - The real-API code path (`_run`) is only smoke-verified through the CLI exit codes (`exit=2` for missing flag, `exit=3` for missing key); the artifact-writing branch is exercised by tests via a `MockProvider`-backed shim that replaces `OpenAIProvider`. A real-key end-to-end run is left to the operator (see M3 prompt §5 step 1 note that this is optional for the gate).
+  - The summary's "first fire site" column shows the field values from the first event of each channel; if a future channel emits events whose first occurrence is uninformative, the operator may want a "best" or "representative" event instead. Defer to a future initiative.
+
 ## 3. Current repo state
 
-> Re-verify these numbers before starting work.
+> Re-verify these numbers before starting. Do not trust this list blindly.
 
-- **last commit**: `TBD` `[obs-thr/M2] add --aggressive-thresholds preset + SnipTool/MicroCompactor constructor params`
-- **tests**: 551 passing
+- **last commit**: `TBD` `[obs-thr/M3] visibility_full_demo.py + artifact guard + .gitignore`
+- **tests**: 557 passing (was 551 after `M2`, delta +6)
 - **mypy**: clean (no issues found in 21 source files)
 - **ruff**: clean (all checks passed)
 - **branch**: main
@@ -82,24 +100,42 @@
   - **Secret-leak invariant**: trace lines MUST NOT contain raw user input or LLM output text. Only metadata (counts, token estimates, entry names, scores, tool ids). Enforced by `tests/test_trace.py::test_stderr_tracer_no_raw_user_input_through_repl`. Any new fire site MUST honor this.
   - Fire-site ordering: perform-action → `tracer.emit(...)` → `metrics.record_*()` (where applicable).
 
+New constraints from M3:
+
+- **do not modify**:
+  - The four artifact filenames written by `visibility_full_demo.py`: `transcript.txt`, `trace.stderr`, `metrics.json`, `summary.md`. The M3 prompt's exit gate names them exactly; any future demo that wants to add more artifacts must NOT rename these four.
+  - `.gitignore` entry `examples/_artifacts/` — committing anything under that directory dirties the working tree and breaks the autonomous-loop pre-flight check.
+- **preserve**:
+  - The two exit codes — `2` (missing `--confirm-api-call`) and `3` (missing API key) — and the invariant that neither path constructs `OpenAIProvider`. The `_ExplodingProvider` tripwire in `tests/test_visibility_full_demo.py` enforces this.
+
 ## 5. Next milestone guidance
 
-For `M3` — real-api-visibility-demo-and-guard:
+**This was the last milestone.** PLAN.md is marked `STATUS: complete`.
+The autonomous loop will start the review session next; no further
+milestone session will read this guidance, but the review session and
+any human operator will.
 
-- **next scope (refined from PLAN by M2 experience)**:
-  - New `examples/visibility_full_demo.py` (~120-160 LoC): real-API demo using `OpenAIProvider` (or any OpenAI-compatible endpoint), runs with `--aggressive-thresholds` wiring, drives 8 turns with repeated `read_file` calls, saves 4 artifacts to a timestamped `artifacts/<run-id>/` directory: `trace.stderr`, `metrics.json`, `summary.md`, `transcript.json`. Guard: `--confirm-api-call` flag required to make any real API call (exit code 2 if missing). Exit code 3 if at least one of compact/snip channels never fires.
-  - Update `.gitignore` to exclude `artifacts/` in the same M3 commit.
-  - New `tests/test_visibility_full_demo.py` (~6 cases): use `_ExplodingProvider` (raises `PromptTooLongError`) to trigger reactive-compact path without a real API key; assert artifact directory is created, `trace.stderr` contains expected `[trace]` prefixes, `metrics.json` is valid JSON with the 6 MetricsCollector fields, `summary.md` contains one row per active channel, exit code 3 fires when no compact/snip.
-  - README.md "Examples" section: document `visibility_full_demo.py` usage.
-  - Mark `initiatives/current/PLAN.md` STATUS=complete (M3 is the last milestone — see M3 prompt §5.5).
-- **channels confirmed firing under aggressive thresholds** (M2 demo, `snip_keep=1`, `compact_threshold=0.2`, `ctx=4k`, 8-turn repeated-read): `snip` (6×), `compact` (1×), `microcompact` (1×). M3's `summary.md` must emit all 9 channel rows (0 is a valid count; row omission is not).
-- **relevant files**: `examples/visibility_full_demo.py` (new), `.gitignore` (update), `tests/test_visibility_full_demo.py` (new), `README.md` (update Examples section), `initiatives/current/PLAN.md` (mark STATUS=complete in §5.5)
-- **risks**:
-  - **Real-API cost**: `--confirm-api-call` gate is mandatory; without it the demo must NOT make any network call.
-  - **Artifact directory must be in `.gitignore` in the same commit**.
-  - **Exit codes 2 and 3 must be distinct**: exit 2 = guard missing, exit 3 = no compact/snip fired.
-  - **`super().__init__()` chain** — any new subclass of a Tracer-bearing component must call `super().__init__()`.
-  - **`_AGGRESSIVE_THRESHOLDS` import**: `from simple_coding_agent.cli import _AGGRESSIVE_THRESHOLDS` (module-level, not a function scope).
+Deferred items surfaced during M3 (candidates for a future initiative):
 
-The full ready-to-run prompt is at:
+- **JSON-lines tracer back-end.** `StderrTracer` writes human-readable
+  lines. A future `JsonlTracer` (or `OpenTelemetryTracer`) would let the
+  demo emit machine-readable events and remove the `_parse_trace_events`
+  re-parsing currently in `visibility_full_demo.py`.
+- **A `/trace` REPL slash command.** Static `--verbose` is sufficient
+  today, but mid-session toggling would help operators who realise after
+  several turns that they want to start capturing the trace stream.
+- **Semantic memory selector.** `MemorySelector` is lexical Jaccard; a
+  BM25 or embedding-based selector would be a more useful real-world
+  demo of `ProjectMemory` and would let the visibility demo's auto-learn
+  cue surface more interesting `memory_select` events.
+- **`summary.md` "best event" column.** Currently shows the first event
+  per channel; surfacing a representative event (largest externalized
+  bytes, largest compacted message count) would tell a tighter story
+  for `compact` and `externalize` rows.
+- **Real-key end-to-end smoke run.** The autonomous-loop gate cannot
+  consume API quota; running with a real `OPENAI_API_KEY` is the
+  remaining manual verification the operator should do before declaring
+  the initiative shipped externally.
+
+The full M3 prompt is at:
 `initiatives/current/prompts/M3.md`

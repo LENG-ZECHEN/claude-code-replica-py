@@ -191,6 +191,7 @@ milestones:
       the M3 prompt to avoid relying on the auto-apply.
 ---
 > Bootstrapped on 2026-05-22. Baseline commit: 2d414d91da65cc5998563e9c63b2d2be7028315d. Baseline pytest: 520 passing.
+> STATUS: complete (M1 + M2 + M3 shipped 2026-05-22)
 
 # Goal
 

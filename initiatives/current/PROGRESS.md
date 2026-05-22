@@ -36,3 +36,12 @@ exists in this file. Deleting or rewriting a prior block halts the loop.
 - **files changed**: `src/simple_coding_agent/cli.py`, `src/simple_coding_agent/compact.py`, `src/simple_coding_agent/openai_cli.py`, `src/simple_coding_agent/snip.py`, `examples/aggressive_thresholds_demo.py` (new), `tests/test_snip.py`, `tests/test_repl.py`, `tests/test_openai_cli_repl.py`, `tests/test_aggressive_thresholds_demo.py` (new)
 - **exit gate**: `--aggressive-thresholds` REPL startup banner starts with `[aggressive-thresholds]`; demo shows full_compacts=1, snip_runs=6; pytest ≥ 545; mypy + ruff clean → **PASS** (smoke: banner verified; demo: full_compacts=1, snip_runs=6; pytest 551, mypy 21 files clean, ruff clean)
 - **notes**: agent session terminated by API usage exhaustion before reaching §5 exit ritual; source work was complete. This commit is the manual exit-ritual collation per RUNBOOK recovery path.
+
+## M3 — done 2026-05-22
+
+- **commit**: `TBD` `[obs-thr/M3] visibility_full_demo.py + artifact guard + .gitignore`
+- **tests**: 551 → 557 (+6)
+- **mypy**: clean | **ruff**: clean
+- **files changed**: `examples/visibility_full_demo.py` (new), `tests/test_visibility_full_demo.py` (new), `.gitignore`, `README.md`, `initiatives/current/PLAN.md`, `initiatives/current/HANDOFF.md`, `initiatives/current/PROGRESS.md`
+- **exit gate**: `visibility_full_demo.py` without `--confirm-api-call` exits 2; with the flag but no API key exits 3; the key-less path proves `OpenAIProvider` is never constructed via the `_ExplodingProvider` tripwire; pytest ≥ 550; mypy + ruff clean → **PASS** (CLI smoke: no-flag exit=2, `--confirm-api-call` without key exit=3, pytest 557, mypy 21 files clean, ruff clean)
+- **notes**: M3 is the last milestone; PLAN.md marked `STATUS: complete`. M2 HANDOFF §5 suggested exit-3 == "no compact/snip fired"; the M3 prompt overrode that (exit 3 = missing API key) and was followed as source of truth.

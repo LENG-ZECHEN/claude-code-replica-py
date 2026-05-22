@@ -54,6 +54,7 @@ tests/
 examples/
   demo.py                 MockProvider demo (no API key, no network)
   openai_chat_demo.py     Hardened OpenAI demo (requires --confirm-api-call)
+  visibility_full_demo.py Real-API visibility demo — writes trace, transcript, metrics, and summary artifacts under examples/_artifacts/ (requires --confirm-api-call)
 ```
 
 ## Setup
