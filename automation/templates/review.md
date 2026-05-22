@@ -3,8 +3,8 @@ PROMPT for the script-spawned review + wrap-up session.
 
 automation/scripts/run_all_milestones.sh invokes one final
 `claude --print` after all milestones pass their exit gate. The script
-substitutes {{INITIATIVE_SLUG}}, {{COMMIT_PREFIX}}, {{ARCHIVE_SLUG}}
-before piping this file as stdin.
+substitutes {{INITIATIVE_SLUG}}, {{COMMIT_PREFIX}}, {{ARCHIVE_SLUG}},
+and {{BASELINE_COMMIT}} (4 tokens) before piping this file as stdin.
 
 The review session is REQUIRED to honor the steps below in order. Its
 exit ritual (Phase 2C wrap-up) physically moves initiatives/current/
@@ -44,11 +44,17 @@ Step 2 below).
 ### Step 1: Verify completion
 
 For every M{N} in `config.yaml`:
-- `git -C python-replica log --oneline | grep -F "[{{COMMIT_PREFIX}}/M{N}]"`
-  must return at least one match.
+- `git -C python-replica log {{BASELINE_COMMIT}}..HEAD --oneline | grep -F "[{{COMMIT_PREFIX}}/M{N}]"`
+  must return at least one match. The `{{BASELINE_COMMIT}}..HEAD` range
+  restricts the search to THIS initiative's commits, preventing false
+  positives from a prior archived initiative that happened to reuse the
+  same `commit_prefix`. `{{BASELINE_COMMIT}}` was substituted in by the
+  shell script from `initiatives/current/config.yaml` (Phase 1 Step 5).
 - If any milestone is missing its commit, STOP and write a
   REVIEW.md with just a "BLOCKED" section explaining which milestone
-  failed and why. Skip Steps 2-7 and Phase 2C.
+  failed and why. Skip Steps 2-6 (rest of Phase 2B) and all of Phase 2C
+  (Steps 7-11) — do NOT run `git mv initiatives/current
+  initiatives/_archive/...` against an incomplete initiative.
 
 ### Step 2: Snapshot final numbers
 
@@ -143,13 +149,19 @@ Read `automation/RUNBOOK.md` section "Doc-update tiers (used by Step 6)"
 in full before starting this step. The tier definitions live there; this
 section just tells you how to execute them.
 
-Run the diff once at the top of this step:
+Run the diff once at the top of this step. The `{{BASELINE_COMMIT}}`
+token was substituted in by the shell script from
+`initiatives/current/config.yaml` (Phase 1 Step 5). It points at the
+Phase 1 entry HEAD — i.e. the commit BEFORE the human-made bootstrap
+commit and before any milestone shipped — so `{{BASELINE_COMMIT}}..HEAD`
+spans every change this initiative introduced. Limiting `--` to
+`src/ pyproject.toml` ignores the bootstrap commit's
+`initiatives/ + INBOX.md` move, leaving exactly the production-code
+delta to classify into Tier A/B/C.
 
 ```
-git -C python-replica log --oneline | grep -F "[{{COMMIT_PREFIX}}/M1]"  # find bootstrap-commit
-BOOTSTRAP_PARENT=<the commit immediately before the [{{COMMIT_PREFIX}}/M1] commit>
-git -C python-replica diff $BOOTSTRAP_PARENT..HEAD --stat -- src/ pyproject.toml
-git -C python-replica diff $BOOTSTRAP_PARENT..HEAD --name-only -- src/ pyproject.toml
+git -C python-replica diff {{BASELINE_COMMIT}}..HEAD --stat -- src/ pyproject.toml
+git -C python-replica diff {{BASELINE_COMMIT}}..HEAD --name-only -- src/ pyproject.toml
 ```
 
 Then walk each tier in order:

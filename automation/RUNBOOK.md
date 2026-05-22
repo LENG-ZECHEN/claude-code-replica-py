@@ -88,10 +88,46 @@ line. If either fails, refuse and explain — do NOT proceed to Step 1.
 
 ### Pre-flight checks
 
-1. Working tree is clean (`git -C python-replica status --short` empty).
+1. Working tree has no uncommitted changes **except**
+   `automation/INBOX.md`. This exception is required because the normal
+   user path is to edit the tracked INBOX file before triggering Phase 1.
+   Check with:
+   `git -C python-replica status --short --untracked-files=all`.
+   Every listed path, after the two-column status prefix, must be
+   `automation/INBOX.md` (or the output is empty). `M`, `MM`, or staged
+   status variants for that one path are allowed. Any other modified,
+   staged, deleted, renamed, or untracked path is a hard failure.
 2. `initiatives/current/` contains only `.gitkeep` (no active initiative).
-3. `automation/INBOX.md` exists and is not the bare template
-   (look for at least one milestone entry).
+3. `automation/INBOX.md` exists and is not the bare template. **Three
+   hard checks** (ALL must hold):
+   (a) `grep -q '^> placeholder:' automation/INBOX.md` returns
+       NON-zero (the placeholder block has been deleted);
+   (b) the parsed `slug` value is NOT `example-slug` (the literal
+       template default);
+   (c) the parsed `commit_prefix` value is NOT `example-prefix`.
+   **Why not "at least one milestone entry"?** The bare template itself
+   already declares example `M1` and `M2` entries, so a milestone-count
+   check trivially passes and cannot tell template from real content.
+   The three signals above ARE template-specific and disappear the
+   moment the user replaces them with real values.
+4. The `commit_prefix` declared in INBOX is NOT already used anywhere
+   in git history. Check with
+   `git -C python-replica log --format='%s' | grep -qF "[${commit_prefix}/"`.
+   If it returns non-empty (a prior initiative already used the same
+   prefix), refuse and ask the user to pick a different prefix.
+   **Implementation note:** this check needs INBOX's `commit_prefix`,
+   which requires YAML parsing — do the parse once here and reuse the
+   parsed structure for Step 1 ("Validate INBOX") below instead of
+   re-parsing. If the YAML is malformed and `commit_prefix` cannot be
+   extracted, surface that as a distinct failure ("INBOX YAML parse
+   error: <details>") rather than reporting "prefix already used",
+   so the user knows which problem to fix first.
+   **Why:** prefix reuse would let `run_all_milestones.sh`'s
+   `find_milestone_commit` and the review session's Step 1 grep collide
+   with prior-initiative commits, causing either misleading "PROGRESS
+   block missing" failures or (in pathological cases) false skips.
+   `baseline_commit` (Step 5 below) defends the runtime, but rejecting
+   reuse here catches the problem earlier and avoids confusing the user.
 
 If any check fails, stop and report. Do not proceed.
 
@@ -103,7 +139,7 @@ If any check fails, stop and report. Do not proceed.
 | 2 | **Derive archive slug** = `<YYYY-MM>-<slug>` from today's date. | `archive_slug` |
 | 3 | **Decide if `run_all_milestones.sh` needs updating.** Edit ONLY if (a) the INBOX YAML schema introduces a field the script must parse (e.g., a new `before_first_milestone` hook), OR (b) the script's hard-coded `CLAUDE_MODEL` / `ALLOWED_TOOLS` / `DISALLOWED_TOOLS` need changing for this initiative. Otherwise: noop. | edit or noop |
 | 4 | **Move INBOX into the initiative.** `git mv automation/INBOX.md initiatives/current/PLAN.md`. Edit `PLAN.md` to prepend a provenance header above the original `---` YAML block: `> Bootstrapped on YYYY-MM-DD. Baseline commit: <SHA>. Baseline pytest: <N> passing.` | `initiatives/current/PLAN.md` |
-| 5 | **Generate `config.yaml`** from PLAN's YAML front-matter. Include `slug`, `commit_prefix`, `archive_slug`, and the full `milestones` table. | `initiatives/current/config.yaml` |
+| 5 | **Generate `config.yaml`** from PLAN's YAML front-matter. Include `slug`, `commit_prefix`, `archive_slug`, `baseline_commit` (output of `git -C python-replica rev-parse HEAD` at Phase 1 entry — the same SHA recorded in PLAN.md's provenance header and HANDOFF.md Section 3 baseline), and the full `milestones` table. `baseline_commit` lets `run_all_milestones.sh` and the review session restrict every commit-subject grep to this initiative's range (`baseline_commit..HEAD`), preventing collisions with prior-initiative commits that may have reused the same `commit_prefix`. | `initiatives/current/config.yaml` |
 | 6 | **Write `HANDOFF.md`** using `automation/templates/handoff_initial.md`. Fill `slug`, baseline commit/pytest/mypy/ruff, first milestone's name. | `initiatives/current/HANDOFF.md` |
 | 7 | **Write `PROGRESS.md`** using `automation/templates/progress_entry.md` as the file header (no milestone entries yet). | `initiatives/current/PROGRESS.md` |
 | 8 | **Write per-milestone prompts.** For every M{N} in PLAN's `milestones` block, write `initiatives/current/prompts/M{N}.md` using `automation/templates/milestone_prompt.md` as a skeleton. Customize every section using PLAN content, INBOX `notes`, and CLAUDE.md execution rules. Each prompt MUST include sections **§1 Baseline, §2 Scope, §2.5 Out of scope, §3 Mandatory reading, §4 Implementation requirements, §5 Exit ritual** (§2.5 is REQUIRED — the template fails open if missing). | N files |
@@ -141,10 +177,14 @@ read initiatives/current/config.yaml
 for each milestone M{N} in milestones (in declaration order):
     log_file = initiatives/current/logs/M{N}.log
     prompt   = initiatives/current/prompts/M{N}.md
-    if an existing [<commit_prefix>/M{N}] commit already passes the
-       resumability checks (HANDOFF touched in that commit, PROGRESS
-       block present, pytest green, HANDOFF has the 5-section structure):
+    if an existing [<commit_prefix>/M{N}] commit **in the range
+       baseline_commit..HEAD** already passes the resumability checks
+       (HANDOFF touched in that commit, PROGRESS block present, pytest
+       green, HANDOFF has the 5-section structure):
         skip M{N} and continue
+    (The baseline_commit..HEAD range — recorded in config.yaml by
+     Phase 1 Step 5 — is what prevents a prior archived initiative that
+     reused this commit_prefix from poisoning the resumability check.)
 
     claude --print --model claude-opus-4-7 \
            --allowedTools "<whitelist>" --disallowedTools "<denylist>" \
@@ -222,7 +262,7 @@ After the last milestone's exit gate passes, the script spawns ONE more
 | 3 | **Review prompts.** Open each `initiatives/current/prompts/M{N}.md` and score on **8 dimensions** (clarity, completeness, scope alignment with PLAN, constraint specificity, exit-ritual correctness, out-of-scope enumeration, mandatory-reading completeness, exit-gate objectivity) — see `automation/templates/review.md` Step 3 for the full table. Produce a per-prompt scorecard. |
 | 4 | **Review execution.** For each milestone, look at: commit message quality, test count delta, mypy/ruff status delta, **design decisions in the milestone's HANDOFF Section 2 subsection**, anomalies in the milestone log, plus 4 audit dimensions (implementation matches PLAN, scope discipline, HANDOFF accuracy, failure-path coverage) — see `automation/templates/review.md` Step 4 for the full table. Produce a per-milestone scorecard with **9 dimensions**. |
 | 5 | Write `initiatives/current/REVIEW.md` containing both scorecards plus a lessons-learned section that future Phase 1 bootstraps can read. |
-| 6 | **Three-tier doc update.** Diff `<bootstrap-commit>..HEAD -- src/ pyproject.toml` then act per the **Doc-update tiers** subsection below: A-tier safe edits applied automatically, B-tier judged-creations applied automatically when triggers match, C-tier rewrites only proposed in REVIEW.md. Every applied edit is logged in REVIEW.md's `## Auto-applied edits` section. |
+| 6 | **Three-tier doc update.** Diff `baseline_commit..HEAD -- src/ pyproject.toml` (where `baseline_commit` is the field Phase 1 Step 5 wrote into `initiatives/current/config.yaml`; the shell script substitutes its concrete SHA into the review prompt as `{{BASELINE_COMMIT}}`) then act per the **Doc-update tiers** subsection below: A-tier safe edits applied automatically, B-tier judged-creations applied automatically when triggers match, C-tier rewrites only proposed in REVIEW.md. Every applied edit is logged in REVIEW.md's `## Auto-applied edits` section. |
 
 ### Doc-update tiers (used by Step 6)
 
@@ -342,8 +382,10 @@ itself — Phase 2C only handles archive + NOW.md + index updates.
 | Symptom | Cause | Recovery |
 |---|---|---|
 | Phase 1 refuses with "INBOX is the bare template" | You forgot to fill in INBOX | Edit `automation/INBOX.md`, retry |
-| Phase 1 refuses with "working tree dirty" | Uncommitted changes | `git stash` or commit; retry |
+| Phase 1 refuses with "working tree dirty outside automation/INBOX.md" | You have uncommitted changes besides the initiative brief | Commit or stash every non-INBOX change, keep only `automation/INBOX.md` dirty, retry |
 | Phase 1 refuses with "initiatives/current/ not empty" | Previous initiative wasn't wrapped up | Either resume by running the script, or manually run Phase 2C steps |
+| Phase 1 refuses with "commit_prefix already used in git history" | You chose a prefix that a prior (archived) initiative already used | Edit `automation/INBOX.md` and pick a different `commit_prefix`, retry. Pre-flight check 4 enforces prefix uniqueness so `find_milestone_commit` cannot collide with prior-initiative commits |
+| Script halts: "baseline_commit ... is not an ancestor of HEAD" | Branch was rebased / cherry-picked / hard-reset since Phase 1, so the `baseline_commit` recorded in `initiatives/current/config.yaml` is no longer reachable from HEAD | Inspect `git log` to see what happened. If the rewrite was intentional and the new history still contains every milestone commit, update `baseline_commit` in `config.yaml` to a fresh pre-initiative SHA, commit that change, retry. If the rewrite dropped commits, restore from reflog (`git reflog`) first |
 | Phase 1 crashed mid-bootstrap (partial state: INBOX moved but PLAN/config/HANDOFF/prompts incomplete) | Phase 1 Step 4+ failed after `git mv automation/INBOX.md initiatives/current/PLAN.md` succeeded | **Recovery (do not retry blindly — pre-flight will refuse both ways):** (1) inspect: `ls initiatives/current/`; (2) restore INBOX: `git -C python-replica restore --source=HEAD --staged --worktree automation/INBOX.md` (assumes the `git mv` was never committed — if it was, use `git show HEAD~1:automation/INBOX.md > automation/INBOX.md` against the bootstrap parent); (3) clear partial initiative: `git -C python-replica restore --staged initiatives/current/` then remove anything other than `.gitkeep`; (4) re-run Phase 1 from a clean slate |
 | Script halts: "M{N} failed exit-gate check N" | The milestone agent skipped its exit ritual (check name says which step) | Read `initiatives/current/logs/M{N}.log`, fix manually or restart from M{N} with `./automation/scripts/run_next.sh M{N} --run` |
 | Script finishes but no REVIEW.md | Review session failed | Read last log; manually invoke the review prompt against `initiatives/current/` |

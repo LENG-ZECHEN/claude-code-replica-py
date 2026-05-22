@@ -96,21 +96,37 @@ Do not fix it.
 6. **The Expected-files list from §2** — read the source files this
    milestone will touch, plus their existing tests, before writing any
    code.
-7. **If `{{MILESTONE_ID}}` is not M1**: `git -C python-replica log
-   --oneline -10` and `git show <previous-commit>` to see what the
-   immediately prior milestone changed.
+7. **If `{{MILESTONE_ID}}` is not M1**: run `git -C python-replica log
+   --oneline -10` and `git -C python-replica show HEAD~1` to see what
+   the immediately prior milestone changed. (`HEAD~1` is the prior
+   milestone's commit because each milestone commits exactly once
+   before the loop advances; if you suspect that invariant has been
+   violated, use `git -C python-replica log {{BASELINE_COMMIT}}..HEAD
+   --oneline | grep -F "[{{COMMIT_PREFIX}}/" | head -1` instead and
+   `git -C python-replica show <sha>` to inspect that SHA. The `-C
+   python-replica` is required because the autonomous loop launches
+   `claude --print` from `/Users/leng/my-cc-py`, not from inside the
+   repo. The `grep -F` is required because the literal `[` in the
+   marker would otherwise be parsed as an unclosed character class
+   (e.g. `[mcp-int/` triggers `grep: invalid character range`); `-F`
+   forces fixed-string matching. The `{{BASELINE_COMMIT}}..HEAD` range
+   matches what `run_all_milestones.sh` uses, so the fallback stays
+   consistent with the resumability check and is robust against any
+   prefix-collision edge case Phase 1 pre-flight may have missed.)
 8. **If `{{MILESTONE_ID}}` > M2**: skim
    `initiatives/current/logs/M{N-1}.log` for any anomalies (warnings,
    retries, KeyboardInterrupts) that didn't make it into HANDOFF
    Section 2 design-decisions.
 
-**Before editing any code**, write a **5-bullet summary** in your tool-use
-log of what you learned from PLAN / HANDOFF / PROGRESS / the previous
-commit. If those sources disagree on a fact, treat HANDOFF as advisory
-and `git diff` + test output as source of truth. This summary lives only
-in the session log (not in any committed file) — its purpose is to force
-genuine reading rather than skimming. If you cannot produce a substantive
-5-bullet summary, you have not read enough; go back to §3.
+**Before invoking any Edit or Write tool**, print a **5-bullet summary**
+to stdout (plain text, not a tool call, not a TaskCreate todo, not a
+file write) of what you learned from PLAN / HANDOFF / PROGRESS / the
+previous commit. If those sources disagree on a fact, treat HANDOFF as
+advisory and `git diff` + test output as source of truth. This summary
+lives only in the captured session log under `initiatives/current/logs/`
+(not in any committed file) — its purpose is to force genuine reading
+rather than skimming. If you cannot produce a substantive 5-bullet
+summary, you have not read enough; go back to §3.
 
 ## §4 Implementation requirements
 
@@ -139,10 +155,17 @@ cd python-replica && ruff check .
 
 All three must be green before you commit.
 
-## §5 Exit ritual (MANDATORY — the script verifies all 5 checks below)
+## §5 Exit ritual (MANDATORY)
 
 After your milestone work passes the exit gate in §2, before stopping,
-perform these steps **in order**:
+perform these steps **in order**. The shell script independently
+verifies the **5 side-effects** listed at the end of this section.
+Step 1 below ("Confirm exit gate met") is **honor-system** — the script
+cannot inspect whether you actually quoted the right command output, so
+the 5 mechanical checks are produced by steps 2-4 (commit, PROGRESS
+append, HANDOFF rewrite) plus the standing pytest-green requirement
+from §4. Skipping step 1 makes a green run meaningless even though it
+would still pass the gate; do not skip it.
 
 ### 1. Confirm exit gate met (objectively)
 

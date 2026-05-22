@@ -34,3 +34,12 @@ initiatives/<active-or-archived-slug>/
 ├── logs/            # raw claude --print logs from each milestone run
 └── REVIEW.md        # post-execution audit (written by Phase 2 wrap-up)
 ```
+
+> **Note on pre-RUNBOOK archives.** The
+> [`2026-05-runtime-activation`](./_archive/2026-05-runtime-activation/)
+> archive predates the current RUNBOOK and was backfilled by hand, so
+> it lacks `config.yaml` and `REVIEW.md`, and its `logs/M*.log` files
+> are short stubs rather than full `claude --print` session captures.
+> All future initiatives go through Phase 1 / Phase 2 in
+> [`../automation/RUNBOOK.md`](../automation/RUNBOOK.md) and produce
+> the full shape above.

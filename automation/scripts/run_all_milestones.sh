@@ -22,6 +22,7 @@
 #   ./automation/scripts/run_all_milestones.sh M3 M4    # run a subset (debug; skips completed ones)
 #   ./automation/scripts/run_all_milestones.sh --dry-run
 #   ./automation/scripts/run_all_milestones.sh --skip-review
+#   ./automation/scripts/run_all_milestones.sh --skip-quality
 #   ./automation/scripts/run_all_milestones.sh --help
 
 set -euo pipefail
@@ -77,10 +78,19 @@ die() {
 }
 
 # Read a top-level scalar key from initiatives/current/config.yaml.
-# Handles `key: value` (no nested keys, no quoting).
+# Handles `key: value` (no nested keys, no quoting). Strips inline
+# `# comment` and trailing whitespace so values like `slug: foo  # bar`
+# yield `foo`, not `foo  # bar` (would otherwise poison every grep / sed
+# downstream that uses INITIATIVE_SLUG / COMMIT_PREFIX / ARCHIVE_SLUG).
 read_config_scalar() {
   local key="$1"
-  awk -v k="^${key}:" '$0 ~ k { sub(/^[^:]+:[ \t]*/, ""); print; exit }' "$CONFIG"
+  awk -v k="^${key}:" '$0 ~ k {
+    sub(/^[^:]+:[ \t]*/, "")   # drop "key: " prefix
+    sub(/[ \t]*#.*$/, "")      # drop inline "# comment"
+    sub(/[ \t]+$/, "")          # drop trailing whitespace
+    print
+    exit
+  }' "$CONFIG"
 }
 
 # List milestone IDs by scanning prompts/M*.md (sorted naturally).
@@ -102,7 +112,17 @@ list_milestones_from_config() {
 
 find_milestone_commit() {
   local m="$1"
-  git -C "$REPLICA_DIR" log --format='%H%x09%s' \
+  # Scan only THIS initiative's commit range (baseline_commit..HEAD).
+  # Without the range restriction, a prior archived initiative that
+  # happened to choose the same commit_prefix would poison the
+  # resumability check — leading to either a false skip (rare; needs
+  # the current PROGRESS.md to also contain that M{N} block) or a
+  # misleading "PROGRESS block missing" failure (common, because the
+  # current PROGRESS.md is fresh and has no M{N} block yet).
+  # BASELINE_COMMIT is read from config.yaml during pre-flight and is
+  # verified to be an ancestor of HEAD; if either step failed the
+  # script has already die'd before find_milestone_commit is called.
+  git -C "$REPLICA_DIR" log "${BASELINE_COMMIT}..HEAD" --format='%H%x09%s' \
     | awk -F '\t' -v marker="[${COMMIT_PREFIX}/${m}]" '
         index($2, marker) { print $1; exit }
       '
@@ -131,7 +151,7 @@ check_pytest_green() {
       echo "---- pytest output (last 20 lines) ----" >&2
       echo "$PYTEST_OUT" | tail -20 >&2
       echo "---- end pytest output ----" >&2
-      die "$m failed exit-gate check 4: pytest is now red (rerun: cd python-replica && pytest)"
+      die "$m failed exit-gate check 4: pytest is now red (rerun: cd python-replica && pytest). NOTE: if $m was already committed in a previous run, the baseline may have regressed since — inspect commits AFTER $m with: git -C python-replica log --oneline -- src/ tests/ | head -20"
     fi
   fi
 }
@@ -210,10 +230,20 @@ command -v claude >/dev/null 2>&1 || die "claude CLI not on PATH"
 INITIATIVE_SLUG=$(read_config_scalar "slug")
 COMMIT_PREFIX=$(read_config_scalar "commit_prefix")
 ARCHIVE_SLUG=$(read_config_scalar "archive_slug")
+BASELINE_COMMIT=$(read_config_scalar "baseline_commit")
 
 [ -n "$INITIATIVE_SLUG" ]   || die "slug missing from $CONFIG"
 [ -n "$COMMIT_PREFIX" ]     || die "commit_prefix missing from $CONFIG"
 [ -n "$ARCHIVE_SLUG" ]      || die "archive_slug missing from $CONFIG"
+[ -n "$BASELINE_COMMIT" ]   || die "baseline_commit missing from $CONFIG (Phase 1 Step 5 records it as 'git rev-parse HEAD' at Phase 1 entry; pre-RUNBOOK config.yaml files lack this field — rebootstrap or add 'baseline_commit: <baseline SHA>' to $CONFIG manually)"
+
+# Defense: baseline_commit must be an ancestor of HEAD. If a branch has
+# been rebased / cherry-picked / hard-reset since Phase 1, baseline_commit
+# may no longer be reachable, and 'git log baseline_commit..HEAD' would
+# silently produce a wrong (often empty) commit set.
+if ! git -C "$REPLICA_DIR" merge-base --is-ancestor "$BASELINE_COMMIT" HEAD 2>/dev/null; then
+  die "baseline_commit $BASELINE_COMMIT in $CONFIG is not an ancestor of HEAD — the branch may have been rebased, cherry-picked, or hard-reset since Phase 1; investigate before proceeding"
+fi
 
 printf 'slug       : %s\n' "$INITIATIVE_SLUG"
 printf 'prefix     : %s\n' "$COMMIT_PREFIX"
@@ -361,6 +391,7 @@ sed \
   -e "s|{{INITIATIVE_SLUG}}|$INITIATIVE_SLUG|g" \
   -e "s|{{COMMIT_PREFIX}}|$COMMIT_PREFIX|g" \
   -e "s|{{ARCHIVE_SLUG}}|$ARCHIVE_SLUG|g" \
+  -e "s|{{BASELINE_COMMIT}}|$BASELINE_COMMIT|g" \
   "$REVIEW_TEMPLATE" > "$REVIEW_PROMPT"
 
 printf 'Review prompt : %s\n' "$REVIEW_PROMPT"

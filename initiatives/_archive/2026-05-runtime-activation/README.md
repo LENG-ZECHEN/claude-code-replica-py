@@ -39,6 +39,21 @@ reachable, observable, and demonstrable from the CLI:
 Future initiatives bootstrap from `automation/INBOX.md` into
 `initiatives/current/`. After completion they move here. The artifacts
 in this folder remain searchable evidence of what was attempted, what
-diverged from plan, and what the final shape was. Subsequent initiatives
-can read this folder's `HANDOFF.md` Section 3 ("Decisions That Diverge")
-for inherited assumptions.
+diverged from plan, and what the final shape was.
+
+> **Note on schema drift.** This archive predates the 5-section HANDOFF
+> schema in [`../../../automation/templates/handoff_milestone.md`](../../../automation/templates/handoff_milestone.md).
+> Its `HANDOFF.md` uses the OLD shape (`Objective State` / `What M{N}
+> Accomplished` / `Decisions Diverge` / `Open Questions` / `Next Session
+> Prompt`); divergences live in **Section 3** here. Under the CURRENT
+> schema, divergences live in **Section 2**'s `design decisions
+> (deviations from PLAN)` subsections of each per-milestone block.
+> Future archives follow the current schema — read them, not this one,
+> when you need a structural example.
+
+It also lacks a `config.yaml` and a `REVIEW.md`, and its
+`logs/M*.log` files are short stubs rather than full `claude --print`
+session captures, because the runbook automation that produces those
+files was built AFTER this initiative shipped. The initiative itself
+is real (the commits in `git log` are the actual work); only the
+runbook artifacts are backfilled.
