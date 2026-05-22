@@ -17,6 +17,31 @@ slug: example-slug                # required, kebab-case [a-z0-9-]+
 commit_prefix: example-prefix     # required, used in commit subjects: [<prefix>/M2] ...
 
 milestones:                       # required, at least one entry
+  #
+  # SIZING GUIDANCE — read before splitting your work.
+  # Each milestone runs in ONE `claude --print` session. Claude Code's
+  # auto-compact thrash-loop protection (v2.1.89+) silently terminates a
+  # session that re-fills its context 3x post-compact (exit 0, no commit,
+  # 1-byte log). M1 of observable-thresholds hit this at turn 243.
+  #
+  # Split a milestone into M{N}a / M{N}b / M{N}c when ANY of these is true:
+  #   - touches > 6 source files in src/
+  #   - introduces a Protocol / required constructor param / pure-function
+  #     signature change that propagates to > 4 components
+  #   - adds > 15 new test cases
+  #   - combines "introduce abstraction" + "wire it everywhere" +
+  #     "expose via CLI" in a single milestone (the M1 pattern)
+  #
+  # Suggested split shape for cross-cutting work:
+  #   M{N}a = introduce the abstraction + focused unit tests
+  #   M{N}b = wire it into existing components (the migration)
+  #   M{N}c = expose via CLI flag + integration tests
+  #
+  # Phase 1 will re-assess sizing per RUNBOOK §"Milestone sizing assessment"
+  # before generating prompts. If you're confident the work is atomic and
+  # must stay in one milestone, write a `> SIZING WAIVED: <rationale>` note
+  # under "Anything else" so Phase 1 can record it in PLAN.md provenance.
+  #
   M1:                             # key must match ^M[0-9]+$
     name: short-title-of-m1       # required
     phase_ids: [A1]               # required, free-form labels you can reference in PLAN

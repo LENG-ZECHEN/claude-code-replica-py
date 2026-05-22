@@ -131,6 +131,48 @@ line. If either fails, refuse and explain — do NOT proceed to Step 1.
 
 If any check fails, stop and report. Do not proceed.
 
+### Milestone sizing assessment (before Step 1 — mandatory)
+
+Each milestone runs in **one** `claude --print` session. Claude Code's
+auto-compaction thrash-loop protection (v2.1.89+) terminates a session
+cleanly (exit 0, no `end_turn`, no commit) if the context refills to
+the limit three times in a row after compaction. M1 of
+`observable-thresholds` (May 2026) hit exactly this at turn 243 — 11
+src files + 5 test files + a cross-cutting `Tracer` Protocol wiring
+proved too heavy for one session. Source work was complete; the
+commit was not. See
+[anthropics/claude-code#41796](https://github.com/anthropics/claude-code/issues/41796).
+
+**Before Step 1, parse INBOX's milestone table and flag any milestone
+that hits ANY of these heuristics:**
+
+| Signal | Threshold |
+|---|---|
+| Source files to touch (`src/` only, count from INBOX `notes` + Design sketch) | **> 6** |
+| Components receiving a cross-cutting interface change (new Protocol, new required constructor param, new pure-function signature) | **> 4** |
+| New test cases (sum across all `tests/test_*.py`) | **> 15** |
+| Combines "introduce abstraction" + "wire it across N components" + "expose via CLI" in a single milestone | always — this is the M1 pattern that thrashed |
+
+**When triggered**, the Phase 1 agent MUST:
+
+1. **Propose a split** to the user before proceeding. A typical split
+   looks like:
+   - `M{N}a` — introduce the new abstraction (1-2 src files, focused
+     unit tests, no migration)
+   - `M{N}b` — wire the abstraction into existing components (the
+     migration; touch only the components, not the CLI)
+   - `M{N}c` — expose via CLI flag / integration test (the user-facing
+     surface)
+2. **Wait for explicit user confirmation** of the split before
+   continuing. The agent does NOT auto-split — the user owns scope.
+3. **If the user declines the split** (e.g. the work is genuinely
+   atomic), record `> SIZING WAIVED: <user rationale>` in PLAN.md's
+   provenance block alongside the baseline line, so the failure mode
+   is traceable if it recurs.
+
+This assessment is honor-system — there is no automated check. The
+goal is to surface size risk at planning time rather than at turn 243.
+
 ### Steps (11)
 
 | # | Action | Output |

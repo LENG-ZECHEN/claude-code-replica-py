@@ -521,7 +521,14 @@ $(git_dirty_summary)
 Started: $(date)" \
     "rocket" "default"
 
-  if ! claude --print --model "$CLAUDE_MODEL" \
+  # --verbose: stream tool calls and intermediate progress to stdout so
+  # the operator can monitor a long autonomous run live AND the log
+  # captures something useful even if the session terminates before
+  # `end_turn` (e.g. Claude Code's auto-compact thrash-loop protection;
+  # see anthropics/claude-code#41796). Without --verbose, --print only
+  # emits the final response text — a session that never reaches
+  # end_turn produces a 0/1-byte log, making post-mortem debugging hard.
+  if ! claude --print --verbose --model "$CLAUDE_MODEL" \
        --allowedTools "$ALLOWED_TOOLS" \
        --disallowedTools "$DISALLOWED_TOOLS" \
        < "$PROMPT" 2>&1 | tee "$LOG"; then
@@ -646,7 +653,10 @@ Archive target: initiatives/_archive/${ARCHIVE_SLUG}
 Started: $(date)" \
   "mag" "default"
 
-if ! claude --print --model "$CLAUDE_MODEL" \
+# --verbose: same rationale as the per-milestone invocation above —
+# stream progress so the review log is informative even on early
+# termination.
+if ! claude --print --verbose --model "$CLAUDE_MODEL" \
      --allowedTools "$ALLOWED_TOOLS" \
      --disallowedTools "$DISALLOWED_TOOLS" \
      < "$REVIEW_PROMPT" 2>&1 | tee "$REVIEW_LOG"; then
