@@ -499,9 +499,16 @@ for M in "${MILESTONES[@]}"; do
   fi
 
   LOG="$LOGS_DIR/${M}.log"
+  # `tee "$LOG"` creates the file only after claude emits its first byte.
+  # Pre-touching it lets the operator run `tail -F` *immediately* after
+  # seeing the Live view line, without macOS BSD tail bailing out with
+  # "No such file or directory" on a not-yet-existent path.
+  : > "$LOG"
   printf 'Prompt     : %s\n' "$PROMPT"
   printf 'Log        : %s\n' "$LOG"
-  printf 'Live view  : tail -f %s\n\n' "$LOG"
+  # tail -F (uppercase) follows by name and retries on rename/truncate,
+  # so it stays robust if the file is rotated or recreated mid-run.
+  printf 'Live view  : tail -F %s\n\n' "$LOG"
 
   MILESTONE_STARTED_AT="$(date +%s)"
   CURRENT_STAGE="milestone ${M}: running claude"
@@ -637,8 +644,12 @@ sed \
   -e "s|{{BASELINE_COMMIT}}|$BASELINE_COMMIT|g" \
   "$REVIEW_TEMPLATE" > "$REVIEW_PROMPT"
 
+# Pre-touch so `tail -F` works immediately — same rationale as the
+# per-milestone log pre-touch above.
+: > "$REVIEW_LOG"
 printf 'Review prompt : %s\n' "$REVIEW_PROMPT"
-printf 'Review log    : %s\n\n' "$REVIEW_LOG"
+printf 'Review log    : %s\n' "$REVIEW_LOG"
+printf 'Live view     : tail -F %s\n\n' "$REVIEW_LOG"
 
 CURRENT_STAGE="review: running claude"
 CURRENT_LOG="$REVIEW_LOG"
