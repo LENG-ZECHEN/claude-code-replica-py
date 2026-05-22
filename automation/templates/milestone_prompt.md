@@ -104,6 +104,14 @@ Do not fix it.
    retries, KeyboardInterrupts) that didn't make it into HANDOFF
    Section 2 design-decisions.
 
+**Before editing any code**, write a **5-bullet summary** in your tool-use
+log of what you learned from PLAN / HANDOFF / PROGRESS / the previous
+commit. If those sources disagree on a fact, treat HANDOFF as advisory
+and `git diff` + test output as source of truth. This summary lives only
+in the session log (not in any committed file) — its purpose is to force
+genuine reading rather than skimming. If you cannot produce a substantive
+5-bullet summary, you have not read enough; go back to §3.
+
 ## §4 Implementation requirements
 
 Follow execution rules documented in `python-replica/CLAUDE.md`. In

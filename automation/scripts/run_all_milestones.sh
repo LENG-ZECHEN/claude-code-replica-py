@@ -214,9 +214,13 @@ for M in "${MILESTONES[@]}"; do
     die "$M failed exit-gate check 2: initiatives/current/HANDOFF.md was not modified in the commit (exit ritual step 4 skipped)"
   fi
 
-  # Check 3: PROGRESS.md contains a '${M}' entry (exit ritual step 3)
-  if ! grep -qF "$M" "$REPLICA_DIR/initiatives/current/PROGRESS.md" 2>/dev/null; then
-    die "$M failed exit-gate check 3: no '$M' string found in initiatives/current/PROGRESS.md (exit ritual step 3 skipped)"
+  # Check 3: PROGRESS.md contains a '## M{N} — done YYYY-MM-DD' block
+  # (exit ritual step 3). Use anchored regex so e.g. M1 does NOT match
+  # M10 / M11 / etc., and so a bare "M1" appearing in a notes line does
+  # not satisfy the gate.
+  if ! grep -qE "^## ${M} — done [0-9]{4}-[0-9]{2}-[0-9]{2}" \
+       "$REPLICA_DIR/initiatives/current/PROGRESS.md" 2>/dev/null; then
+    die "$M failed exit-gate check 3: no '## $M — done YYYY-MM-DD' block found in initiatives/current/PROGRESS.md (exit ritual step 3 skipped or format wrong)"
   fi
 
   # Check 4: pytest still green (unless --skip-quality). The agent already
@@ -227,6 +231,20 @@ for M in "${MILESTONES[@]}"; do
       die "$M failed exit-gate check 4: pytest is now red (rerun: cd python-replica && pytest)"
     fi
   fi
+
+  # Check 5: HANDOFF.md has the 5-section structure (proves the agent
+  # used automation/templates/handoff_milestone.md, not a free-form
+  # HANDOFF). Each section header must be present verbatim.
+  HANDOFF_PATH="$REPLICA_DIR/initiatives/current/HANDOFF.md"
+  for section in "## 1. Current initiative" \
+                 "## 2. Completed milestones" \
+                 "## 3. Current repo state" \
+                 "## 4. Important constraints" \
+                 "## 5. Next milestone guidance"; do
+    if ! grep -qF "$section" "$HANDOFF_PATH"; then
+      die "$M failed exit-gate check 5: HANDOFF.md is missing section header '$section' (agent did not use automation/templates/handoff_milestone.md)"
+    fi
+  done
 
   printf '\n=== %s done at %s ===\n' "$M" "$(date)"
 done
