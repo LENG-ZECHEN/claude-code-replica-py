@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 
 from . import cli as _cli
+from .coding_tools import ShellMode
 from .context import ContextBudget, ContextBuilder
 from .loop import AgentLoop, LoopResult, LoopStatus
 from .memory import SessionMemory
@@ -169,6 +170,16 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable streaming and wait for each provider response before printing.",
     )
+    parser.add_argument(
+        "--shell-mode",
+        choices=("mock", "allowlist"),
+        default="mock",
+        help=(
+            "Shell tool execution mode. 'mock' (default) is safe and "
+            "deterministic; 'allowlist' actually executes the 5-command "
+            "allowlist (pwd, ls, cat, grep, python -m pytest)."
+        ),
+    )
     return parser
 
 
@@ -206,8 +217,9 @@ def _run_task(
     max_tokens: int,
     show_steps: bool,
     stream: bool,
+    shell_mode: ShellMode = ShellMode.MOCK,
 ) -> int:
-    registry = build_default_registry(workspace)
+    registry = build_default_registry(workspace, shell_mode=shell_mode)
     budget = ContextBudget(
         max_tokens=_DEFAULT_CONTEXT_TOKENS,
         reserved_output_tokens=_DEFAULT_RESERVED_OUTPUT_TOKENS,
@@ -279,6 +291,7 @@ def _build_openai_repl_loop(
     max_context_tokens: int,
     reserved_output_tokens: int,
     session_memory: SessionMemory,
+    shell_mode: ShellMode = ShellMode.MOCK,
 ) -> AgentLoop:
     """Wire a real-provider AgentLoop using the cli helper for everything else.
 
@@ -302,6 +315,7 @@ def _build_openai_repl_loop(
         project_memory=project_memory,
         provider=provider,  # type: ignore[arg-type]
         system_prompt=_DEFAULT_SYSTEM_PROMPT,
+        shell_mode=shell_mode,
     )
 
 
@@ -315,6 +329,7 @@ def _run_openai_repl(
     reserved_output_tokens: int,
     stream: bool,
     resume: str | None,
+    shell_mode: ShellMode = ShellMode.MOCK,
 ) -> int:
     """Drive the OpenAI-backed REPL, sharing slash commands with ``cli``.
 
@@ -338,6 +353,7 @@ def _run_openai_repl(
         max_context_tokens=max_context_tokens,
         reserved_output_tokens=reserved_output_tokens,
         session_memory=session_memory,
+        shell_mode=shell_mode,
     )
 
     if resume is not None:
@@ -382,6 +398,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     max_tokens = args.max_tokens or _env_int("SIMPLE_AGENT_MAX_TOKENS", _DEFAULT_MAX_TOKENS)
+    shell_mode = ShellMode[str(args.shell_mode).upper()]
 
     if repl_mode:
         return _run_openai_repl(
@@ -393,6 +410,7 @@ def main(argv: list[str] | None = None) -> int:
             reserved_output_tokens=int(args.reserved_output_tokens),
             stream=not bool(args.no_stream),
             resume=args.resume,
+            shell_mode=shell_mode,
         )
 
     return _run_task(
@@ -402,6 +420,7 @@ def main(argv: list[str] | None = None) -> int:
         max_tokens=max_tokens,
         show_steps=bool(args.show_steps),
         stream=not bool(args.no_stream),
+        shell_mode=shell_mode,
     )
 
 

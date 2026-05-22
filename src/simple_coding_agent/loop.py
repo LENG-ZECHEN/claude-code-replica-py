@@ -175,7 +175,14 @@ class AgentLoop:
         self._registry = registry
         self._compactor = compactor
         self._microcompactor = microcompactor or MicroCompactor()
-        self._microcompacted = False
+        # Track the uuid of the latest assistant message at the time of
+        # the most recent microcompact. ``None`` means "never microcompacted
+        # in this loop". When a new assistant message arrives (different
+        # uuid), ``_maybe_microcompact`` is allowed to re-evaluate the
+        # aging window — this preserves the "don't spam every turn"
+        # intent while still letting long REPL sessions clear newly aged
+        # tool results.
+        self._microcompacted_against_assistant_uuid: str | None = None
         self._snip_tool = snip_tool or SnipTool()
         self._snip_attempted_this_turn = False
         self._session_memory = session_memory
@@ -518,17 +525,36 @@ class AgentLoop:
         return True
 
     def _maybe_microcompact(self) -> bool:
-        """Run cold-cache tool-result cleanup at most once per loop instance."""
-        if self._microcompacted:
-            return False
+        """Run cold-cache tool-result cleanup when stale tool results age in.
+
+        Runs at most once per "wave" of stale tool results: if the latest
+        assistant message is the same one we already microcompacted
+        against, skip. Otherwise let
+        :meth:`MicroCompactor.should_microcompact` decide whether the
+        60-minute aging window is crossed.
+        """
         messages = self._transcript.all_messages()
+        latest_assistant_uuid = self._latest_assistant_uuid(messages)
+        if (
+            latest_assistant_uuid is not None
+            and latest_assistant_uuid == self._microcompacted_against_assistant_uuid
+        ):
+            return False
         if not self._microcompactor.should_microcompact(messages):
             return False
         compacted = self._microcompactor.microcompact(messages)
         self._transcript.replace_all(compacted)
-        self._microcompacted = True
+        self._microcompacted_against_assistant_uuid = latest_assistant_uuid
         self._metrics.record_microcompact()
         return True
+
+    @staticmethod
+    def _latest_assistant_uuid(messages: list[Message]) -> str | None:
+        """Return the uuid of the most recent assistant message, or None."""
+        for msg in reversed(messages):
+            if msg.role == Role.ASSISTANT:
+                return msg.uuid
+        return None
 
     def _maybe_snip(self) -> bool:
         """Fold redundant tool results at most once per user turn."""

@@ -439,3 +439,34 @@ def test_coding_tools_register_into_registry_and_execute(
     # Secret rejection surfaces via is_error=True (ToolExecutor catches it)
     content, is_error = executor.execute("read_file", {"path": ".env"})
     assert is_error
+
+
+# ---------------------------------------------------------------------------
+# Patch 4 (Cap1): build_default_registry honors a configurable ShellMode.
+# ---------------------------------------------------------------------------
+
+
+def test_build_default_registry_defaults_to_mock_shell(workspace: Path) -> None:
+    """Default ``shell_mode`` is MOCK; ``run_shell`` returns the stub block."""
+    from simple_coding_agent.tool_registry_factory import build_default_registry
+
+    registry = build_default_registry(workspace)
+    tool = registry.get("run_shell")
+    output = tool.fn(command="pwd")
+    # Mock output is a deterministic header block with [mock] markers.
+    assert "[mock]" in output
+    assert "no real execution in MOCK mode" in output
+
+
+def test_build_default_registry_honors_allowlist_shell(workspace: Path) -> None:
+    """Explicit ``ShellMode.ALLOWLIST`` makes ``run_shell`` execute the command."""
+    from simple_coding_agent.tool_registry_factory import build_default_registry
+
+    registry = build_default_registry(workspace, shell_mode=ShellMode.ALLOWLIST)
+    tool = registry.get("run_shell")
+    output = tool.fn(command="pwd")
+    # Real subprocess output: no mock markers; returncode line present;
+    # workspace path appears in stdout.
+    assert "[mock]" not in output
+    assert "returncode=0" in output
+    assert str(workspace.resolve()) in output

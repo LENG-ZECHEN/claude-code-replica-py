@@ -169,7 +169,9 @@ def test_microcompact_runs_at_most_once_per_loop_instance() -> None:
     loop.run("second request")
 
     assert counter.microcompact_calls == 1
-    assert loop._microcompacted is True
+    # Patch 3 (C2): bookkeeping now tracks the uuid of the latest assistant
+    # message at microcompact time rather than a bare bool.
+    assert loop._microcompacted_against_assistant_uuid is not None
 
 
 # ---------------------------------------------------------------------------
@@ -194,3 +196,86 @@ def test_microcompact_skipped_when_no_old_assistant() -> None:
     assert "aged tool result body" in sent
     assert CLEARED_TOOL_RESULT_CONTENT not in sent
     assert counter.microcompact_calls == 0
+
+
+# ---------------------------------------------------------------------------
+# 4. Patch 3 (C2): microcompact can fire again after a NEW assistant
+#    message ages past the 60-minute window — preventing a long REPL
+#    session from microcompacting only once for its entire lifetime.
+# ---------------------------------------------------------------------------
+
+def test_microcompact_can_fire_twice_after_new_assistant_aged_in() -> None:
+    """Track latest-assistant uuid, not a bare bool.
+
+    Scenario: a wave of stale results triggers microcompact (counter=1).
+    Then a brand-new assistant turn + brand-new aged tool_result arrives.
+    The new assistant uuid differs from the one recorded at the previous
+    microcompact, so ``_maybe_microcompact`` must re-evaluate
+    ``should_microcompact`` and fire again (counter=2). A repeat call
+    without any new assistant must NOT fire (counter stays at 2).
+    """
+    aged_ts = (datetime.now(UTC) - timedelta(minutes=120)).isoformat()
+    transcript = Transcript()
+    for msg in _aged_tool_exchange(aged_ts):
+        transcript.append(msg)
+
+    counter = _CallCountingMicroCompactor()
+    provider = MockProvider([MockProvider.direct_answer("ignored")])
+    loop, _ = _build_loop(
+        provider, transcript=transcript, microcompactor=counter,
+    )
+
+    # First call: should fire.
+    assert loop._maybe_microcompact() is True
+    assert counter.microcompact_calls == 1
+    first_recorded_uuid = loop._microcompacted_against_assistant_uuid
+    assert first_recorded_uuid is not None
+
+    # Same transcript, no new assistant — must NOT fire again.
+    assert loop._maybe_microcompact() is False
+    assert counter.microcompact_calls == 1
+
+    # Append a new aged tool_use / tool_result pair plus a new, aged
+    # assistant message (different uuid than the previous one). The new
+    # assistant's timestamp is also aged so should_microcompact returns
+    # True.
+    new_aged_ts = (datetime.now(UTC) - timedelta(minutes=120)).isoformat()
+    transcript.append(Message(
+        uuid="asst-new-call",
+        role=Role.ASSISTANT,
+        content=[ToolCall(
+            id="tu_new",
+            name="read_file",
+            input={"path": "fresh.py"},
+        )],
+        timestamp=new_aged_ts,
+        type=MessageType.TOOL_USE,
+    ))
+    transcript.append(Message(
+        uuid="user-new-result",
+        role=Role.USER,
+        content=[ToolResult(
+            tool_use_id="tu_new",
+            content="newly aged tool result body",
+        )],
+        timestamp=new_aged_ts,
+        type=MessageType.TOOL_RESULT,
+        is_meta=True,
+    ))
+    transcript.append(Message(
+        uuid="asst-new-final",
+        role=Role.ASSISTANT,
+        content="newly aged assistant turn",
+        timestamp=new_aged_ts,
+    ))
+
+    # New assistant uuid -> bookkeeping pointer is stale -> re-evaluate
+    # and fire again.
+    assert loop._maybe_microcompact() is True
+    assert counter.microcompact_calls == 2
+    assert loop._microcompacted_against_assistant_uuid == "asst-new-final"
+    assert loop._microcompacted_against_assistant_uuid != first_recorded_uuid
+
+    # Re-call without any new assistant — must NOT fire again.
+    assert loop._maybe_microcompact() is False
+    assert counter.microcompact_calls == 2

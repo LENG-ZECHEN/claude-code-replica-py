@@ -507,6 +507,13 @@ def test_openai_provider_does_not_map_non_context_errors() -> None:
 
 
 def test_openai_provider_rejects_non_object_tool_arguments() -> None:
+    """Non-object tool arguments are folded into a controlled response.
+
+    Mirrors the streaming path's StreamToolParseError handling: rather
+    than raising, the non-stream call drops all tool_calls for the turn
+    and returns a ``ProviderResponse`` with ``stop_reason=end_turn`` and
+    an explanatory text body.
+    """
     raw_tool_call = SimpleNamespace(
         id="call_1",
         function=SimpleNamespace(name="read_file", arguments='["not", "object"]'),
@@ -518,11 +525,16 @@ def test_openai_provider_rejects_non_object_tool_arguments() -> None:
     ))
     provider = OpenAIProvider(model="test-model", client=client)
 
-    with pytest.raises(ValueError, match="arguments"):
-        provider.call(system="", messages=[], tools=[])
+    result = provider.call(system="", messages=[], tools=[])
+
+    assert result.tool_calls == []
+    assert result.stop_reason == "end_turn"
+    assert result.text is not None
+    assert "could not be parsed" in result.text
 
 
 def test_openai_provider_rejects_invalid_json_tool_arguments() -> None:
+    """Invalid JSON tool arguments are folded into a controlled response."""
     raw_tool_call = SimpleNamespace(
         id="call_1",
         function=SimpleNamespace(name="read_file", arguments="{bad json"),
@@ -534,8 +546,43 @@ def test_openai_provider_rejects_invalid_json_tool_arguments() -> None:
     ))
     provider = OpenAIProvider(model="test-model", client=client)
 
-    with pytest.raises(ValueError, match="valid JSON"):
-        provider.call(system="", messages=[], tools=[])
+    result = provider.call(system="", messages=[], tools=[])
+
+    assert result.tool_calls == []
+    assert result.stop_reason == "end_turn"
+    assert result.text is not None
+    assert "could not be parsed" in result.text
+
+
+def test_openai_provider_call_returns_controlled_response_on_malformed_tool_args() -> None:
+    """Regression: malformed tool args in non-stream call must not crash.
+
+    Patch 1 (A3): the non-streaming path now mirrors the streaming path's
+    behaviour of catching parse errors, dropping all tool calls from the
+    turn, and returning a ProviderResponse with stop_reason=end_turn and
+    an explanatory text body that includes the original parse error.
+    """
+    raw_tool_call = SimpleNamespace(
+        id="call_bad",
+        function=SimpleNamespace(name="write_file", arguments="{not valid json"),
+    )
+    client = _FakeOpenAIClient(_completion(
+        content="I will try to write the file.",
+        tool_calls=[raw_tool_call],
+        finish_reason="tool_calls",
+    ))
+    provider = OpenAIProvider(model="test-model", client=client)
+
+    # Must not raise.
+    result = provider.call(system="", messages=[], tools=[])
+
+    assert result.tool_calls == []
+    assert result.stop_reason == "end_turn"
+    assert result.text is not None
+    # Original assistant text is preserved.
+    assert "I will try to write the file." in result.text
+    # Explanatory marker present.
+    assert "could not be parsed" in result.text
 
 
 def test_openai_provider_streams_text_deltas() -> None:

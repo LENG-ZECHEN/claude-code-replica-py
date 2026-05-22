@@ -10,6 +10,7 @@ to rank during a REPL session.
   simple-agent memory delete <id>
   simple-agent memory search <keyword>
   simple-agent memory show <id>
+  simple-agent memory update <id> <body...>
 
 Storage directory resolution:
   1. ``SIMPLE_AGENT_MEMORY_DIR`` env var (absolute path).
@@ -110,6 +111,36 @@ def _cmd_search(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_update(args: argparse.Namespace) -> int:
+    """Rewrite the body of an existing memory entry, preserving identity.
+
+    Same secret-rejection + path-traversal guards as ``add`` (delegated
+    to :meth:`ProjectMemory.save`). Missing ids exit with code 2 so
+    callers can distinguish a no-op from a successful update.
+    """
+    store = _store()
+    existing = store.load(str(args.id))
+    if existing is None:
+        print(f"error: no memory entry with id {args.id!r}", file=sys.stderr)
+        return 2
+    new_body = " ".join(str(part) for part in args.body)
+    updated = MemoryEntry(
+        id=existing.id,
+        name=existing.name,
+        body=new_body,
+        type=existing.type,
+        tags=list(existing.tags),
+        created_at=existing.created_at,
+    )
+    try:
+        store.save(updated)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"updated memory {updated.id}")
+    return 0
+
+
 def _cmd_show(args: argparse.Namespace) -> int:
     entry = _store().load(str(args.id))
     if entry is None:
@@ -167,6 +198,16 @@ def _build_parser() -> argparse.ArgumentParser:
     showp = sub.add_parser("show", help="Print one memory entry in full.")
     showp.add_argument("id", help="Memory id to show.")
 
+    updatep = sub.add_parser(
+        "update", help="Update the body of an existing memory entry."
+    )
+    updatep.add_argument("id", help="Memory id to update.")
+    updatep.add_argument(
+        "body",
+        nargs="+",
+        help="New body text. Multiple words are joined with single spaces.",
+    )
+
     return parser
 
 
@@ -184,6 +225,7 @@ def main(argv: list[str] | None = None) -> int:
         "delete": _cmd_delete,
         "search": _cmd_search,
         "show": _cmd_show,
+        "update": _cmd_update,
     }[str(args.cmd)]
     return handler(args)
 

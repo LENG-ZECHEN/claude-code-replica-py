@@ -286,3 +286,54 @@ def test_dump_preserves_created_at_timestamp(tmp_path: Path) -> None:
     entries = loaded.all()
     assert len(entries) == 1
     assert entries[0].created_at == ts
+
+
+# ---------------------------------------------------------------------------
+# Patch 2 (Mem8): load-time secret filter on SessionMemory.load_json
+# ---------------------------------------------------------------------------
+
+
+def test_session_memory_load_json_skips_entries_with_bearer_token(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A snapshot with a secret-tainted entry loads the safe one only.
+
+    Mirrors ``ProjectMemory.save``'s secret rejection so a malicious or
+    accidentally-tainted ``session_memory.json`` can never re-hydrate
+    secrets into the active session.
+    """
+    payload: dict[str, Any] = {
+        "version": 1,
+        "entries": [
+            {
+                "id": "safe-entry-1",
+                "name": "safe",
+                "body": "User prefers Python.",
+                "type": "user",
+                "tags": [],
+                "created_at": "2026-05-21T00:00:00+00:00",
+            },
+            {
+                "id": "tainted-entry-1",
+                "name": "tainted",
+                "body": "Authorization: Bearer eyJ.abc.def_123ghi",
+                "type": "reference",
+                "tags": [],
+                "created_at": "2026-05-21T00:00:00+00:00",
+            },
+        ],
+    }
+    path = tmp_path / "session_memory.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING, logger="simple_coding_agent.memory"):
+        loaded = SessionMemory.load_json(path)
+
+    entries = loaded.all()
+    assert len(entries) == 1
+    assert entries[0].id == "safe-entry-1"
+    assert any(
+        "tainted-entry-1" in rec.message and "secret" in rec.message.lower()
+        for rec in caplog.records
+    )

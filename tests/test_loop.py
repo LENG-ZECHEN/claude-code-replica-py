@@ -632,7 +632,22 @@ def test_agent_loop_does_not_microcompact_recent_tool_results() -> None:
     assert CLEARED_TOOL_RESULT_CONTENT not in sent_context
 
 
-def test_agent_loop_microcompacts_at_most_once_per_session() -> None:
+def test_agent_loop_microcompacts_at_most_once_per_assistant_uuid() -> None:
+    """Patch 3 (C2): microcompact fires at most once per assistant uuid.
+
+    Under the old "bool flag" design, microcompact fired at most once per
+    AgentLoop instance for its entire lifetime. The new design tracks the
+    uuid of the latest assistant message at microcompact time so a long
+    REPL can re-clear newly aged tool results — but it must still not
+    spam every loop iteration. This test confirms that within the
+    same turn (single ``run()`` call) microcompact only fires once per
+    *new* assistant message: one initial fire against the seed transcript,
+    and exactly one re-fire after the provider's tool_call adds a new
+    assistant message. After the direct-answer turn appends another
+    assistant message, no additional microcompact runs because
+    ``_maybe_microcompact`` is only called at the top of each turn,
+    not after each appended message.
+    """
     transcript = Transcript()
     for msg in _tool_exchange_messages():
         transcript.append(msg)
@@ -652,7 +667,12 @@ def test_agent_loop_microcompacts_at_most_once_per_session() -> None:
     result = loop.run("call echo")
 
     assert result.status == LoopStatus.COMPLETED
-    assert microcompactor.microcompact_calls == 1
+    # Two turns through the loop: the seed transcript's assistant uuid
+    # triggers the first fire; the tool_call response appends a new
+    # assistant message whose uuid differs from the recorded one, so
+    # the second turn's ``_maybe_microcompact`` re-evaluates and fires
+    # again.
+    assert microcompactor.microcompact_calls == 2
 
 
 # ---------------------------------------------------------------------------

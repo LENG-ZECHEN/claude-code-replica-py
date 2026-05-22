@@ -286,6 +286,39 @@ def test_project_memory_does_not_store_env_values(tmp_path: object) -> None:
         ))
 
 
+def test_project_memory_save_rejects_bearer_token(tmp_path: object) -> None:
+    """Patch 2 (Mem1): Bearer token bodies are rejected by save()."""
+    pm = ProjectMemory(storage_dir=str(tmp_path))
+    with pytest.raises(ValueError, match="secret"):
+        pm.save(MemoryEntry(
+            name="bad-bearer",
+            body="Authorization: Bearer eyJ.abc.def_123ghi",
+            type=MemoryType.REFERENCE,
+        ))
+
+
+def test_project_memory_save_rejects_aws_access_key(tmp_path: object) -> None:
+    """Patch 2 (Mem1): AWS access key IDs (AKIA + 16 chars) are rejected."""
+    pm = ProjectMemory(storage_dir=str(tmp_path))
+    with pytest.raises(ValueError, match="secret"):
+        pm.save(MemoryEntry(
+            name="bad-aws",
+            body="my key is AKIAIOSFODNN7EXAMPLE for staging",
+            type=MemoryType.REFERENCE,
+        ))
+
+
+def test_project_memory_save_rejects_pem_block(tmp_path: object) -> None:
+    """Patch 2 (Mem1): PEM PRIVATE KEY block headers are rejected."""
+    pm = ProjectMemory(storage_dir=str(tmp_path))
+    with pytest.raises(ValueError, match="secret"):
+        pm.save(MemoryEntry(
+            name="bad-pem",
+            body="-----BEGIN RSA PRIVATE KEY-----\nMIIE...",
+            type=MemoryType.REFERENCE,
+        ))
+
+
 def test_project_memory_manifest_written(tmp_path: object) -> None:
     pm = ProjectMemory(storage_dir=str(tmp_path))
     pm.save(MemoryEntry(name="fact-a", body="body a", type=MemoryType.USER))
@@ -295,6 +328,42 @@ def test_project_memory_manifest_written(tmp_path: object) -> None:
     content = open(manifest_path).read()
     assert "fact-a" in content
     assert "fact-b" in content
+
+
+def test_manifest_escapes_brackets_in_entry_name(tmp_path: object) -> None:
+    """Patch 6 (Mem3): square brackets in entry name are escaped."""
+    pm = ProjectMemory(storage_dir=str(tmp_path))
+    pm.save(MemoryEntry(name="weird ] name", body="b", type=MemoryType.USER))
+    content = open(os.path.join(str(tmp_path), "MEMORY.md")).read()
+    # Escaped form must be present; raw bracket must not break the link.
+    assert "weird \\] name" in content
+    # The remainder of the link must remain intact.
+    assert "](" in content
+
+
+def test_manifest_escapes_parens_in_entry_name(tmp_path: object) -> None:
+    """Patch 6 (Mem3): parentheses in entry name are escaped."""
+    pm = ProjectMemory(storage_dir=str(tmp_path))
+    pm.save(MemoryEntry(name="hax (link) name", body="b", type=MemoryType.USER))
+    content = open(os.path.join(str(tmp_path), "MEMORY.md")).read()
+    assert "hax \\(link\\) name" in content
+
+
+def test_manifest_collapses_newlines_in_entry_name(tmp_path: object) -> None:
+    """Patch 6 (Mem3): newlines in entry name collapse to spaces.
+
+    Without this guard a name like ``"foo\\nbar"`` would split the
+    manifest line so a downstream parser sees two entries instead of one.
+    """
+    pm = ProjectMemory(storage_dir=str(tmp_path))
+    pm.save(MemoryEntry(name="line\none\nthree", body="b", type=MemoryType.USER))
+    content = open(os.path.join(str(tmp_path), "MEMORY.md")).read()
+    # The escaped name should be on a single line.
+    matching = [
+        line for line in content.splitlines() if "line" in line and "three" in line
+    ]
+    assert len(matching) == 1
+    assert "\n" not in matching[0]
 
 
 def test_project_memory_to_snippets(tmp_path: object) -> None:

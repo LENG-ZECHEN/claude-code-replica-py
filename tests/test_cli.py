@@ -75,3 +75,46 @@ def test_cli_max_steps_flag_default_is_10(
     loops = list(getattr(cli_mod, "_LAST_LOOPS", []))
     assert loops, "REPL should have built at least one AgentLoop"
     assert loops[0]._max_steps == 10
+
+
+def test_cli_shell_mode_defaults_to_mock(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Patch 4 (Cap1): without `--shell-mode` the run_shell tool stays MOCK."""
+    import simple_coding_agent.claude_md as cm
+    monkeypatch.setattr(cm, "_DEFAULT_USER_CLAUDE_MD", tmp_path / "no_claude.md")
+    monkeypatch.setattr("sys.stdin", io.StringIO("/exit\n"))
+
+    rc = main(["--repl", "--workspace", str(tmp_path)])
+    assert rc == 0
+    loops = list(getattr(cli_mod, "_LAST_LOOPS", []))
+    assert loops, "REPL should have built at least one AgentLoop"
+    run_shell_tool = loops[-1]._registry.get("run_shell")
+    output = run_shell_tool.fn(command="pwd")
+    assert "[mock]" in output
+
+
+def test_cli_shell_mode_flag_threads_to_registry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Patch 4 (Cap1): `--shell-mode allowlist` makes run_shell execute."""
+    import simple_coding_agent.claude_md as cm
+    monkeypatch.setattr(cm, "_DEFAULT_USER_CLAUDE_MD", tmp_path / "no_claude.md")
+    monkeypatch.setattr("sys.stdin", io.StringIO("/exit\n"))
+
+    rc = main([
+        "--repl",
+        "--shell-mode", "allowlist",
+        "--workspace", str(tmp_path),
+    ])
+    assert rc == 0
+    loops = list(getattr(cli_mod, "_LAST_LOOPS", []))
+    assert loops, "REPL should have built at least one AgentLoop"
+    run_shell_tool = loops[-1]._registry.get("run_shell")
+    output = run_shell_tool.fn(command="pwd")
+    # Real subprocess output, not the MOCK stub block.
+    assert "[mock]" not in output
+    assert "returncode=0" in output
+    assert str(tmp_path.resolve()) in output

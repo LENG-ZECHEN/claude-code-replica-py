@@ -276,3 +276,98 @@ def test_storage_dir_default_under_workspace(
     assert rc == 0
     default_dir = tmp_path / ".simple-agent" / "memory"
     assert (default_dir / "named.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# Patch 6 (Mem5): memory update subcommand
+# ---------------------------------------------------------------------------
+
+
+def test_update_changes_body(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """``update`` rewrites the body while preserving identity."""
+    storage = tmp_path / "mem"
+    assert _run(
+        "add", "user", "fav-editor", "I prefer Helix.",
+        env={"SIMPLE_AGENT_MEMORY_DIR": str(storage)},
+        monkeypatch=monkeypatch,
+    ) == 0
+
+    rc = _run(
+        "update", "fav-editor", "Actually", "I", "switched", "to", "Vim.",
+        env={"SIMPLE_AGENT_MEMORY_DIR": str(storage)},
+        monkeypatch=monkeypatch,
+    )
+    assert rc == 0
+    data = json.loads((storage / "fav-editor.json").read_text(encoding="utf-8"))
+    assert data["body"] == "Actually I switched to Vim."
+
+
+def test_update_preserves_id_and_type(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """``update`` must not change id, type, name, or created_at."""
+    storage = tmp_path / "mem"
+    assert _run(
+        "add", "feedback", "tabs", "user prefers tabs",
+        env={"SIMPLE_AGENT_MEMORY_DIR": str(storage)},
+        monkeypatch=monkeypatch,
+    ) == 0
+    before = json.loads((storage / "tabs.json").read_text(encoding="utf-8"))
+
+    assert _run(
+        "update", "tabs", "user prefers spaces now",
+        env={"SIMPLE_AGENT_MEMORY_DIR": str(storage)},
+        monkeypatch=monkeypatch,
+    ) == 0
+
+    after = json.loads((storage / "tabs.json").read_text(encoding="utf-8"))
+    assert after["id"] == before["id"]
+    assert after["type"] == before["type"] == "feedback"
+    assert after["name"] == before["name"]
+    assert after["created_at"] == before["created_at"]
+    assert after["body"] == "user prefers spaces now"
+
+
+def test_update_unknown_id_exits_2(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Updating a missing id surfaces as exit code 2 with a clear error."""
+    storage = tmp_path / "mem"
+    rc = _run(
+        "update", "doesnotexist", "some", "new", "body",
+        env={"SIMPLE_AGENT_MEMORY_DIR": str(storage)},
+        monkeypatch=monkeypatch,
+    )
+    assert rc == 2
+    err = capsys.readouterr().err.lower()
+    assert "no memory entry" in err
+
+
+def test_update_rejects_secret_body(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``update`` honours the same secret-rejection guard as ``add``."""
+    storage = tmp_path / "mem"
+    assert _run(
+        "add", "user", "harmless", "nothing to see here",
+        env={"SIMPLE_AGENT_MEMORY_DIR": str(storage)},
+        monkeypatch=monkeypatch,
+    ) == 0
+
+    rc = _run(
+        "update", "harmless", "API_KEY=abc123xyz",
+        env={"SIMPLE_AGENT_MEMORY_DIR": str(storage)},
+        monkeypatch=monkeypatch,
+    )
+    assert rc == 2
+    err = capsys.readouterr().err.lower()
+    assert "secret" in err
+    # Disk content must remain unchanged.
+    data = json.loads((storage / "harmless.json").read_text(encoding="utf-8"))
+    assert data["body"] == "nothing to see here"

@@ -657,7 +657,22 @@ class OpenAIProvider:
 
         choice = choices[0]
         message = _get_value(choice, "message")
-        tool_calls = _parse_openai_tool_calls(_get_value(message, "tool_calls"))
+        try:
+            tool_calls = _parse_openai_tool_calls(_get_value(message, "tool_calls"))
+        except ValueError as parse_error:
+            recovered_text = _content_text(_get_value(message, "content")) or ""
+            controlled_text = (
+                (recovered_text + "\n\n" if recovered_text else "")
+                + "The model emitted tool calls whose arguments could not be "
+                + "parsed; aborting this turn.\n"
+                + f"- {parse_error}"
+            )
+            return ProviderResponse(
+                text=controlled_text,
+                tool_calls=[],
+                usage=_openai_usage(_get_value(completion, "usage")),
+                stop_reason=STOP_END_TURN,
+            )
         return ProviderResponse(
             text=_content_text(_get_value(message, "content")),
             tool_calls=tool_calls,

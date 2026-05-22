@@ -34,12 +34,22 @@ def _format_search_results(matches: list[SearchMatch]) -> str:
     return "\n".join(f"{m.path}:{m.line_no}: {m.preview}" for m in matches)
 
 
-def build_default_registry(workspace: str | Path) -> ToolRegistry:
+def build_default_registry(
+    workspace: str | Path,
+    *,
+    shell_mode: ShellMode = ShellMode.MOCK,
+) -> ToolRegistry:
     """Register the safe coding tools against *workspace* and return the registry.
 
     Each tool's ``fn`` accepts the same keyword arguments the LLM will send
     via ``ToolExecutor.execute(name, input)`` (which calls ``fn(**input)``).
     Workspace is closed over so the LLM never sees or controls the root.
+
+    ``shell_mode`` selects the execution mode for the ``run_shell`` tool;
+    ``ShellMode.MOCK`` (the default) returns deterministic stub output
+    without executing anything. ``ShellMode.ALLOWLIST`` runs the command
+    through ``subprocess.run`` against the five-command allowlist
+    (``pwd``, ``ls``, ``cat``, ``grep``, ``python -m pytest``).
     """
     ws = Path(workspace)
     registry = ToolRegistry()
@@ -137,7 +147,7 @@ def build_default_registry(workspace: str | Path) -> ToolRegistry:
                 "type": "string",
                 "description": (
                     "Allowlisted command (pwd, ls, cat, grep, python -m pytest). "
-                    "Runs in MOCK mode by default."
+                    "Runs in the configured shell mode (MOCK or ALLOWLIST)."
                 ),
             },
         },
@@ -146,11 +156,19 @@ def build_default_registry(workspace: str | Path) -> ToolRegistry:
     registry.register(Tool(
         name="run_shell",
         description=(
-            "Run a safe shell command in MOCK mode. Only allowlisted commands pass; "
-            "metacharacters and secret paths are refused."
+            "Run a safe shell command. Only allowlisted commands pass; "
+            "metacharacters and secret paths are refused. Execution mode "
+            "is configured at registry build time (default: MOCK)."
         ),
         input_schema=run_schema,
-        fn=lambda command: run_shell(command, mode=ShellMode.MOCK),
+        # ``_mode=shell_mode`` / ``_cwd=ws`` capture the configured mode
+        # and workspace root into the lambda's default-arg slots at
+        # definition time, avoiding the classic late-binding closure
+        # trap. ``cwd`` is required by ``ShellMode.ALLOWLIST`` and is
+        # harmlessly passed for ``MOCK`` (which never inspects it).
+        fn=lambda command, _mode=shell_mode, _cwd=ws: run_shell(
+            command, mode=_mode, cwd=_cwd,
+        ),
     ))
 
     return registry

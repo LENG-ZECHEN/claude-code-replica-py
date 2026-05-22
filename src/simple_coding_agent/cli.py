@@ -31,10 +31,17 @@ from pathlib import Path
 
 from .auto_learn import detect_cue, format_hint
 from .claude_md import ClaudeMdLoader
+from .coding_tools import ShellMode
 from .compact import ContextCompactor
 from .context import ContextBudget, ContextBuilder
 from .loop import AgentLoop, LoopStatus
-from .memory import MemoryEntry, MemoryType, ProjectMemory, SessionMemory
+from .memory import (
+    MemoryEntry,
+    MemoryType,
+    ProjectMemory,
+    SessionMemory,
+    _check_body_for_secrets,
+)
 from .metrics import MetricsCollector
 from .models import ToolCall
 from .provider import MockProvider, ProviderResponse
@@ -97,6 +104,8 @@ _REPL_HELP_TEXT: str = (
     "  /save <name>                   Persist transcript + last summary to a named session.\n"
     "  /load <name>                   Restore a previously saved session into this REPL.\n"
     "  /remember <type> <id> <body>   Save a project memory entry (auto-learn target).\n"
+    "  /remember-session <text>       Add a session-scoped memory note "
+    "(lost when REPL ends unless saved).\n"
     "  /exit, /quit                   Leave the REPL.\n"
 )
 _REPL_DEFAULT_ANSWER: str = (
@@ -150,10 +159,10 @@ def _format_call(call: ToolCall) -> str:
     return f"{call.name}({kvs})"
 
 
-def _run_demo(workspace: Path) -> int:
+def _run_demo(workspace: Path, *, shell_mode: ShellMode = ShellMode.MOCK) -> int:
     """Wire components, run the loop, print a structured trace, return exit code."""
     _seed_workspace(workspace)
-    registry = build_default_registry(workspace)
+    registry = build_default_registry(workspace, shell_mode=shell_mode)
     executor = ToolExecutor(registry)
     budget = ContextBudget(max_tokens=200_000, reserved_output_tokens=8_192)
     transcript = Transcript()
@@ -267,6 +276,7 @@ def _build_repl_loop(
     project_memory: ProjectMemory | None = None,
     provider: MockProvider | None = None,
     system_prompt: str | None = None,
+    shell_mode: ShellMode = ShellMode.MOCK,
 ) -> AgentLoop:
     """Wire one shared AgentLoop for the REPL session.
 
@@ -276,7 +286,7 @@ def _build_repl_loop(
     the REPL falls back to the MockProvider hook used by the default
     ``simple-agent --repl`` mode.
     """
-    registry = build_default_registry(workspace)
+    registry = build_default_registry(workspace, shell_mode=shell_mode)
     executor = ToolExecutor(registry)
     budget = ContextBudget(
         max_tokens=max_context_tokens,
@@ -337,6 +347,9 @@ def _handle_slash_command(cmd: str, loop: AgentLoop | None = None) -> str:
     if head == "/remember":
         _handle_remember_command(tokens[1:], loop)
         return "continue"
+    if head == "/remember-session":
+        _handle_remember_session_command(tokens[1:], loop)
+        return "continue"
     print(f"Unknown command: {head!r}. Try /help for the command list.")
     return "continue"
 
@@ -378,6 +391,45 @@ def _handle_remember_command(args: list[str], loop: AgentLoop | None) -> None:
         print(f"Could not save memory: {err}")
         return
     print(f"Remembered {entry.id} ({type_str}).")
+
+
+def _handle_remember_session_command(
+    args: list[str], loop: AgentLoop | None
+) -> None:
+    """Implement ``/remember-session <text...>``.
+
+    Appends an ephemeral session-scoped memory entry to the active loop's
+    ``SessionMemory``. The REPL's exit hook persists the session memory
+    via ``dump_json``, so the next REPL invocation in the same workspace
+    can rehydrate it.
+
+    Secret bodies are rejected via the same filter as ``/remember`` so a
+    malicious-but-friendly note like ``Bearer eyJ...`` never lands in
+    persisted session memory.
+    """
+    if loop is None:
+        print("(no active session)")
+        return
+    session_memory = loop._session_memory
+    if session_memory is None:
+        print("(no session memory configured for this REPL)")
+        return
+    if not args:
+        print("Usage: /remember-session <text...>")
+        return
+    body = " ".join(args)
+    try:
+        _check_body_for_secrets(body)
+    except ValueError as err:
+        print(f"Could not save session memory: {err}")
+        return
+    entry = MemoryEntry(
+        name="session note",
+        body=body,
+        type=MemoryType.PROJECT,
+    )
+    session_memory.add(entry)
+    print(f"Remembered session note {entry.id[:8]}.")
 
 
 def _handle_save_command(args: list[str], loop: AgentLoop | None) -> None:
@@ -428,6 +480,10 @@ def _apply_resume(name: str, loop: AgentLoop) -> int:
         return 2
     loop._transcript.replace_all(transcript.all_messages())
     loop._last_summary = last_summary
+    # The microcompact bookkeeping tracks a uuid from the previous
+    # transcript; after a transcript replacement that pointer is stale,
+    # so reset it to allow microcompact to re-evaluate the new transcript.
+    loop._microcompacted_against_assistant_uuid = None
     print(f"Resumed session from {path}")
     return 0
 
@@ -456,6 +512,10 @@ def _handle_load_command(args: list[str], loop: AgentLoop | None) -> None:
         return
     loop._transcript.replace_all(transcript.all_messages())
     loop._last_summary = last_summary
+    # The microcompact bookkeeping tracks a uuid from the previous
+    # transcript; after a transcript replacement that pointer is stale,
+    # so reset it to allow microcompact to re-evaluate the new transcript.
+    loop._microcompacted_against_assistant_uuid = None
     print(f"Loaded session from {path}")
 
 
@@ -546,6 +606,7 @@ def _run_repl(
     reserved_output_tokens: int,
     stream: bool,
     resume: str | None = None,
+    shell_mode: ShellMode = ShellMode.MOCK,
 ) -> int:
     """Run the interactive REPL.
 
@@ -578,6 +639,7 @@ def _run_repl(
         reserved_output_tokens=reserved_output_tokens,
         session_memory=session_memory,
         project_memory=project_memory,
+        shell_mode=shell_mode,
     )
 
     if resume is not None:
@@ -647,6 +709,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "$SIMPLE_AGENT_SESSIONS_DIR (default ~/.simple-agent/sessions/)."
         ),
     )
+    parser.add_argument(
+        "--shell-mode",
+        choices=("mock", "allowlist"),
+        default="mock",
+        help=(
+            "Shell tool execution mode. 'mock' (default) is safe and "
+            "deterministic; 'allowlist' actually executes the 5-command "
+            "allowlist (pwd, ls, cat, grep, python -m pytest)."
+        ),
+    )
     return parser
 
 
@@ -678,6 +750,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(args_in)
 
+    shell_mode = ShellMode[str(args.shell_mode).upper()]
+
     if args.repl or args.resume is not None:
         workspace = _resolve_workspace_arg(args.workspace)
         return _run_repl(
@@ -687,11 +761,12 @@ def main(argv: list[str] | None = None) -> int:
             reserved_output_tokens=int(args.reserved_output_tokens),
             stream=bool(args.stream),
             resume=args.resume,
+            shell_mode=shell_mode,
         )
 
-    # One-shot demo (unchanged behavior).
+    # One-shot demo (unchanged behavior; default shell_mode is MOCK).
     with tempfile.TemporaryDirectory(prefix="simple-agent-demo-") as tmp:
-        return _run_demo(Path(tmp))
+        return _run_demo(Path(tmp), shell_mode=shell_mode)
 
 
 __all__ = ["main"]

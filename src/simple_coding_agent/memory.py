@@ -32,10 +32,49 @@ _MANIFEST_FILENAME = "MEMORY.md"
 _MAX_MANIFEST_BODY_PREVIEW = 80
 _SAFE_ENTRY_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
-_SECRET_PATTERN = re.compile(
-    r"(?i)(api[_-]?key|secret|token|password|passwd|private[_-]?key)\s*[=:]\s*\S+",
+_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # Original key=value style.
+    re.compile(
+        r"(?i)(api[_-]?key|secret|token|password|passwd|private[_-]?key)\s*[=:]\s*\S+",
+    ),
+    # Bearer tokens, e.g. "Authorization: Bearer abc.def_123".
+    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9_\-\.=/+]{8,}"),
+    # AWS access key IDs.
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    # PEM block headers (matches both BEGIN and headers for any
+    # PRIVATE KEY family: RSA, EC, OPENSSH, PGP, etc.).
+    re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----"),
 )
 _MEMORY_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9]+")
+
+
+def _check_body_for_secrets(body: str) -> None:
+    """Raise ValueError if body matches any known secret pattern."""
+    for pattern in _SECRET_PATTERNS:
+        if pattern.search(body):
+            raise ValueError(
+                "Memory body appears to contain a secret "
+                "(matched a known secret pattern). "
+                "Do not store secrets in memory."
+            )
+
+
+def _escape_markdown_link_text(text: str) -> str:
+    """Escape characters in markdown link text.
+
+    User-controlled entry names must not be able to break the
+    ``[link text](url)`` form in the ``MEMORY.md`` manifest or inject
+    newlines that would split the one-line-per-entry layout.
+    """
+    return (
+        text.replace("\\", "\\\\")
+            .replace("]", "\\]")
+            .replace("[", "\\[")
+            .replace("(", "\\(")
+            .replace(")", "\\)")
+            .replace("\n", " ")
+            .replace("\r", " ")
+    )
 
 
 class MemoryType(StrEnum):
@@ -234,6 +273,17 @@ class SessionMemory:
                     err,
                 )
                 continue
+            try:
+                _check_body_for_secrets(entry.body)
+            except ValueError as err:
+                logger.warning(
+                    "session_memory: skipping entry %r in %s due to "
+                    "secret-like body: %s",
+                    entry.id,
+                    target,
+                    err,
+                )
+                continue
             store.add(entry)
         return store
 
@@ -301,7 +351,8 @@ class ProjectMemory:
         lines: list[str] = ["# Memory Index\n"]
         for e in entries[:200]:
             preview = e.body[:_MAX_MANIFEST_BODY_PREVIEW].replace("\n", " ")
-            lines.append(f"- [{e.name}]({e.id}.json) — {preview}\n")
+            safe_name = _escape_markdown_link_text(e.name)
+            lines.append(f"- [{safe_name}]({e.id}.json) — {preview}\n")
         with open(os.path.join(self._dir, _MANIFEST_FILENAME), "w", encoding="utf-8") as fh:
             fh.writelines(lines)
 
@@ -317,8 +368,9 @@ class ProjectMemory:
 
     @staticmethod
     def _reject_secrets(body: str) -> None:
-        if _SECRET_PATTERN.search(body):
-            raise ValueError(
-                "Memory body appears to contain a secret (key=value pattern). "
-                "Do not store secrets in memory."
-            )
+        """Delegate to the module-level :func:`_check_body_for_secrets`.
+
+        Kept for backwards compatibility with callers that referenced the
+        static method directly.
+        """
+        _check_body_for_secrets(body)
