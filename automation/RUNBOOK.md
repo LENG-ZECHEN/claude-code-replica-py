@@ -143,26 +143,51 @@ for each milestone M{N} in milestones (in declaration order):
     claude --print --model claude-opus-4-7 \
            --allowedTools "<whitelist>" --disallowedTools "<denylist>" \
            < $prompt 2>&1 | tee $log_file
-    exit_gate = "[<commit_prefix>/M{N}]"
-    if git log -1 | grep -qE "$exit_gate" :
-        continue
-    else:
-        report failure with last 50 lines of log
-        exit non-zero  # halts loop; subsequent milestones NOT run
+
+    # 4-check exit gate (ALL must pass or the loop halts):
+    1. git log -1 subject matches [<commit_prefix>/M{N}]
+    2. initiatives/current/HANDOFF.md was modified in that commit
+       (proves exit ritual step 4 ran)
+    3. initiatives/current/PROGRESS.md contains "M{N}"
+       (proves exit ritual step 3 ran)
+    4. pytest --tb=no -q is green (trust-but-verify; skippable with
+       --skip-quality)
 ```
 
 Each milestone prompt (written in Phase 1) ends with a §5 Exit Ritual
 that REQUIRES the agent to:
 
-1. Verify the milestone's `exit_gate` (per config.yaml).
+1. Verify the milestone's `exit_gate` (per config.yaml) objectively —
+   quote the verifying command's output, not "feels complete".
 2. Commit with `[<commit_prefix>/M{N}]` subject.
-3. Append a milestone block to `initiatives/current/PROGRESS.md`.
-4. Rewrite `initiatives/current/HANDOFF.md` so M{N+1} can read it.
+3. Append a milestone block to `initiatives/current/PROGRESS.md`
+   (terse-fact-log format — see `automation/templates/progress_entry.md`).
+4. Rewrite `initiatives/current/HANDOFF.md` using the 5-section
+   structure in `automation/templates/handoff_milestone.md` so M{N+1}
+   can read it. Section 4 "Important constraints" propagates invariants;
+   Section 5 "Next milestone guidance" is written FOR the next agent.
 5. (last milestone only) Mark `initiatives/current/PLAN.md` STATUS as
    `complete`.
 
-If a milestone agent fails to honor the exit ritual, the script's
-`exit_gate` grep fails and the loop halts.
+If a milestone agent fails any of the 4 exit-gate checks above, the
+loop halts and subsequent milestones do NOT run. The failure message
+names which check failed so you can fix and resume with
+`./automation/scripts/run_next.sh M{N}`.
+
+### HANDOFF vs PROGRESS — responsibility split
+
+These two files look similar but serve different audiences. Keep them
+in their lanes to avoid duplication and rot.
+
+| File | Audience | Format | Update mode | Purpose |
+|---|---|---|---|---|
+| `initiatives/current/HANDOFF.md` | The NEXT milestone agent | 5-section structured (narrative allowed) | Rewritten each milestone | Cross-milestone state baton — design decisions, invariants, next-milestone guidance |
+| `initiatives/current/PROGRESS.md` | The final REVIEW agent | Terse bullets per block | Append-only | Cross-milestone fact log — commit, tests delta, files, exit-gate evidence |
+
+If you feel an entry could go in either, ask:
+- "Does the next milestone agent need this to do their job?" → HANDOFF
+- "Does the final review need this to audit what happened?" → PROGRESS
+- Both? → put the narrative in HANDOFF and the bullet in PROGRESS.
 
 ### Phase 2B — Review (script-spawned final claude session)
 

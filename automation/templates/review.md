@@ -73,6 +73,9 @@ For each `prompts/M{N}.md` score on 5 dimensions (1-5 each):
 | Scope alignment | Do the §2 scope + exit gate match PLAN's M{N} entry? |
 | Constraint specificity | Are TDD / file-limit / no-`-A` requirements explicit? |
 | Exit-ritual correctness | Does §5 match `automation/templates/milestone_prompt.md` §5? |
+| **Out-of-scope enumeration** | Does §2.5 list concrete "do not" items (other milestones, harness files, unrelated refactors, public-API changes, new deps), or is it just a generic disclaimer? |
+| **Mandatory reading completeness** | Does §3 list all 8 mandatory reads (CLAUDE.md, PLAN.md, config.yaml, HANDOFF.md, PROGRESS.md, expected files, git log when N>1, prior log when N>2)? |
+| **Exit gate objectivity** | Is the exit_gate quoted in §2 objectively verifiable by a command output, NOT subjective phrasing like "implementation is good" / "looks correct"? |
 
 Produce a markdown table inside REVIEW.md.
 
@@ -90,8 +93,12 @@ Score on 5 dimensions:
 | Commit hygiene | Subject matches `[{{COMMIT_PREFIX}}/M{N}]` format; body explains why |
 | Test growth | Did pytest grow as expected? Were new tests meaningful? |
 | Gate honor | mypy + ruff still clean? |
-| Divergence discipline | Are divergences clearly explained in HANDOFF Section 3? |
+| Divergence discipline | Are divergences clearly explained in the milestone's HANDOFF Section 2 "design decisions" subsection? |
 | Log cleanliness | Any unexplained errors / warnings / retries in the log? |
+| **Implementation matches PLAN** | Does the diff actually deliver what PLAN.md M{N} promised, or only the surface (tests pass but the architecture / public-API shape differs from what was planned)? Quote the PLAN passage and the matching diff hunks. |
+| **Scope discipline** | Did the milestone touch only files listed in its prompt §2 "Expected files to touch", or did it scope-creep into unrelated modules? Run `git show --stat <commit>` and compare with §2. |
+| **HANDOFF accuracy** | Cross-reference the milestone's HANDOFF Section 2 ("behavior implemented", "files changed", "tests added") with the actual diff and PROGRESS.md entry. Does what's CLAIMED match what SHIPPED? Catch HANDOFF inflation early. |
+| **Failure-path coverage** | Did new tests cover error / edge paths (look for `pytest.raises`, invalid-input cases, boundary conditions), or only happy path? A milestone whose 100% of new tests are happy-path is fragile and should be flagged. |
 
 ### Step 5: Write `initiatives/current/REVIEW.md`
 

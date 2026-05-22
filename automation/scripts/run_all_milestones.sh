@@ -97,6 +97,7 @@ list_milestones_from_prompts() {
 
 DRY_RUN=0
 SKIP_REVIEW=0
+SKIP_QUALITY=0
 MILESTONE_FILTER=()
 
 for arg in "$@"; do
@@ -104,6 +105,7 @@ for arg in "$@"; do
     --help|-h)       show_help; exit 0 ;;
     --dry-run)       DRY_RUN=1 ;;
     --skip-review)   SKIP_REVIEW=1 ;;
+    --skip-quality)  SKIP_QUALITY=1 ;;
     M[0-9])          MILESTONE_FILTER+=("$arg") ;;
     M[0-9][0-9])     MILESTONE_FILTER+=("$arg") ;;
     *)               die "Unknown arg: $arg (try --help)" ;;
@@ -195,10 +197,35 @@ for M in "${MILESTONES[@]}"; do
     die "$M: claude invocation exited non-zero (see $LOG)"
   fi
 
-  # Exit-gate: did the milestone commit with the expected subject?
+  # ------------------------------------------------------------------------
+  # Exit-gate: 4 independent checks. ALL must pass or the loop halts.
+  # See automation/RUNBOOK.md Phase 2A for the full spec.
+  # ------------------------------------------------------------------------
+
+  # Check 1: commit subject contains [<commit_prefix>/<M>]
   if ! git -C "$REPLICA_DIR" log --oneline -1 | grep -qF "[${COMMIT_PREFIX}/${M}]"; then
     git -C "$REPLICA_DIR" log --oneline -5
-    die "$M did not produce a '[${COMMIT_PREFIX}/${M}]' commit (loop stopping)"
+    die "$M failed exit-gate check 1: no '[${COMMIT_PREFIX}/${M}]' commit at HEAD"
+  fi
+
+  # Check 2: HANDOFF.md was modified in that commit (exit ritual step 4)
+  if ! git -C "$REPLICA_DIR" log -1 --name-only --pretty=format: \
+       | grep -qx "initiatives/current/HANDOFF.md"; then
+    die "$M failed exit-gate check 2: initiatives/current/HANDOFF.md was not modified in the commit (exit ritual step 4 skipped)"
+  fi
+
+  # Check 3: PROGRESS.md contains a '${M}' entry (exit ritual step 3)
+  if ! grep -qF "$M" "$REPLICA_DIR/initiatives/current/PROGRESS.md" 2>/dev/null; then
+    die "$M failed exit-gate check 3: no '$M' string found in initiatives/current/PROGRESS.md (exit ritual step 3 skipped)"
+  fi
+
+  # Check 4: pytest still green (unless --skip-quality). The agent already
+  # runs pytest before commit per §4, but we trust-but-verify here so a
+  # skipped or flaky agent run does not propagate to the next milestone.
+  if [ "$SKIP_QUALITY" -eq 0 ]; then
+    if ! (cd "$REPLICA_DIR" && pytest --tb=no -q > /dev/null 2>&1); then
+      die "$M failed exit-gate check 4: pytest is now red (rerun: cd python-replica && pytest)"
+    fi
   fi
 
   printf '\n=== %s done at %s ===\n' "$M" "$(date)"

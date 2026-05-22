@@ -4,29 +4,33 @@ SKELETON for initiatives/current/PROGRESS.md.
 Phase 1 Step 7 (RUNBOOK) writes the header at the top of this file as
 the initial PROGRESS.md (no entries yet).
 
-Each milestone agent at exit ritual step 3 APPENDS one "## M{N} — done
-<YYYY-MM-DD>" block to the bottom of PROGRESS.md, formatted exactly
-like the example block below.
+Each milestone agent at exit ritual step 3 APPENDS one block to the
+bottom of PROGRESS.md, formatted exactly like the example block below.
+
+PROGRESS.md is a TERSE FACT LOG for the final review session to audit.
+Narrative belongs in HANDOFF.md Section 2 ("behavior implemented",
+"design decisions"); here you only need the bullets below.
+
+Rule of thumb (per RUNBOOK responsibility split):
+  HANDOFF.md  = the cross-milestone state baton (rewritten each milestone)
+  PROGRESS.md = the cross-milestone fact log    (append-only, terse)
 -->
 
 # {{INITIATIVE_SLUG}} progress log
 
-Cumulative milestone log for the {{INITIATIVE_SLUG}} initiative.
-Append one block per milestone, newest at the bottom.
+Cumulative milestone log for the `{{INITIATIVE_SLUG}}` initiative.
+One block per milestone, newest at the bottom. Append only.
 
-<!-- BEGIN example block — copy + customize this for every milestone -->
+<!-- BEGIN example block — for shape reference only. The first real
+     milestone replaces this with its own block. -->
 
 ## {{MILESTONE_ID}} — done {{TODAY}}
 
-Phase {{PHASE_IDS}}. <one-paragraph factual summary of what shipped:
-new file(s), new flag(s), new symbol(s). Include the commit subject
-verbatim if it helps disambiguate. End with the pytest delta and what
-the next milestone should pick up.>
-
-Files: `<file1>`, `<file2>` (+N tests in `<test_files>`).
-Commit: `<sha> [<commit_prefix>/{{MILESTONE_ID}}] <subject>`.
-pytest {{PREV_COUNT}} → {{NEW_COUNT}} (+{{DELTA}}). mypy + ruff clean.
-{{NEXT_MILESTONE_ID}} should pick up phase {{NEXT_PHASE_IDS}} per
-initiatives/current/PLAN.md.
+- **commit**: `{{COMMIT_SHA}}` `[{{COMMIT_PREFIX}}/{{MILESTONE_ID}}] {{COMMIT_SUBJECT}}`
+- **tests**: {{PREV_COUNT}} → {{NEW_COUNT}} (+{{DELTA}})
+- **mypy**: {{MYPY_STATUS}} | **ruff**: {{RUFF_STATUS}}
+- **files changed**: `<file1>`, `<file2>`, ...
+- **exit gate**: `<gate text from §2 of the milestone prompt>` → PASS (<one-line evidence>)
+- **notes**: <optional, ≤1 line. Anything longer goes in HANDOFF.md.>
 
 <!-- END example block -->

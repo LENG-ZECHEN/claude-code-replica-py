@@ -1,62 +1,122 @@
 <!--
 SKELETON for the handoff file rewritten by each milestone at its exit
 ritual (step 4 of §5 in automation/templates/milestone_prompt.md).
+
 The milestone agent overwrites initiatives/current/HANDOFF.md with a
 filled-in copy of this file every time it completes.
-Section 3 is the most important: be specific about divergences so the
-next milestone can decide whether to inherit or revert.
+
+The 5-section structure (Current initiative / Completed milestones /
+Current repo state / Important constraints / Next milestone guidance)
+is non-negotiable and identical to handoff_initial.md.
+
+In Section 2, the milestone agent APPENDS its own subsection to whatever
+subsections prior milestones left. NEVER delete or rewrite a prior
+milestone's subsection — each milestone is the source of truth on itself.
+
+In Section 4, the milestone agent APPENDS new constraints (do-not-modify,
+preserve, compatibility). Entries are removed only when explicitly retired
+by a later milestone that quotes the original constraint and explains why
+it no longer applies.
+
+Comment blocks (HTML comments) are guidance to the milestone agent and
+should NOT appear in the written HANDOFF.md.
 -->
 
 # HANDOFF — Next: {{NEXT_MILESTONE_ID}} ({{NEXT_MILESTONE_NAME}})
 
-> Updated by: {{JUST_COMPLETED_MILESTONE_ID}} session
+> Updated by: `{{JUST_COMPLETED_MILESTONE_ID}}` session
 > Date: {{TODAY}}
-> Read this file FIRST in the next session, then verify against git/pytest.
+> Re-verify Section 3 numbers before starting work — do not trust this
+> file blindly.
 
 ---
 
-## 1. Objective State
+## 1. Current initiative
 
-> The next session MUST re-verify these numbers. Do not trust this list
-> blindly — re-run the commands.
+- **slug**: `{{INITIATIVE_SLUG}}`
+- **current milestone**: just-completed `{{JUST_COMPLETED_MILESTONE_ID}}` — {{JUST_COMPLETED_MILESTONE_NAME}}
+- **next milestone**: `{{NEXT_MILESTONE_ID}}` — {{NEXT_MILESTONE_NAME}}
+- **all milestones (per PLAN)**: {{ALL_MILESTONE_IDS_WITH_STATUS}}
 
-- Last commit: `{{COMMIT_SHA}}` — `git -C python-replica show {{COMMIT_SHA}}` to inspect
-- pytest: {{PYTEST_COUNT}} passing (was {{PREV_PYTEST_COUNT}} after {{PREV_MILESTONE_ID}}, delta {{PYTEST_DELTA}})
-- mypy:   {{MYPY_STATUS}}
-- ruff:   {{RUFF_STATUS}}
-- Branch: {{BRANCH}}
+  <!-- format: "M1 [done], M2 [done], M3 [next], M4 [pending], M5 [pending]" -->
 
-## 2. What {{JUST_COMPLETED_MILESTONE_ID}} accomplished
+## 2. Completed milestones
 
-- {{PHASE_ID_1}}: <what shipped, in one bullet>
-- {{PHASE_ID_2}}: <what shipped, in one bullet>
-- Test additions: `tests/test_xxx.py` (+N cases), `tests/test_yyy.py` (+M cases). Total: {{PREV_PYTEST_COUNT}} → {{PYTEST_COUNT}}.
+<!--
+PRESERVE every prior subsection verbatim. APPEND your own subsection at
+the bottom. Each subsection's fields are all required (use "(none)" for
+empty ones).
+-->
 
-## 3. Decisions Made That Diverge From Plan ⚠️
+{{PRIOR_MILESTONE_BLOCKS}}
 
-> THE MOST IMPORTANT SECTION. Any place reality diverged from
-> `initiatives/current/PLAN.md` — alternative library, skipped test,
-> renamed function, added abstraction, deferred work, etc. Include
-> the WHY so the next session can decide whether to inherit or revert.
+### {{JUST_COMPLETED_MILESTONE_ID}}
 
-- **<short title of divergence>**: <what was different from plan and
-  why>. <Where in the diff it is visible>. <Impact on next milestone>.
-- (none) if truly no divergences
+- **commit**: `{{COMMIT_SHA}}` `[{{COMMIT_PREFIX}}/{{JUST_COMPLETED_MILESTONE_ID}}] {{COMMIT_SUBJECT}}`
+- **files changed**: `<file1>`, `<file2>`, ...
+- **tests added**: `<test_file>` (+N cases). Total: {{PREV_PYTEST_COUNT}} → {{PYTEST_COUNT}}
+- **behavior implemented**: <one-paragraph factual summary — what now
+  works that did not before. Cite new public symbols / CLI flags /
+  slash commands / env vars.>
+- **design decisions (deviations from PLAN)**:
+  - **<short title>**: <what was different from PLAN and WHY>. Visible
+    in: `<path:line>`. Impact on `{{NEXT_MILESTONE_ID}}`: <e.g., "must
+    respect new invariant Z" / "can ignore — internal only">.
+  - (none) if truly no divergences
+- **known limitations**:
+  - <thing not fully done; e.g., "happy-path only, error case deferred to M4">
+  - (none) if you fully cleaned up
 
-## 4. Open Questions / Blockers for {{NEXT_MILESTONE_ID}}
+## 3. Current repo state
 
-> Anything needing human input, or pre-conditions for {{NEXT_MILESTONE_ID}}.
-> If none, write "(none)".
+> Re-verify these numbers before starting. Do not trust this list blindly.
 
-(none) — all quality gates green; working tree clean before this handoff
-was written.
+- **last commit**: `{{COMMIT_SHA}}` — `git -C python-replica show {{COMMIT_SHA}}`
+- **tests**: {{PYTEST_COUNT}} passing (was {{PREV_PYTEST_COUNT}} after `{{PREV_MILESTONE_ID}}`, delta +{{PYTEST_DELTA}})
+- **mypy**: {{MYPY_STATUS}}
+- **ruff**: {{RUFF_STATUS}}
+- **branch**: {{BRANCH}}
+- **known failing checks**: none | <list any quarantined / xfail tests>
 
-## 5. Next Session Prompt
+## 4. Important constraints (carried forward)
 
-> The autonomous loop (`automation/scripts/run_all_milestones.sh`) does
-> NOT read this section — it reads `initiatives/current/prompts/{{NEXT_MILESTONE_ID}}.md`
-> directly. This section exists only for manual single-milestone restarts
-> via `automation/scripts/run_next.sh`.
+> Invariants that `{{NEXT_MILESTONE_ID}}` and subsequent milestones MUST
+> respect. Update by ADDING — only remove a constraint by quoting it
+> and explaining why it is retired.
 
-See `initiatives/current/prompts/{{NEXT_MILESTONE_ID}}.md` for the full
-prompt the loop will feed to the next session.
+{{PRIOR_CONSTRAINTS}}
+
+<!-- New constraints from {{JUST_COMPLETED_MILESTONE_ID}}, if any: -->
+
+- **do not modify**:
+  - `<path>` — <reason; e.g., "frozen by {{JUST_COMPLETED_MILESTONE_ID}} design decision: new public API">
+  - (none) if no new freezes
+- **preserve**:
+  - `<test or behavior>` — <reason>
+  - (none)
+- **compatibility requirements**:
+  - <e.g., "the new XClient.connect() signature is part of public API; do not change it">
+  - (none)
+
+## 5. Next milestone guidance
+
+For `{{NEXT_MILESTONE_ID}}` — {{NEXT_MILESTONE_NAME}}:
+
+- **next scope**: <2-3 sentences. Paraphrase from PLAN.md / config.yaml,
+  but add anything you learned in `{{JUST_COMPLETED_MILESTONE_ID}}` that
+  sharpens the next milestone's job.>
+- **relevant files**:
+  - `<src/path/x.py>` — <why; e.g., "extends what {{JUST_COMPLETED_MILESTONE_ID}} introduced">
+  - `<tests/path/test_y.py>` — <why>
+- **expected tests**:
+  - `<tests/test_<thing>.py>` — <what to cover (happy path + at least one error/edge case)>
+- **risks**:
+  - <surprise you ran into in `{{JUST_COMPLETED_MILESTONE_ID}}`;
+    e.g., "the new XClient call sometimes hangs on bad input — make sure
+    `{{NEXT_MILESTONE_ID}}` handles that case">
+  - (none) if smooth sailing
+
+The full ready-to-run prompt is at:
+`initiatives/current/prompts/{{NEXT_MILESTONE_ID}}.md`
+
+{{IF_LAST_MILESTONE_BLOCK}}
