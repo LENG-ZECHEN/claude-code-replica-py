@@ -19,12 +19,14 @@
 #   - claude CLI on PATH
 #   - working tree in python-replica/ is clean
 #
-# IMPORTANT: this script does NOT enforce the 5-check exit gate that
-# run_all_milestones.sh enforces (commit subject / HANDOFF modified /
-# PROGRESS entry / pytest green / HANDOFF 5-section structure). It is
-# strictly a debug runner. After verifying the milestone manually, re-run
+# IMPORTANT: this script does NOT enforce the 6-check exit gate that
+# run_all_milestones.sh enforces (1: commit subject / 2: HANDOFF.md modified
+# in commit / 3: PROGRESS.md entry exists / 4: pytest green / 5: HANDOFF
+# 5-section structure / 6: PROGRESS.md and HANDOFF.md preserve all prior
+# milestone blocks since baseline — append-only contract). It is strictly
+# a debug runner. After verifying the milestone manually, re-run
 # `./automation/scripts/run_all_milestones.sh` to continue the loop —
-# the 5-check gate there will skip already-good milestones and pick up
+# the 6-check gate there will skip already-good milestones and pick up
 # from the next undone one.
 
 set -euo pipefail
@@ -107,10 +109,9 @@ PROMPT="$PROMPTS_DIR/${MILESTONE}.md"
 [ -f "$PROMPT" ]    || die "prompt missing for $MILESTONE: $PROMPT"
 command -v claude >/dev/null 2>&1 || die "claude CLI not on PATH"
 
-if ! git -C "$REPLICA_DIR" diff --quiet HEAD 2>/dev/null \
-   || ! git -C "$REPLICA_DIR" diff --cached --quiet 2>/dev/null; then
+if [ -n "$(git -C "$REPLICA_DIR" status --porcelain)" ]; then
   git -C "$REPLICA_DIR" status --short
-  die "working tree in $REPLICA_DIR is dirty (commit or stash, then retry)"
+  die "working tree in $REPLICA_DIR is dirty — commit, stash, or remove untracked files, then retry (untracked files are NOT exempt: a half-bootstrapped initiatives/current/ or a crashed milestone agent leaving new test files would silently pollute Phase 2; see RUNBOOK Pre-flight)"
 fi
 
 printf '=== Pre-flight ===\n'
@@ -147,8 +148,8 @@ if ! claude --print --model "$CLAUDE_MODEL" \
 fi
 
 printf '\n=== %s session ended at %s ===\n' "$MILESTONE" "$(date)"
-printf 'NOTE: run_next.sh does NOT enforce the 5-check exit gate.\n'
+printf 'NOTE: run_next.sh does NOT enforce the 6-check exit gate.\n'
 printf '      Verify the milestone manually (commit / HANDOFF / PROGRESS /\n'
-printf '      pytest / HANDOFF structure), then re-run\n'
+printf '      pytest / HANDOFF structure / append-only contract), then re-run\n'
 printf '      ./automation/scripts/run_all_milestones.sh\n'
 printf '      to continue the full loop.\n'

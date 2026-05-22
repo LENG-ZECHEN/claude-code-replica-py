@@ -135,10 +135,10 @@ If any check fails, stop and report. Do not proceed.
 
 | # | Action | Output |
 |---|---|---|
-| 1 | **Validate INBOX.** Parse YAML front-matter. Check `slug` matches `^[a-z0-9-]+$`, `commit_prefix` is non-empty, every milestone has `name + phase_ids + exit_gate`. | pass/fail |
+| 1 | **Validate INBOX.** Parse YAML front-matter. Check `slug` matches `^[a-z0-9-]+$`, `commit_prefix` matches `^[a-z0-9][a-z0-9_-]{0,31}$` (it is interpolated unquoted into sed -E regexes in `run_all_milestones.sh`, so regex meta-chars are unsafe), every milestone has `name + phase_ids + exit_gate`. | pass/fail |
 | 2 | **Derive archive slug** = `<YYYY-MM>-<slug>` from today's date. | `archive_slug` |
 | 3 | **Decide if `run_all_milestones.sh` needs updating.** Edit ONLY if (a) the INBOX YAML schema introduces a field the script must parse (e.g., a new `before_first_milestone` hook), OR (b) the script's hard-coded `CLAUDE_MODEL` / `ALLOWED_TOOLS` / `DISALLOWED_TOOLS` need changing for this initiative. Otherwise: noop. | edit or noop |
-| 4 | **Move INBOX into the initiative.** `git mv automation/INBOX.md initiatives/current/PLAN.md`. Edit `PLAN.md` to prepend a provenance header above the original `---` YAML block: `> Bootstrapped on YYYY-MM-DD. Baseline commit: <SHA>. Baseline pytest: <N> passing.` | `initiatives/current/PLAN.md` |
+| 4 | **Move INBOX into the initiative.** `git mv automation/INBOX.md initiatives/current/PLAN.md`. Edit `PLAN.md` to **insert a provenance block IMMEDIATELY AFTER the closing `---` of the YAML front-matter** (NOT before — putting it before would push `---` off line 1 and break standard frontmatter parsers): `> Bootstrapped on YYYY-MM-DD. Baseline commit: <SHA>. Baseline pytest: <N> passing.` followed by a blank line, then the free-form markdown body that came after `---` in INBOX. The resulting PLAN.md shape is: line 1 `---`, then YAML body, then `---`, then provenance block, then blank line, then PLAN's prose body. This keeps PLAN.md parseable as standard frontmatter. | `initiatives/current/PLAN.md` |
 | 5 | **Generate `config.yaml`** from PLAN's YAML front-matter. Include `slug`, `commit_prefix`, `archive_slug`, `baseline_commit` (output of `git -C python-replica rev-parse HEAD` at Phase 1 entry — the same SHA recorded in PLAN.md's provenance header and HANDOFF.md Section 3 baseline), and the full `milestones` table. `baseline_commit` lets `run_all_milestones.sh` and the review session restrict every commit-subject grep to this initiative's range (`baseline_commit..HEAD`), preventing collisions with prior-initiative commits that may have reused the same `commit_prefix`. | `initiatives/current/config.yaml` |
 | 6 | **Write `HANDOFF.md`** using `automation/templates/handoff_initial.md`. Fill `slug`, baseline commit/pytest/mypy/ruff, first milestone's name. | `initiatives/current/HANDOFF.md` |
 | 7 | **Write `PROGRESS.md`** using `automation/templates/progress_entry.md` as the file header (no milestone entries yet). | `initiatives/current/PROGRESS.md` |
@@ -168,6 +168,15 @@ bootstrap as a single change after reviewing.
 `python-replica/` (or any descendant — the script `cd`s to its own
 location).
 
+> **Phase 2 pre-flight is stricter than Phase 1's.** Phase 1 allows
+> `automation/INBOX.md` to be the only dirty path (the normal user
+> path edits INBOX before triggering Phase 1). By the time you reach
+> Phase 2, the user is expected to have committed Phase 1's bootstrap
+> diff (Phase 1 itself never commits — see Step 11), so Phase 2's
+> pre-flight requires a strictly clean working tree with NO
+> exceptions. If Phase 2 refuses because the tree is dirty, commit or
+> stash the leftover changes and retry.
+
 The script does three things in sequence:
 
 ### Phase 2A — Execute milestones (script-driven)
@@ -190,7 +199,7 @@ for each milestone M{N} in milestones (in declaration order):
            --allowedTools "<whitelist>" --disallowedTools "<denylist>" \
            < $prompt 2>&1 | tee $log_file
 
-    # 5-check exit gate for freshly run milestones (ALL must pass):
+    # 6-check exit gate for freshly run milestones (ALL must pass):
     1. git log -1 subject matches [<commit_prefix>/M{N}]
     2. initiatives/current/HANDOFF.md was modified in that commit
        (proves exit ritual step 4 ran)
@@ -209,6 +218,17 @@ for each milestone M{N} in milestones (in declaration order):
          ## 5. Next milestone guidance
        (proves the agent used the structured handoff_milestone.md
        template rather than a free-form HANDOFF)
+    6. Append-only contract: for every prior milestone M{i} found in
+       baseline_commit..HEAD (i.e. every [<commit_prefix>/M{i}] commit
+       this initiative produced before the current M{N}):
+         - initiatives/current/PROGRESS.md still contains a heading
+           matching ^## M{i} — done YYYY-MM-DD
+         - initiatives/current/HANDOFF.md still contains a Section 2
+           subsection heading matching ^### M{i}$
+       Without this check, a milestone agent that rewrote PROGRESS.md
+       or HANDOFF.md Section 2 from scratch (erasing M1..M{N-1}'s real
+       records) would slip past checks 1-5. M1 trivially passes
+       because there are no prior milestones.
 ```
 
 Each milestone prompt (written in Phase 1) ends with a §5 Exit Ritual
@@ -217,16 +237,21 @@ that REQUIRES the agent to:
 1. Verify the milestone's `exit_gate` (per config.yaml) objectively —
    quote the verifying command's output, not "feels complete".
 2. Commit with `[<commit_prefix>/M{N}]` subject.
-3. Append a milestone block to `initiatives/current/PROGRESS.md`
+3. **APPEND** a milestone block to `initiatives/current/PROGRESS.md`
    (terse-fact-log format — see `automation/templates/progress_entry.md`).
+   Prior milestones' `## M{i} — done` blocks MUST remain verbatim;
+   exit-gate check 6 enforces this.
 4. Rewrite `initiatives/current/HANDOFF.md` using the 5-section
    structure in `automation/templates/handoff_milestone.md` so M{N+1}
    can read it. Section 4 "Important constraints" propagates invariants;
    Section 5 "Next milestone guidance" is written FOR the next agent.
+   In Section 2 "Completed milestones", **APPEND** a new `### M{N}`
+   subsection — prior `### M{i}` subsections MUST be preserved
+   verbatim; exit-gate check 6 enforces this too.
 5. (last milestone only) Mark `initiatives/current/PLAN.md` STATUS as
    `complete`.
 
-If a milestone agent fails any of the 5 exit-gate checks above, the
+If a milestone agent fails any of the 6 exit-gate checks above, the
 loop halts and subsequent milestones do NOT run. The failure message
 names which check failed so you can fix and resume with
 `./automation/scripts/run_next.sh M{N} --run`, then rerun
@@ -305,7 +330,7 @@ to existing files are to revert.
 
 | Trigger | Action |
 |---|---|
-| `src/` gains a new **subdirectory**, OR a new top-level module that is **>150 LOC** AND exports **≥3 public symbols** (non-underscored functions/classes/dataclasses) | Create `docs/<slug>.md` using `automation/templates/subsystem_doc.md`. If `docs/<slug>.md` already exists, **append** a "## Recent changes" bullet instead. |
+| `src/` gains a new **subdirectory**, OR a new top-level module that is **>150 LOC** AND exports **≥3 public symbols** | Create `docs/<slug>.md` using `automation/templates/subsystem_doc.md`. If `docs/<slug>.md` already exists, **append** a "## Recent changes" bullet instead. |
 | HANDOFF.md Section 2's per-milestone "design decisions (deviations from PLAN)" subsections **collectively contain ≥2 divergences** AND at least one is architectural (keywords: `renamed module`, `new abstraction`, `dropped feature`, `protocol change`, `inverted dependency`), OR a single divergence touches **>2 source files** | Create `docs/DECISIONS/<NNNN>-<slug>.md` using `automation/templates/adr.md`. If `docs/DECISIONS/` doesn't exist yet, create it with a `README.md` index file too. NNNN = (max existing) + 1, zero-padded to 4 digits, starting at 0001. |
 
 Hard rules for Tier B:
@@ -317,6 +342,17 @@ Hard rules for Tier B:
 - If unsure whether a trigger has fired, **prefer to apply** (moderate
   aggression). Over-eager B-tier writes are reversible by deleting the
   one new file.
+
+**Definition: "public symbol"** for the subsystem-doc trigger above —
+a top-level name in the module that is reachable as part of the
+module's API surface. Concretely, the union of:
+(i) names listed in the module's `__all__` (if defined); OR
+(ii) when `__all__` is absent, non-underscore-prefixed `def`,
+`class`, `@dataclass`, `Protocol` subclass, `TypeAlias`, and
+module-level `Final[...] = ...` constants at the top level of the
+file.
+Imported names re-exported via `from x import y` count only when
+`__all__` lists them. Anything starting with `_` is excluded.
 
 #### Tier C — propose only (never auto-apply)
 
@@ -381,7 +417,9 @@ itself — Phase 2C only handles archive + NOW.md + index updates.
 
 | Symptom | Cause | Recovery |
 |---|---|---|
-| Phase 1 refuses with "INBOX is the bare template" | You forgot to fill in INBOX | Edit `automation/INBOX.md`, retry |
+| Phase 1 refuses with "INBOX placeholder block still present" | Pre-flight 3(a) failed — you forgot to delete the `> placeholder:` block at the top of INBOX | Delete the entire `> placeholder:` paragraph from `automation/INBOX.md`, retry |
+| Phase 1 refuses with "INBOX slug is still 'example-slug'" | Pre-flight 3(b) failed — you replaced the placeholder block but did not change the YAML slug | Edit the `slug:` value in `automation/INBOX.md` to a real kebab-case name, retry |
+| Phase 1 refuses with "INBOX commit_prefix is still 'example-prefix'" | Pre-flight 3(c) failed — you changed slug but forgot commit_prefix | Edit the `commit_prefix:` value in `automation/INBOX.md` to a real short token, retry |
 | Phase 1 refuses with "working tree dirty outside automation/INBOX.md" | You have uncommitted changes besides the initiative brief | Commit or stash every non-INBOX change, keep only `automation/INBOX.md` dirty, retry |
 | Phase 1 refuses with "initiatives/current/ not empty" | Previous initiative wasn't wrapped up | Either resume by running the script, or manually run Phase 2C steps |
 | Phase 1 refuses with "commit_prefix already used in git history" | You chose a prefix that a prior (archived) initiative already used | Edit `automation/INBOX.md` and pick a different `commit_prefix`, retry. Pre-flight check 4 enforces prefix uniqueness so `find_milestone_commit` cannot collide with prior-initiative commits |

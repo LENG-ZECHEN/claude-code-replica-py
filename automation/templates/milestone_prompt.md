@@ -257,7 +257,17 @@ verifies:
    Completed milestones`, `## 3. Current repo state`, `## 4. Important
    constraints`, `## 5. Next milestone guidance`). A free-form HANDOFF
    fails this check even if the file was modified.
+6. **Append-only contract.** For every prior milestone `M{i}` your
+   initiative has already shipped (every `[{{COMMIT_PREFIX}}/M{i}]`
+   commit in `baseline_commit..HEAD`):
+   - `initiatives/current/PROGRESS.md` still contains the
+     `^## M{i} — done YYYY-MM-DD` block from that milestone;
+   - `initiatives/current/HANDOFF.md` still contains the
+     `^### M{i}$` subsection under "## 2. Completed milestones".
+   Rewriting either file from scratch and only including your own
+   `M{{MILESTONE_ID}}` block is a HARD FAILURE here — prior milestones
+   are the source of truth on themselves; you APPEND only.
 
-Any of those five failing halts the loop. The final review session will
+Any of those six failing halts the loop. The final review session will
 also audit whether you stayed in scope and whether your HANDOFF accurately
 describes your diff.

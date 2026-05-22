@@ -175,6 +175,45 @@ check_handoff_touched_in_commit() {
   fi
 }
 
+# Check 6: enforce the append-only contract on PROGRESS.md and
+# HANDOFF.md Section 2. Both files must still carry every prior
+# milestone's record. Without this, a milestone agent that rewrote
+# either file from scratch (erasing M1..M{N-1}'s real history) would
+# slip past checks 1-5 — only the current M{N}'s block is needed to
+# satisfy check 3, and checks 1/2/4/5 do not look at prior content.
+#
+# Prior milestones are discovered by walking baseline_commit..HEAD for
+# `[<prefix>/M*]` commits (matching find_milestone_commit's range, so
+# a prior archived initiative reusing the same prefix cannot leak in).
+check_prior_milestones_preserved() {
+  local m="$1"
+  local prior
+  local prior_subjects
+
+  prior_subjects="$(git -C "$REPLICA_DIR" log "${BASELINE_COMMIT}..HEAD" \
+                    --format='%s' | grep -F "[${COMMIT_PREFIX}/" || true)"
+  [ -n "$prior_subjects" ] || return 0  # no prior milestones yet (M1 case)
+
+  while IFS= read -r prior_subject; do
+    [ -n "$prior_subject" ] || continue
+    # Extract M_ID from "[<prefix>/M_ID] ..." -> after the slash, before the close bracket
+    prior="$(printf '%s\n' "$prior_subject" \
+             | sed -nE "s|^\[${COMMIT_PREFIX}/(M[0-9]+)\].*$|\1|p" \
+             | head -1)"
+    [ -n "$prior" ] || continue
+    [ "$prior" = "$m" ] && continue  # skip the current milestone (it just appended itself)
+
+    if ! grep -qE "^## ${prior} — done [0-9]{4}-[0-9]{2}-[0-9]{2}" \
+         "$REPLICA_DIR/initiatives/current/PROGRESS.md" 2>/dev/null; then
+      die "$m failed exit-gate check 6: PROGRESS.md no longer contains the '## ${prior} — done' block from the previous milestone — current milestone rewrote PROGRESS.md instead of appending (violates the append-only contract documented in automation/templates/progress_entry.md)"
+    fi
+    if ! grep -qE "^### ${prior}$" \
+         "$REPLICA_DIR/initiatives/current/HANDOFF.md" 2>/dev/null; then
+      die "$m failed exit-gate check 6: HANDOFF.md Section 2 no longer contains the '### ${prior}' subsection from the previous milestone — current milestone rewrote HANDOFF Section 2 instead of appending (violates the append-only contract documented in automation/templates/handoff_milestone.md)"
+    fi
+  done <<< "$prior_subjects"
+}
+
 milestone_already_complete() {
   local m="$1"
   local commit
@@ -186,6 +225,7 @@ milestone_already_complete() {
   check_progress_block "$m"
   check_pytest_green "$m"
   check_handoff_structure "$m"
+  check_prior_milestones_preserved "$m"
 
   printf '=== %s already complete at %s; skipping ===\n' "$m" "${commit:0:7}"
   return 0
@@ -234,6 +274,11 @@ BASELINE_COMMIT=$(read_config_scalar "baseline_commit")
 
 [ -n "$INITIATIVE_SLUG" ]   || die "slug missing from $CONFIG"
 [ -n "$COMMIT_PREFIX" ]     || die "commit_prefix missing from $CONFIG"
+# commit_prefix is interpolated into sed -E regexes (see check_prior_milestones_preserved
+# and the review-template substitution); reject anything that could corrupt those regexes.
+if ! printf '%s' "$COMMIT_PREFIX" | grep -qE '^[a-z0-9][a-z0-9_-]{0,31}$'; then
+  die "commit_prefix '$COMMIT_PREFIX' in $CONFIG must match ^[a-z0-9][a-z0-9_-]{0,31}\$ — it is interpolated into sed -E regexes, so regex meta-chars (|, [, \\, *, +, ?, ., etc.) are unsafe"
+fi
 [ -n "$ARCHIVE_SLUG" ]      || die "archive_slug missing from $CONFIG"
 [ -n "$BASELINE_COMMIT" ]   || die "baseline_commit missing from $CONFIG (Phase 1 Step 5 records it as 'git rev-parse HEAD' at Phase 1 entry; pre-RUNBOOK config.yaml files lack this field — rebootstrap or add 'baseline_commit: <baseline SHA>' to $CONFIG manually)"
 
@@ -277,12 +322,11 @@ fi
 printf 'milestones : %s\n' "${MILESTONES[*]}"
 
 if [ "$DRY_RUN" -eq 0 ]; then
-  if ! git -C "$REPLICA_DIR" diff --quiet HEAD 2>/dev/null \
-     || ! git -C "$REPLICA_DIR" diff --cached --quiet 2>/dev/null; then
+  if [ -n "$(git -C "$REPLICA_DIR" status --porcelain)" ]; then
     git -C "$REPLICA_DIR" status --short
-    die "working tree in $REPLICA_DIR is dirty (commit or stash, then retry)"
+    die "working tree in $REPLICA_DIR is dirty — commit, stash, or remove untracked files, then retry (untracked files are NOT exempt: a half-bootstrapped initiatives/current/ or a crashed milestone agent leaving new test files would silently pollute Phase 2; see RUNBOOK Pre-flight)"
   fi
-  printf 'OK         : working tree clean\n'
+  printf 'OK         : working tree clean (no tracked diffs, no untracked files)\n'
 fi
 
 mkdir -p "$LOGS_DIR"
@@ -323,7 +367,7 @@ for M in "${MILESTONES[@]}"; do
   fi
 
   # ------------------------------------------------------------------------
-  # Exit-gate: 5 independent checks. ALL must pass or the loop halts.
+  # Exit-gate: 6 independent checks. ALL must pass or the loop halts.
   # See automation/RUNBOOK.md Phase 2A for the full spec.
   # ------------------------------------------------------------------------
 
@@ -351,6 +395,14 @@ for M in "${MILESTONES[@]}"; do
   # used automation/templates/handoff_milestone.md, not a free-form
   # HANDOFF). Each section header must be present verbatim.
   check_handoff_structure "$M"
+
+  # Check 6: append-only contract on PROGRESS.md and HANDOFF.md Section
+  # 2 — every prior milestone (baseline_commit..HEAD, same range
+  # find_milestone_commit uses) must still have its '## M{i} — done'
+  # PROGRESS block and '### M{i}' HANDOFF subsection. Without this, a
+  # milestone that rewrote either file from scratch would erase the
+  # real history of M1..M{N-1} and still pass checks 1-5.
+  check_prior_milestones_preserved "$M"
 
   printf '\n=== %s done at %s ===\n' "$M" "$(date)"
 done

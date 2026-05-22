@@ -12,6 +12,10 @@ is non-negotiable and identical to handoff_initial.md.
 In Section 2, the milestone agent APPENDS its own subsection to whatever
 subsections prior milestones left. NEVER delete or rewrite a prior
 milestone's subsection — each milestone is the source of truth on itself.
+**This is machine-enforced:** `run_all_milestones.sh` exit-gate check 6
+walks `baseline_commit..HEAD`, finds every prior `[<prefix>/M{i}]`
+commit, and verifies the corresponding `### M{i}` subsection still
+exists. Deleting or rewriting a prior subsection halts the loop.
 
 In Section 4, the milestone agent APPENDS new constraints (do-not-modify,
 preserve, compatibility). Entries are removed only when explicitly retired
