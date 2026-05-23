@@ -106,7 +106,7 @@
    - **ctx-mgmt-pdf-align initiative — M1–M4** (`8f1d98f`–`02f17f6`, 2026-05-23). Aligns the five-mechanism context pipeline with the PDF: M1 microcompact `keep_recent=5` + double-headroom autocompact threshold + LLM-default summarizer + 4 CLI flags; M2 engine snip orphan + ancient-cleared-pair deletion + `SNIP_BOUNDARY`; M3 recent-files snapshot + post-compaction `ATTACHMENT` re-injection (`FileSnapshot`, frozen `CompactSummary`); M4 model-driven `snip_history` tool + `<msg uuid="...">` wrap + 10k-token `SnipNudge`. See ADR-0002. pytest 615 → 704 (+89).
    ```
 
-3. `initiatives/_archive/2026-05-ctx-mgmt-pdf-align/PROGRESS.md` (M4 block) and `HANDOFF.md` §2 (M4) — Correct the phantom test baseline. — why: rewriting a milestone's own historical fact-log is outside the wrap agent's mandate (append-only contract), so this is proposed rather than auto-applied.
+3. **[APPLIED 2026-05-24 — see Post-review follow-up below]** `initiatives/_archive/2026-05-ctx-mgmt-pdf-align/PROGRESS.md` (M4 block) and `HANDOFF.md` §2 (M4) — Correct the phantom test baseline. — why: rewriting a milestone's own historical fact-log is outside the wrap agent's mandate (append-only contract), so this was proposed at review time; the owner subsequently authorized and the correction was applied.
    Trigger: Tier C (edits existing historical records).
    Suggested diff:
    ```diff
@@ -132,8 +132,9 @@ The decision-maker-facing Chinese owner brief lives in
 ## Post-review follow-up (2026-05-24, user-directed)
 
 After reading this review the owner directed fixes for all three surfaced
-findings. Quality after the follow-up: **pytest 704 → 707**, mypy clean (22
-files), ruff clean.
+findings, then a follow-on flag to make the model-snip path drivable. Quality
+after both rounds: **pytest 704 → 711** (707 after findings 1–3; +4 from the
+`--snip-nudge-growth-tokens` flag round), mypy clean (22 files), ruff clean.
 
 - **Finding 2 (consecutive same-role payload) — RESOLVED, contract changed.**
   The owner chose Anthropic-compatibility over the prior OpenAI-only adjacency.
