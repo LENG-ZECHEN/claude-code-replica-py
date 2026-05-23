@@ -10,7 +10,9 @@ For the active-initiative pointer and the bootstrap procedure, see
 
 ## Active
 
-_(none — `current/` is empty)_
+| Slug | Status | Period | Milestones | Final commit |
+|---|---|---|---|---|
+| [ctx-mgmt-pdf-align](./current/) | bootstrapped | 2026-05-23 – | M1 → M4 | `(pending)` |
 
 ## Archived
 

@@ -6,9 +6,26 @@
 
 ## Active initiative
 
-**None.**
+**ctx-mgmt-pdf-align** — see
+[`initiatives/current/`](./initiatives/current/).
 
-`initiatives/current/` is empty (`.gitkeep` only).
+| | |
+|---|---|
+| Bootstrapped | 2026-05-23 |
+| Milestones | M1 → M4 |
+| Baseline commit | `8f1d98f` |
+| Baseline pytest | 615 passing |
+| Status | Bootstrapped, awaiting Phase 2 execution |
+
+Goal: align the 5-mechanism context-management pipeline with Claude
+Code v2.1.88's behaviour per the user's `claude_code_notes.pdf` rubric.
+Closes every gap except forked-agent + prompt-cache sharing.
+
+Next command:
+
+```
+./automation/scripts/run_all_milestones.sh
+```
 
 ## Last completed initiative
 
