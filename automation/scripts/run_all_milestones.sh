@@ -725,7 +725,7 @@ Recent commits:
 ${RECENT_COMMITS}
 
 Last review log lines:
-$(log_tail_summary "$REVIEW_LOG" 20)
+$(log_tail_summary "$ARCHIVED_REVIEW_LOG" 20)
 
 Completed: $(date)" \
   "tada,package" "high"
