@@ -79,6 +79,8 @@ After install:
 
 Both entry points support `--verbose` (stream `[trace] [<channel>] …` events to stderr) and `--aggressive-thresholds` (lower compact/snip/microcompact thresholds for demo-friendly behavior; prints a banner summarizing the preset).
 
+The REPL also accepts fine-grained threshold overrides: `--microcompact-keep-recent`, `--output-headroom`, `--compact-headroom`, `--min-session-tokens` (PDF-aligned auto-compaction knobs), and `--snip-nudge-growth-tokens` (tokens of growth since the last snip that arm the model-driven `snip_history` nudge — lower it with a roomy `--max-context-tokens` to exercise model snips without auto-compact preempting them). See `simple-agent --help` / `simple-agent-openai --help` for the authoritative, current list.
+
 ## Running the demo (safe, no API key required)
 
 ```bash
