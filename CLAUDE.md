@@ -73,6 +73,29 @@ The priorities tracked in this document have shipped through P8. Commits are pin
 
 - **observable-thresholds initiative — M1–M3** (`063d5d9`–`026db2e`, 2026-05-22–23). Adds the per-event live-trace surface and two tuning knobs. `trace.py` introduces the `Tracer` Protocol with two concrete implementations: `NullTracer` (no-op, default everywhere, zero overhead) and `StderrTracer` (writes `[trace] [<channel>] k=v …` lines to a stream, keys sorted alphabetically). Nine channel names — `compact`, `reactive`, `microcompact`, `snip`, `externalize`, `memory_select`, `claude_md`, `auto_learn`, `budget` — cover every mechanism; fire-site order is perform-action → `tracer.emit()` → `metrics.record_*()`. Both CLI entry points gain `--verbose` (swaps in `StderrTracer` at REPL build time) and `--aggressive-thresholds` (activates `_AGGRESSIVE_THRESHOLDS`, a module-level preset of 8 lowered thresholds for demo-friendly compaction, plus a startup banner). `SnipTool` and `MicroCompactor` gain constructor params (`keep_recent=3`, `threshold_minutes=60`) matching prior hard-coded defaults so the preset can override them without API breaks. `examples/visibility_full_demo.py` drives a 3-turn scripted REPL under `OpenAIProvider` + aggressive thresholds and persists four artifacts (`transcript.txt`, `trace.stderr`, `metrics.json`, `summary.md`) under `examples/_artifacts/visibility-demo-<UTC-timestamp>/`. pytest 520 → 557 (+37).
 
+- **observable-thresholds-harden initiative — M1–M3**
+  (`6284ea8`–`PENDING_M3`, 2026-05-23). A follow-up quality pass on the
+  `observable-thresholds` work, scoped well below the 11-src/5-test water
+  mark. M1 hardens `trace.py` against closed streams and unsafe value
+  serialisation (`StderrTracer.emit` wraps the write in
+  `except (OSError, ValueError)`; new `_render_value` repr-quotes
+  whitespace/non-scalar field values) and expands the secret-leak negative
+  test to 4 shapes. M2 fixes the `_AGGRESSIVE_THRESHOLDS` bug where
+  `context_tokens` / `reserved_output_tokens` were always shadowed by the
+  argparse defaults — `--max-context-tokens` / `--reserved-output-tokens` /
+  `--max-steps` now use `None` sentinels resolved through
+  `cli._resolve_threshold` (explicit flag > preset > built-in default),
+  shared by both REPLs — and adds the full 8-field × 3-state precedence
+  matrix plus a `MicroCompactor(threshold_minutes<1)` guard test. M3
+  hardens `examples/visibility_full_demo.py` against same-second directory
+  collisions (`_new_run_dir` appends a `-2`…`-9` suffix, else `SystemExit`)
+  and parser fragility (`_parse_trace_events` now reads repr-quoted /
+  bracketed values whole), pins `NullTracer` zero overhead via a `timeit`
+  assertion (100k `emit` calls < 20ms, skipped under coverage), adds a
+  `--help` snapshot test pinning the `preset value applies` precedence
+  wording, and syncs README + this roadmap. No source change in M3.
+  pytest 557 → 615 (+58: M1 557→584, M2 584→605, M3 605→615).
+
 - **P9 — M2: Stress and microcompact demos (Phase C1 + C2)** (earlier change). Even after M1, the long-running mechanisms still needed deterministic single-command reproducers so M2's exit gate could prove that full-compact, reactive-compact, and microcompact actually fire end-to-end. `examples/stress_demo.py` builds a 210k-char scripted transcript inside a 10k-token `ContextBudget` (`keep_recent=4`, `compact_threshold=0.5`) so `ContextCompactor.compact()` runs on the first turn; a second scenario scripts a `PromptTooLongError` on the first provider call so `AgentLoop`'s one-shot reactive-compact retry path also runs. Both scenarios print the normative marker `compact fired (messages_summarized=N)` / `reactive compact fired (messages_summarized=N)` followed by a `[detail]` line with pre/post token counts. `examples/microcompact_demo.py` seeds a `Transcript` whose assistant timestamps are backdated 120 minutes and runs an `AgentLoop` with a `_CallCountingMicroCompactor` wrapping `MicroCompactor`; the cold-cache cleanup fires inside `AgentLoop._maybe_microcompact()` and the demo prints `microcompact fired (results cleared=N)`. A `--fresh` flag swaps in current timestamps so the demo prints `microcompact skipped` to demonstrate the negative path. New tests: `tests/test_stress_full_compact.py` (6 cases: full compact, reactive compact x2, total-budget externalization x2, snip-on-repeated-read), `tests/test_microcompact_runtime.py` (3 cases: fires-when-aged, runs-at-most-once-per-loop, skipped-when-fresh), `tests/test_stress_demo.py` (3 cases), `tests/test_microcompact_demo.py` (3 cases). pytest 421 → 436. Both demos are no-network, no-API-key, MockProvider-only. `.gitignore` adds `logs/` so autonomous-loop runtime artifacts no longer dirty `git status`. Out of scope and explicitly deferred: metrics (M3), session/transcript persistence (M4), OpenAI REPL + auto-learn (M5).
 
 ---

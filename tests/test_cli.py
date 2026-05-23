@@ -171,3 +171,44 @@ def test_cli_default_no_verbose_keeps_stderr_silent(
     assert rc == 0
     captured = capsys.readouterr()
     assert "[trace]" not in captured.err
+
+
+# ---------------------------------------------------------------------------
+# M3: --help snapshot — pin the load-bearing flag phrases
+# ---------------------------------------------------------------------------
+
+
+def _capture_help(capsys: pytest.CaptureFixture[str]) -> str:
+    """Run ``main(["--help"])`` and return whitespace-normalized help text.
+
+    argparse exits 0 after printing help and line-wraps descriptions, so we
+    collapse whitespace runs to single spaces before matching phrases — that
+    pins the wording without coupling to the terminal-width wrap points.
+    """
+    with pytest.raises(SystemExit) as exc:
+        main(["--help"])
+    assert exc.value.code == 0
+    return " ".join(capsys.readouterr().out.split())
+
+
+def test_cli_help_snapshot_pins_flag_phrases(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--verbose / --aggressive-thresholds / --max-context-tokens must stay listed."""
+    help_text = _capture_help(capsys)
+    assert "--verbose" in help_text
+    assert "--aggressive-thresholds" in help_text
+    assert "--max-context-tokens" in help_text
+    # --verbose still advertises the [trace] line stream.
+    assert "[trace]" in help_text
+    assert "lines to stderr" in help_text
+
+
+def test_cli_help_snapshot_pins_preset_precedence_line(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The M2-added precedence wording must survive any help-text rewording."""
+    help_text = _capture_help(capsys)
+    assert "preset" in help_text
+    # Exact M2 phrase, pinned so future edits cannot silently drop it.
+    assert "preset value applies" in help_text

@@ -52,9 +52,12 @@ tests/
   Unit + integration tests across context, compaction, memory, provider,
   loop, tools, CLI, and demos. Run `pytest` for the current count.
 examples/
-  demo.py                 MockProvider demo (no API key, no network)
-  openai_chat_demo.py     Hardened OpenAI demo (requires --confirm-api-call)
-  visibility_full_demo.py Real-API visibility demo — writes trace, transcript, metrics, and summary artifacts under examples/_artifacts/ (requires --confirm-api-call)
+  demo.py                      MockProvider demo (no API key, no network)
+  openai_chat_demo.py          Hardened OpenAI demo (requires --confirm-api-call)
+  aggressive_thresholds_demo.py  --aggressive-thresholds wiring demo (MockProvider, no network)
+  stress_demo.py               Full-compact + reactive-compact stress demo (MockProvider)
+  microcompact_demo.py         MicroCompactor cold-cache cleanup demo (--fresh negative path)
+  visibility_full_demo.py      Real-API visibility demo — writes trace, transcript, metrics, and summary artifacts under examples/_artifacts/ (requires --confirm-api-call)
 ```
 
 ## Setup
@@ -115,6 +118,20 @@ Safety guarantees:
   `ALLOWLIST` mode is opt-in and restricted to `pwd ls cat grep python -m pytest`
   inside the workspace root.
 - `.env` and `.env.*` are gitignored.
+
+## Examples
+
+All demos live under [`examples/`](./examples/). The MockProvider demos make
+no network call and need no API key; the OpenAI demos are explicit opt-ins.
+
+| Demo | Network | What it shows |
+|---|---|---|
+| [`demo.py`](./examples/demo.py) | none (MockProvider) | End-to-end loop over a tempdir; generates `REPORT.md`. |
+| [`aggressive_thresholds_demo.py`](./examples/aggressive_thresholds_demo.py) | none (MockProvider) | `--aggressive-thresholds` wiring — lowers thresholds so compaction fires in short sessions. |
+| [`stress_demo.py`](./examples/stress_demo.py) | none (MockProvider) | Full-compact and reactive-compact firing end-to-end on a scripted oversized transcript. |
+| [`microcompact_demo.py`](./examples/microcompact_demo.py) | none (MockProvider) | MicroCompactor cold-cache cleanup on an aged transcript; `--fresh` shows the skip path. |
+| [`openai_chat_demo.py`](./examples/openai_chat_demo.py) | real API (gated) | Hardened OpenAI chat demo; refuses to call the API without `--confirm-api-call`. |
+| [`visibility_full_demo.py`](./examples/visibility_full_demo.py) | real API (gated) | Real-API visibility run that persists `transcript.txt`, `trace.stderr`, `metrics.json`, and `summary.md` under `examples/_artifacts/`. |
 
 ## Status and ongoing work
 

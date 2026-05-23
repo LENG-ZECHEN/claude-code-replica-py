@@ -127,10 +127,27 @@ def _api_key_for_provider() -> str | None:
 
 
 def _new_run_dir(root: Path) -> Path:
+    """Create a fresh per-run artifact directory.
+
+    Two demo runs that start in the same wall-clock second would otherwise
+    share a timestamped directory and clobber each other's artifacts. When
+    the base name is taken we append a ``-2`` … ``-9`` suffix; if all nine
+    are occupied within one second we refuse rather than overwrite.
+    """
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    path = root / f"visibility-demo-{stamp}"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    base = root / f"visibility-demo-{stamp}"
+    if not base.exists():
+        base.mkdir(parents=True)
+        return base
+    for suffix in range(2, 10):
+        candidate = base.with_name(f"{base.name}-{suffix}")
+        if not candidate.exists():
+            candidate.mkdir(parents=True)
+            return candidate
+    raise SystemExit(
+        f"too many demo runs in the same second; clean {base.parent} "
+        f"or wait a second"
+    )
 
 
 def _seed_workspace(workspace: Path) -> None:
@@ -197,11 +214,90 @@ def _metrics_to_dict(metrics: MetricsCollector) -> dict[str, Any]:
     }
 
 
+_QUOTES = ("'", '"')
+_OPENERS = {"{": "}", "[": "]", "(": ")"}
+
+
+def _scan_value(remainder: str, start: int) -> tuple[str, int]:
+    """Read one field value beginning at ``start``; return (value, end).
+
+    M1's ``trace._render_value`` repr-quotes whitespace-containing strings
+    (``'a b'``) and structured types (``{'a': 1}`` / ``[1, 2]``), so a value
+    can legally contain spaces. A bare ``split()`` would shred those across
+    field boundaries. We therefore read quoted strings to their closing
+    quote and bracketed reprs to their balanced close; everything else
+    (scalars from before M1) reads up to the next whitespace as before.
+    """
+    n = len(remainder)
+    first = remainder[start]
+    if first in _QUOTES:
+        i = start + 1
+        while i < n:
+            if remainder[i] == "\\":
+                i += 2
+                continue
+            if remainder[i] == first:
+                return remainder[start : i + 1], i + 1
+            i += 1
+        return remainder[start:n], n
+    if first in _OPENERS:
+        close, depth, quote, i = _OPENERS[first], 0, "", start
+        while i < n:
+            ch = remainder[i]
+            if quote:
+                if ch == "\\":
+                    i += 2
+                    continue
+                if ch == quote:
+                    quote = ""
+            elif ch in _QUOTES:
+                quote = ch
+            elif ch == first:
+                depth += 1
+            elif ch == close:
+                depth -= 1
+                if depth == 0:
+                    return remainder[start : i + 1], i + 1
+            i += 1
+        return remainder[start:n], n
+    i = start
+    while i < n and not remainder[i].isspace():
+        i += 1
+    return remainder[start:i], i
+
+
+def _parse_fields(remainder: str) -> dict[str, str]:
+    """Parse a ``k1=v1 k2=v2 ...`` remainder, tolerating repr-quoted values."""
+    fields: dict[str, str] = {}
+    i, n = 0, len(remainder)
+    while i < n:
+        if remainder[i].isspace():
+            i += 1
+            continue
+        key_start = i
+        while i < n and remainder[i] != "=" and not remainder[i].isspace():
+            i += 1
+        if i >= n or remainder[i] != "=":
+            # Fragment without '=' (e.g. a malformed token) — skip it.
+            while i < n and not remainder[i].isspace():
+                i += 1
+            continue
+        key = remainder[key_start:i]
+        i += 1  # consume '='
+        if i >= n or remainder[i].isspace():
+            fields[key] = ""
+            continue
+        value, i = _scan_value(remainder, i)
+        fields[key] = value
+    return fields
+
+
 def _parse_trace_events(stderr_path: Path) -> dict[str, list[dict[str, str]]]:
     """Group [trace] lines by channel.
 
     Locked format produced by ``StderrTracer.emit``:
         [trace] [<channel>] k1=v1 k2=v2 ...\\n
+    Values may be repr-quoted (M1) — see ``_scan_value``.
     """
     events: dict[str, list[dict[str, str]]] = {}
     if not stderr_path.exists():
@@ -215,14 +311,9 @@ def _parse_trace_events(stderr_path: Path) -> dict[str, list[dict[str, str]]]:
         channel, sep, remainder = rest.partition("]")
         if not sep:
             continue
-        channel = channel.strip()
-        remainder = remainder.lstrip()
-        fields: dict[str, str] = {}
-        for token in remainder.split():
-            key, eq, value = token.partition("=")
-            if eq:
-                fields[key] = value
-        events.setdefault(channel, []).append(fields)
+        events.setdefault(channel.strip(), []).append(
+            _parse_fields(remainder.lstrip())
+        )
     return events
 
 

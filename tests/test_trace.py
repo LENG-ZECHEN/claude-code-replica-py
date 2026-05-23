@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import os
 import sys
+import timeit
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -43,6 +45,24 @@ def test_null_tracer_satisfies_protocol() -> None:
     """NullTracer is a structural Tracer."""
     tracer: Tracer = NullTracer()
     tracer.emit("snip", n=2)
+
+
+def test_null_tracer_zero_overhead() -> None:
+    """NullTracer.emit must be effectively free: 100k calls < 20ms.
+
+    Proves the ``emit`` body stays literally ``pass`` (no logging, no
+    string work) so the default production path carries zero overhead.
+    Skipped under coverage / trace instrumentation, which inflates
+    per-call cost and would make the budget false-fail.
+    """
+    if os.environ.get("COVERAGE_RUN") or sys.gettrace() is not None:
+        pytest.skip("perf budget is unreliable under coverage/trace instrumentation")
+    tracer = NullTracer()
+    elapsed = timeit.timeit(
+        lambda: tracer.emit("compact", count=1, tokens=42),
+        number=100_000,
+    )
+    assert elapsed < 0.020, f"{elapsed=}s exceeds 20ms budget"
 
 
 # ---------------------------------------------------------------------------

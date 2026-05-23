@@ -1,6 +1,6 @@
-# HANDOFF — Next: M3 (demo-fences-zero-overhead-and-doc-sync)
+# HANDOFF — Initiative complete (M3 was the last milestone)
 
-> Updated by: `M2` session
+> Updated by: `M3` session
 > Date: 2026-05-23
 > Re-verify Section 3 numbers before starting work — do not trust this
 > file blindly.
@@ -10,9 +10,9 @@
 ## 1. Current initiative
 
 - **slug**: `obs-thr-harden`
-- **current milestone**: just-completed `M2` — aggressive-thresholds-precedence-matrix-and-bug-fix
-- **next milestone**: `M3` — demo-fences-zero-overhead-and-doc-sync
-- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [next]
+- **current milestone**: just-completed `M3` — demo-fences-zero-overhead-and-doc-sync
+- **next milestone**: none — initiative complete
+- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [done]
 
 ## 2. Completed milestones
 
@@ -112,14 +112,74 @@
     via `_build_repl_loop`). Left in place to avoid extra churn; safe to
     delete in a future cleanup. Not a regression. ruff/mypy clean.
 
+### M3
+
+- **commit**: `PENDING_M3` `[obs-thr-hd/M3] demo collision fences + NullTracer perf assert + doc sync` (HEAD is source of truth; sha recorded pre-amend)
+- **files changed**: `examples/visibility_full_demo.py`,
+  `tests/test_visibility_full_demo.py`, `tests/test_trace.py`,
+  `tests/test_cli.py`, `README.md`, `CLAUDE.md` (plus the three
+  initiative bookkeeping files: `PROGRESS.md`, `HANDOFF.md`, `PLAN.md`)
+- **tests added**: `tests/test_visibility_full_demo.py` (+7 — 3
+  `_new_run_dir` collision cases: base-when-free, `-2`/`-3` suffix on
+  collision, `SystemExit` when all 9 are taken; 4 `_parse_trace_events`
+  cases: unquoted backward-compat, quoted-whitespace, dict repr, list
+  repr), `tests/test_trace.py` (+1 — `test_null_tracer_zero_overhead`
+  timeit assertion, coverage-skipped), `tests/test_cli.py` (+2 —
+  `--help` snapshot pins flag phrases + the `preset value applies`
+  precedence line). Total: 605 → 615 (+10).
+- **behavior implemented**: `examples/visibility_full_demo._new_run_dir`
+  no longer clobbers a prior run that started in the same wall-clock
+  second — it appends a `-2` … `-9` suffix to the timestamped
+  directory name and raises `SystemExit` with a clear message if all
+  nine are taken in one second (was `mkdir(exist_ok=True)`, which
+  silently shared one directory). `_parse_trace_events` now tolerates
+  the repr-quoted values M1 introduced: a new module-level `_scan_value`
+  helper reads quoted strings to their closing quote and bracketed
+  reprs (`{...}` / `[...]` / `(...)`) to their balanced close, so a
+  space-containing value can no longer shred the adjacent `k=v` field;
+  unquoted scalar lines parse exactly as before. `NullTracer`'s
+  zero-overhead promise is now pinned by a `timeit` assertion (100_000
+  `emit` calls < 20ms, mean < 200ns/call), skipped under coverage /
+  trace instrumentation. A `--help` snapshot test pins the
+  `--verbose` / `--aggressive-thresholds` / `--max-context-tokens` flag
+  phrasing and, critically, the exact M2 wording `preset value applies`,
+  so future help-text drift cannot silently drop the precedence note.
+  README gained an "## Examples" section + the previously-missing
+  `aggressive_thresholds_demo.py` / `stress_demo.py` /
+  `microcompact_demo.py` entries; CLAUDE.md gained the roadmap bullet
+  for this initiative.
+- **design decisions (deviations from PLAN)**:
+  - **`_scan_value` also handles bracket-delimited reprs, not only
+    quote-delimited values**: PLAN's prose for `_parse_trace_events`
+    says "if the next character is `'` or `\"`, read until the matching
+    closing quote." But the exit gate explicitly requires tolerating
+    "dict / list reprs," and `repr({...})` starts with `{`, not a quote.
+    So `_scan_value` reads quote-, brace-, bracket-, and paren-delimited
+    values whole (balanced, quote-aware). This is a superset of PLAN's
+    rule and is required to satisfy the gate; backward compatibility for
+    unquoted scalars is preserved. Visible in:
+    `examples/visibility_full_demo.py` (`_scan_value` / `_parse_fields`).
+    Impact on a follow-up: none — internal to the demo.
+  - **`--help` snapshot normalizes whitespace before matching**: the
+    verbose help renders as ``Stream `[trace] [<channel>] …`` (with a
+    backtick), so the PLAN's suggested literal `"Stream [trace]"` is not
+    a contiguous substring. The test collapses whitespace runs and pins
+    phrases that genuinely appear (`[trace]`, `lines to stderr`,
+    `preset value applies`), which is more robust to argparse line-wrap
+    than a raw-block snapshot. The M2-pinned phrase is matched exactly.
+- **known limitations**:
+  - The recorded commit sha `PENDING_M3` is substituted post-commit and
+    then folded in via `git commit --amend`, so the value written here
+    is one amend-generation behind the final HEAD (same convention M1's
+    `71d3c80` followed). `git -C python-replica log -1` is authoritative.
+
 ## 3. Current repo state
 
 > Re-verify these numbers before starting. Do not trust this list blindly.
 
-- **last commit**: `30945de` — `git -C python-replica show HEAD`
-  (M1 is at `6284ea8`; the `71d3c80` recorded above was M1's
-  pre-rebase sha — git HEAD is the source of truth)
-- **tests**: 605 passing (was 584 after `M1`, delta +21)
+- **last commit**: `PENDING_M3` — `git -C python-replica log --oneline -1`
+  (HEAD is the source of truth; the recorded sha is pre-amend)
+- **tests**: 615 passing (was 605 after `M2`, delta +10)
 - **mypy**: clean
 - **ruff**: clean
 - **branch**: main
@@ -127,9 +187,8 @@
 
 ## 4. Important constraints (carried forward)
 
-> Invariants that `M3` and subsequent milestones MUST respect. Update by
-> ADDING — only remove a constraint by quoting it and explaining why it
-> is retired.
+> Invariants that follow-up initiatives MUST respect. Update by ADDING —
+> only remove a constraint by quoting it and explaining why it is retired.
 
 Initiative-level invariants from PLAN.md "Anything else" (still in force):
 
@@ -139,8 +198,10 @@ Initiative-level invariants from PLAN.md "Anything else" (still in force):
 - Do not add or remove keys from `_AGGRESSIVE_THRESHOLDS` (values may be
   tuned but the 8-key set is frozen).
 - Do not change the `NullTracer.emit` body — it must remain literally
-  `pass`.
-- Do not introduce new dependencies (the M3 perf assertion uses stdlib
+  `pass`. **This is now load-bearing**: `test_null_tracer_zero_overhead`
+  (M3) asserts 100k `emit` calls complete in < 20ms, which only holds
+  while the body does no work.
+- Do not introduce new dependencies (M3's perf assertion uses stdlib
   `timeit`; do not add `pytest-benchmark`, `freezegun`, etc.).
 
 Constraints added by `M1`:
@@ -152,11 +213,11 @@ Constraints added by `M1`:
     to bare `except Exception:` — `KeyboardInterrupt`/`SystemExit` must
     propagate.
 - **preserve**:
-  - `_render_value` helper in `trace.py` is now part of the internal
+  - `_render_value` helper in `trace.py` is part of the internal
     interface that M3's demo-parser tolerance work depends on. Do not
-    rename it or change its semantics in M2/M3 without coordinating: M3
-    extends `visibility_full_demo._parse_trace_events` to read the
-    repr-quoted form M1 produces.
+    rename it or change its semantics without coordinating with
+    `visibility_full_demo._parse_trace_events`, which reads the
+    repr-quoted form it produces.
 - **compatibility requirements**:
   - The locked scalar line format `[trace] [<channel>] k=v ...` is
     byte-identical for scalar values (regression-pinned by
@@ -167,8 +228,7 @@ Constraints added by `M2`:
 
 - **do not modify**:
   - `src/simple_coding_agent/cli.py` and
-    `src/simple_coding_agent/openai_cli.py` — M3 is doc/demo/test only
-    and must NOT touch either CLI module. Resolution lives in
+    `src/simple_coding_agent/openai_cli.py` — resolution lives in
     `cli._resolve_threshold` + `cli._build_repl_loop`; `openai_cli`
     delegates to it, and the symmetry test
     (`tests/test_openai_cli_repl.py::
@@ -180,10 +240,10 @@ Constraints added by `M2`:
     sentinels (both REPLs). The user-visible `--help` text for the two
     budget flags includes the exact phrase `If --aggressive-thresholds
     is also set and you do not pass this flag, the preset value applies;
-    otherwise the built-in default applies.` **This exact phrase is
-    pinned by M3's `--help` snapshot test** — it currently renders
-    contiguously in `--help` (verified). If M3's snapshot fails on it,
-    the snapshot is wrong, not cli.py.
+    otherwise the built-in default applies.` **This exact phrase is now
+    pinned by M3's `--help` snapshot test** — it renders contiguously in
+    `--help`. If that snapshot ever fails, the snapshot is wrong, not
+    cli.py.
 - **compatibility requirements**:
   - `MicroCompactor.__init__` rejects `threshold_minutes < 1` with
     `ValueError` (pre-existing guard at `compact.py:303-304`, now
@@ -191,52 +251,24 @@ Constraints added by `M2`:
     construction must pass `>= 1`.
   - Non-aggressive default behaviour is unchanged: a plain `--repl`
     (no `--aggressive-thresholds`, no explicit flag) still resolves to
-    `200_000` / `8_192` / max-steps `10`. Tests that assume those
-    defaults (e.g. `test_cli_max_steps_flag_default_is_10`) stay green.
+    `200_000` / `8_192` / max-steps `10`.
+
+Constraints added by `M3`:
+
+- **preserve**:
+  - The pinned `--help` wording `preset value applies` (M2) is now
+    load-bearing — both `cli.py` and the `tests/test_cli.py` snapshot
+    test depend on it. Reword the help only if you update the snapshot
+    in the same change.
+  - `visibility_full_demo._parse_trace_events` now accepts both unquoted
+    and `'`/`"`-quoted (and `{`/`[`/`(`-bracketed) values. Future changes
+    to the trace line shape must keep one of these forms parseable.
+- **compatibility requirements**:
+  - `examples/visibility_full_demo._new_run_dir` returns a unique
+    directory or raises `SystemExit`; it never overwrites an existing
+    run directory. Callers must tolerate the `-2`…`-9` suffix in the
+    returned path name.
 
 ## 5. Next milestone guidance
 
-For `M3` — demo-fences-zero-overhead-and-doc-sync:
-
-- **next scope**: Zero source-code change — examples / docs / tests
-  only. Extend `examples/visibility_full_demo._new_run_dir` to handle
-  same-second timestamp collisions by appending a `-2`…`-9` suffix
-  (`SystemExit` if all nine are taken in one second). Extend
-  `_parse_trace_events` to tolerate the repr-quoted values M1 introduced
-  (after `=`, if the next char is `'`/`"`, read to the matching close
-  quote; otherwise split on whitespace as before). Add a `NullTracer`
-  `timeit` perf assertion (100_000 `emit` calls < 20ms, mean < 200ns;
-  skip under coverage via `os.environ.get("COVERAGE_RUN")` or
-  `sys.gettrace()`). Add a `--help` snapshot test pinning the key
-  phrases for `--verbose`, `--aggressive-thresholds`, and
-  `--max-context-tokens` **including the M2-added line** (see Section 4
-  "preserve" for the exact wording). Sync `README.md` "Examples" and
-  add a `python-replica/CLAUDE.md` "Implementation Roadmap" entry for
-  this initiative with the SHA range and pytest delta.
-- **relevant files**:
-  - `examples/visibility_full_demo.py` — extend `_new_run_dir` and
-    `_parse_trace_events` only; do NOT create new example files.
-  - `tests/test_visibility_full_demo.py` — directory-collision case +
-    parser-tolerates-quoted-values case.
-  - `tests/test_trace.py` — add the `NullTracer` perf assertion (coverage
-    skip guard).
-  - `tests/test_cli.py` — add the `--help` snapshot test.
-  - `README.md`, `python-replica/CLAUDE.md` — doc sync.
-- **expected tests**: ~10 new cases (directory collision 1-2, parser
-  tolerance 2, perf assert 1, --help snapshot 2-3, README reference
-  check 1, regression coverage 1-2). pytest 605 → keep the PLAN's
-  ≥587 floor with comfortable margin.
-- **risks**:
-  - **Do NOT touch `cli.py` or `openai_cli.py`.** If the `--help`
-    snapshot test fails after you write it, the snapshot wording is
-    wrong (M2 pinned the phrase and verified it renders contiguously) —
-    investigate the snapshot before editing cli.py.
-  - The perf assertion is interpreter-sensitive; the 200ns budget has
-    ~2-3× headroom on the harness, and the coverage skip prevents
-    false-fails under `pytest --cov`.
-  - `_parse_trace_events` already works for scalar lines; only
-    whitespace/non-scalar (repr-quoted) values need the new branch —
-    preserve backward compatibility for unquoted values.
-
-The full ready-to-run prompt is at:
-`initiatives/current/prompts/M3.md`
+_(initiative complete — follow-up initiatives bootstrap from a fresh INBOX.md)_

@@ -26,6 +26,7 @@ import importlib.util
 import json
 import sys
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -268,3 +269,113 @@ def test_summary_md_lists_every_channel_and_tokens_per_turn(
 def test_gitignore_excludes_artifact_directory() -> None:
     text = _GITIGNORE.read_text(encoding="utf-8")
     assert "examples/_artifacts/" in text
+
+
+# ---------------------------------------------------------------------------
+# (C1) _new_run_dir same-second collision fence
+# ---------------------------------------------------------------------------
+
+
+def _freeze_demo_clock(demo: Any, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Pin ``demo.datetime.now`` to a fixed instant; return the stamp."""
+    fixed = datetime(2026, 5, 23, 12, 0, 0, tzinfo=UTC)
+
+    class _FixedDatetime:
+        @staticmethod
+        def now(tz: object = None) -> datetime:
+            return fixed
+
+    monkeypatch.setattr(demo, "datetime", _FixedDatetime)
+    return fixed.strftime("%Y%m%d-%H%M%S")
+
+
+def test_new_run_dir_returns_base_when_free(demo: Any, tmp_path: Path) -> None:
+    run_dir = demo._new_run_dir(tmp_path)
+    assert run_dir.parent == tmp_path
+    assert run_dir.exists()
+    assert run_dir.name.startswith("visibility-demo-")
+    # A first, collision-free run never carries a -N suffix.
+    assert not run_dir.name.endswith(("-2", "-3", "-4"))
+
+
+def test_new_run_dir_appends_suffix_on_collision(
+    demo: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stamp = _freeze_demo_clock(demo, monkeypatch)
+    first = demo._new_run_dir(tmp_path)
+    second = demo._new_run_dir(tmp_path)
+    third = demo._new_run_dir(tmp_path)
+    assert first.name == f"visibility-demo-{stamp}"
+    assert second.name == f"visibility-demo-{stamp}-2"
+    assert third.name == f"visibility-demo-{stamp}-3"
+    assert first.exists() and second.exists() and third.exists()
+
+
+def test_new_run_dir_raises_when_all_suffixes_taken(
+    demo: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stamp = _freeze_demo_clock(demo, monkeypatch)
+    (tmp_path / f"visibility-demo-{stamp}").mkdir()
+    for suffix in range(2, 10):
+        (tmp_path / f"visibility-demo-{stamp}-{suffix}").mkdir()
+    with pytest.raises(SystemExit) as exc:
+        demo._new_run_dir(tmp_path)
+    assert "same second" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# (C2) _parse_trace_events tolerates repr-quoted values from M1
+# ---------------------------------------------------------------------------
+
+
+def _write_trace(tmp_path: Path, line: str) -> Path:
+    path = tmp_path / "trace.stderr"
+    path.write_text(line if line.endswith("\n") else line + "\n", encoding="utf-8")
+    return path
+
+
+def test_parse_trace_events_unquoted_backward_compat(
+    demo: Any,
+    tmp_path: Path,
+) -> None:
+    """Scalar lines from before M1 must still parse exactly as before."""
+    path = _write_trace(tmp_path, "[trace] [compact] count=2 tokens=42")
+    events = demo._parse_trace_events(path)
+    assert events["compact"][0] == {"count": "2", "tokens": "42"}
+
+
+def test_parse_trace_events_tolerates_quoted_whitespace_value(
+    demo: Any,
+    tmp_path: Path,
+) -> None:
+    """A repr-quoted whitespace string must not corrupt the adjacent field."""
+    path = _write_trace(tmp_path, "[trace] [budget] note='hello world' z=5")
+    events = demo._parse_trace_events(path)
+    assert events["budget"][0]["z"] == "5"
+    assert events["budget"][0]["note"] == "'hello world'"
+
+
+def test_parse_trace_events_tolerates_dict_repr_value(
+    demo: Any,
+    tmp_path: Path,
+) -> None:
+    """A repr-quoted dict (spaces inside) must be captured whole."""
+    path = _write_trace(tmp_path, "[trace] [budget] payload={'a': 1, 'b': 2} z=7")
+    events = demo._parse_trace_events(path)
+    assert events["budget"][0]["z"] == "7"
+    assert events["budget"][0]["payload"] == "{'a': 1, 'b': 2}"
+
+
+def test_parse_trace_events_tolerates_list_repr_value(
+    demo: Any,
+    tmp_path: Path,
+) -> None:
+    """A repr-quoted list (spaces inside) must be captured whole."""
+    path = _write_trace(tmp_path, "[trace] [snip] kept=[1, 2, 3] count=3")
+    events = demo._parse_trace_events(path)
+    assert events["snip"][0]["count"] == "3"
+    assert events["snip"][0]["kept"] == "[1, 2, 3]"

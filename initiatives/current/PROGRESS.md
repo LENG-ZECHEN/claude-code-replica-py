@@ -40,3 +40,14 @@ Block shape (per automation/templates/progress_entry.md):
   `tests/test_openai_cli_repl.py`, `tests/test_compact.py`
 - exit gate: pytest green total >= 577 + test_repl.py 8-field x 3-state precedence matrix + MicroCompactor(0) raises ValueError + openai_cli sentinel symmetry -> PASS (605 passed; matrix 18, guard 1, symmetry 2; mypy+ruff clean)
 - notes: bug fixed in shared `_build_repl_loop` via `_resolve_threshold` (explicit>preset>default); argparse defaults for the 3 int flags now `None`. MicroCompactor guard already existed (compact.py:303) so compact.py needed no src change — only the negative test was added. regression scan: no test relied on old argparse defaults (non-aggressive default preserved).
+
+## M3 — done 2026-05-23
+
+- commit: `PENDING_M3` `[obs-thr-hd/M3] demo collision fences + NullTracer perf assert + doc sync` (HEAD is source of truth; sha recorded pre-amend)
+- tests: 605 -> 615 (+10)
+- mypy: clean | ruff: clean
+- files changed: `examples/visibility_full_demo.py`,
+  `tests/test_visibility_full_demo.py`, `tests/test_trace.py`,
+  `tests/test_cli.py`, `README.md`, `CLAUDE.md`
+- exit gate: pytest green total >= 587 + `_new_run_dir` -2..-9 collision suffix (else SystemExit) + `_parse_trace_events` tolerates repr-quoted/bracketed values + NullTracer timeit < 20ms (coverage-skipped) + `--help` snapshot pins `preset value applies` + README references aggressive_thresholds_demo.py -> PASS (615 passed; 5 demo cases, 1 perf, 2 help-snapshot, +2 parser regression; mypy+ruff clean)
+- notes: zero source-code change — examples/docs/tests only. M1 SHA range start is `6284ea8`.

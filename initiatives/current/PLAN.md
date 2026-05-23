@@ -299,6 +299,7 @@ milestones:
       pytest baseline: 577 → >= 587 (+10 minimum).
 ---
 > Bootstrapped on 2026-05-23. Baseline commit: `e8e2206c2fc6737f509229b2414bb578dc4d99e1`. Baseline pytest: 557 passing. mypy: clean. ruff: clean. Branch: `main`.
+> STATUS: complete (M1 + M2 + M3 shipped 2026-05-23). pytest 557 → 615 (+58); mypy + ruff clean.
 
 # Goal
 
