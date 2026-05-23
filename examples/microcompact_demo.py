@@ -52,7 +52,11 @@ class _CallCountingMicroCompactor(MicroCompactor):
     """
 
     def __init__(self) -> None:
-        super().__init__()
+        # keep_recent=0 clears every aged compactable result so the demo's
+        # "results cleared=N" marker stays meaningful. The MicroCompactor
+        # default is now keep_recent=5 (PDF alignment), which would preserve
+        # all 3 seeded results and make the demo print "skipped".
+        super().__init__(keep_recent=0)
         self.microcompact_calls = 0
         self.results_cleared = 0
 

@@ -260,7 +260,12 @@ def test_metrics_counts_microcompact_invocations() -> None:
     ))
 
     provider = MockProvider([MockProvider.direct_answer("ok")])
-    loop, _, metrics = _build_loop(provider, transcript=transcript)
+    # keep_recent=0: clear the single aged result so the cleared sentinel is
+    # observable. The MicroCompactor default (keep_recent=5) would preserve a
+    # lone result; the invocation counter itself is independent of keep_recent.
+    loop, _, metrics = _build_loop(
+        provider, transcript=transcript, microcompactor=MicroCompactor(keep_recent=0),
+    )
 
     loop.run("continue")
 

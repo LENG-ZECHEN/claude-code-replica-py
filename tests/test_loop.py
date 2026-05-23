@@ -601,7 +601,12 @@ def test_agent_loop_microcompacts_old_tool_results_before_context_building() -> 
         timestamp=old_timestamp,
     ))
     p = MockProvider([MockProvider.direct_answer("ok")])
-    loop, _, _ = _make_loop(p, transcript=transcript)
+    # keep_recent=0: clear the single aged result. The MicroCompactor default
+    # is now keep_recent=5 (PDF alignment), which would preserve a lone result;
+    # this runtime check asserts the pre-PDF clear behaviour explicitly.
+    loop, _, _ = _make_loop(
+        p, transcript=transcript, microcompactor=MicroCompactor(keep_recent=0),
+    )
 
     result = loop.run("continue")
 

@@ -634,3 +634,53 @@ def test_aggressive_thresholds_precedence_matrix(
     assert _FIELD_ACCESSORS[field](loop) == expected
 
 
+# ---------------------------------------------------------------------------
+# M1 (ctx-pdf): the four PDF-threshold flags propagate through
+# _resolve_threshold into the compactor / microcompactor.
+# ---------------------------------------------------------------------------
+
+def test_pdf_threshold_flags_default_when_omitted(tmp_path: Path) -> None:
+    """Omitting the flags applies the built-in PDF defaults."""
+    loop = cli_mod._build_repl_loop(tmp_path)
+    assert loop._microcompactor._keep_recent == 5
+    assert loop._compactor.output_headroom == 12_000
+    assert loop._compactor.compact_headroom == 20_000
+    assert loop._compactor.min_session_tokens == 30_000
+
+
+def test_pdf_threshold_flags_explicit_values_propagate(tmp_path: Path) -> None:
+    """Explicit flag values reach the components (explicit > default)."""
+    loop = cli_mod._build_repl_loop(
+        tmp_path,
+        microcompact_keep_recent=2,
+        output_headroom=1_000,
+        compact_headroom=3_000,
+        min_session_tokens=7_000,
+    )
+    assert loop._microcompactor._keep_recent == 2
+    assert loop._compactor.output_headroom == 1_000
+    assert loop._compactor.compact_headroom == 3_000
+    assert loop._compactor.min_session_tokens == 7_000
+
+
+def test_pdf_threshold_flags_parsed_by_main(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """End-to-end: the flags are accepted by argparse and wired into the loop."""
+    _set_stdin(monkeypatch, "/exit")
+    rc = main([
+        "--repl",
+        "--workspace", str(tmp_path),
+        "--microcompact-keep-recent", "1",
+        "--output-headroom", "500",
+        "--compact-headroom", "1500",
+        "--min-session-tokens", "9000",
+    ])
+    assert rc == 0
+    loop = _captured_loops()[0]
+    assert loop._microcompactor._keep_recent == 1
+    assert loop._compactor.output_headroom == 500
+    assert loop._compactor.compact_headroom == 1_500
+    assert loop._compactor.min_session_tokens == 9_000
+
+

@@ -138,7 +138,12 @@ def test_microcompact_fires_when_assistant_older_than_60min(
     )
 
     provider = MockProvider([MockProvider.direct_answer("next answer")])
-    loop, _ = _build_loop(provider, transcript=transcript)
+    # keep_recent=0: clear the single aged result. The MicroCompactor default
+    # is now keep_recent=5 (PDF alignment), which preserves a lone result; this
+    # runtime check asserts the pre-PDF clear behaviour explicitly.
+    loop, _ = _build_loop(
+        provider, transcript=transcript, microcompactor=MicroCompactor(keep_recent=0),
+    )
 
     loop.run("continue")
 

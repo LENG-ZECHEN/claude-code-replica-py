@@ -95,6 +95,13 @@ _PREVIEW_CHARS: int = 200
 _DEFAULT_MAX_STEPS: int = 10
 _DEFAULT_CONTEXT_TOKENS: int = 200_000
 _DEFAULT_RESERVED_OUTPUT_TOKENS: int = 8_192
+# M1 (ctx-pdf): built-in defaults for the four PDF-threshold flags. These
+# mirror the compact.py constructor defaults; they have no _AGGRESSIVE_THRESHOLDS
+# preset entry, so (like --max-steps) they resolve to explicit-flag-or-default.
+_DEFAULT_MICROCOMPACT_KEEP_RECENT: int = 5
+_DEFAULT_OUTPUT_HEADROOM: int = 12_000
+_DEFAULT_COMPACT_HEADROOM: int = 20_000
+_DEFAULT_MIN_SESSION_TOKENS: int = 30_000
 _REPL_BANNER: str = (
     "simple-agent REPL -- type /help for commands, /exit to quit.\n"
     "MockProvider only: no network, no API key, no real shell.\n"
@@ -350,6 +357,10 @@ def _build_repl_loop(
     max_steps: int | None = None,
     max_context_tokens: int | None = None,
     reserved_output_tokens: int | None = None,
+    microcompact_keep_recent: int | None = None,
+    output_headroom: int | None = None,
+    compact_headroom: int | None = None,
+    min_session_tokens: int | None = None,
     session_memory: SessionMemory | None = None,
     project_memory: ProjectMemory | None = None,
     provider: MockProvider | None = None,
@@ -391,6 +402,24 @@ def _build_repl_loop(
         reserved_output_tokens, "reserved_output_tokens",
         _DEFAULT_RESERVED_OUTPUT_TOKENS, aggressive=aggressive_thresholds,
     )
+    # M1 PDF-threshold flags. preset_key=None (no _AGGRESSIVE_THRESHOLDS entry),
+    # so these resolve to explicit-flag-or-default — the --max-steps pattern.
+    resolved_microcompact_keep_recent = _resolve_threshold(
+        microcompact_keep_recent, None, _DEFAULT_MICROCOMPACT_KEEP_RECENT,
+        aggressive=aggressive_thresholds,
+    )
+    resolved_output_headroom = _resolve_threshold(
+        output_headroom, None, _DEFAULT_OUTPUT_HEADROOM,
+        aggressive=aggressive_thresholds,
+    )
+    resolved_compact_headroom = _resolve_threshold(
+        compact_headroom, None, _DEFAULT_COMPACT_HEADROOM,
+        aggressive=aggressive_thresholds,
+    )
+    resolved_min_session_tokens = _resolve_threshold(
+        min_session_tokens, None, _DEFAULT_MIN_SESSION_TOKENS,
+        aggressive=aggressive_thresholds,
+    )
     # When the aggressive preset is on, swap in low thresholds for the
     # non-flag-backed fields (compact / microcompact / snip / externalize).
     # The flag-backed budget fields above already honour explicit > preset.
@@ -409,17 +438,29 @@ def _build_repl_loop(
         compactor = ContextCompactor(
             keep_recent=keep_recent_kept,
             compact_threshold=compact_threshold,
+            output_headroom=resolved_output_headroom,
+            compact_headroom=resolved_compact_headroom,
+            min_session_tokens=resolved_min_session_tokens,
             tracer=active_tracer,
         )
         microcompactor = MicroCompactor(
             threshold_minutes=microcompact_minutes,
+            keep_recent=resolved_microcompact_keep_recent,
             tracer=active_tracer,
         )
         snip_tool = SnipTool(keep_recent=snip_keep_recent, tracer=active_tracer)
     else:
         tool_result_store = None
-        compactor = ContextCompactor(tracer=active_tracer)
-        microcompactor = MicroCompactor(tracer=active_tracer)
+        compactor = ContextCompactor(
+            output_headroom=resolved_output_headroom,
+            compact_headroom=resolved_compact_headroom,
+            min_session_tokens=resolved_min_session_tokens,
+            tracer=active_tracer,
+        )
+        microcompactor = MicroCompactor(
+            keep_recent=resolved_microcompact_keep_recent,
+            tracer=active_tracer,
+        )
         snip_tool = SnipTool(tracer=active_tracer)
 
     budget = ContextBudget(
@@ -744,6 +785,10 @@ def _run_repl(
     max_context_tokens: int | None,
     reserved_output_tokens: int | None,
     stream: bool,
+    microcompact_keep_recent: int | None = None,
+    output_headroom: int | None = None,
+    compact_headroom: int | None = None,
+    min_session_tokens: int | None = None,
     resume: str | None = None,
     shell_mode: ShellMode = ShellMode.MOCK,
     verbose: bool = False,
@@ -781,6 +826,10 @@ def _run_repl(
         max_steps=max_steps,
         max_context_tokens=max_context_tokens,
         reserved_output_tokens=reserved_output_tokens,
+        microcompact_keep_recent=microcompact_keep_recent,
+        output_headroom=output_headroom,
+        compact_headroom=compact_headroom,
+        min_session_tokens=min_session_tokens,
         session_memory=session_memory,
         project_memory=project_memory,
         shell_mode=shell_mode,
@@ -876,6 +925,42 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--microcompact-keep-recent",
+        type=int,
+        default=None,
+        help=(
+            "MicroCompactor.keep_recent: preserve the N most recent compactable "
+            "tool_results during cold-cache cleanup (default: 5). 0 clears all."
+        ),
+    )
+    parser.add_argument(
+        "--output-headroom",
+        type=int,
+        default=None,
+        help=(
+            "ContextCompactor output headroom tokens subtracted from the "
+            "context window in the auto-compact trigger (default: 12_000)."
+        ),
+    )
+    parser.add_argument(
+        "--compact-headroom",
+        type=int,
+        default=None,
+        help=(
+            "ContextCompactor compact headroom tokens subtracted from the "
+            "context window in the auto-compact trigger (default: 20_000)."
+        ),
+    )
+    parser.add_argument(
+        "--min-session-tokens",
+        type=int,
+        default=None,
+        help=(
+            "ContextCompactor floor: auto-compact's formula trigger only fires "
+            "once used tokens reach this minimum (default: 30_000)."
+        ),
+    )
+    parser.add_argument(
         "--resume",
         default=None,
         metavar="NAME",
@@ -934,6 +1019,10 @@ def main(argv: list[str] | None = None) -> int:
             max_steps=args.max_steps,
             max_context_tokens=args.max_context_tokens,
             reserved_output_tokens=args.reserved_output_tokens,
+            microcompact_keep_recent=args.microcompact_keep_recent,
+            output_headroom=args.output_headroom,
+            compact_headroom=args.compact_headroom,
+            min_session_tokens=args.min_session_tokens,
             stream=bool(args.stream),
             resume=args.resume,
             shell_mode=shell_mode,

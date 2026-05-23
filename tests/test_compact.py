@@ -13,7 +13,11 @@ from simple_coding_agent.compact import (
     MicroCompactor,
     RuleBasedSummarizer,
 )
-from simple_coding_agent.context import ContextBudget
+from simple_coding_agent.context import (
+    ContextBudget,
+    _estimate_messages_tokens,
+    _normalize_messages,
+)
 from simple_coding_agent.models import (
     Message,
     MessageType,
@@ -59,6 +63,12 @@ def _make_tool_exchange(
         is_meta=True,
     )
     return asst, user_r
+
+
+def _estimate_used(transcript: Transcript) -> int:
+    """Token estimate should_compact() sees for the post-boundary messages."""
+    messages = transcript.messages_after_compact_boundary()
+    return _estimate_messages_tokens(_normalize_messages(messages))
 
 
 class FakeSummarizer:
@@ -493,7 +503,10 @@ def test_microcompact_clears_compactable_tool_results() -> None:
         )
         messages.extend([asst, user_r])
 
-    compacted = MicroCompactor().microcompact(messages)
+    # keep_recent=0 reproduces the pre-PDF "clear every compactable result"
+    # behaviour. The default is now keep_recent=5 (PDF alignment), under which
+    # these 4 results would all be preserved; see test_microcompact_keep_recent_*.
+    compacted = MicroCompactor(keep_recent=0).microcompact(messages)
     result_contents = [
         item.content
         for msg in compacted
@@ -520,7 +533,8 @@ def test_microcompact_returns_new_list_and_does_not_mutate_original() -> None:
     asst, user_r = _make_tool_exchange("tc_mut", "original output")
     original_messages = [asst, user_r]
 
-    compacted = MicroCompactor().microcompact(original_messages)
+    # keep_recent=0: the single result is cleared (pre-PDF behaviour).
+    compacted = MicroCompactor(keep_recent=0).microcompact(original_messages)
 
     assert compacted is not original_messages
     assert compacted[1] is not user_r
@@ -562,7 +576,8 @@ def test_microcompact_pairs_tool_result_by_tool_use_id() -> None:
     )
     messages = [custom_asst, compactable_asst, compactable_result, custom_result]
 
-    compacted = MicroCompactor().microcompact(messages)
+    # keep_recent=0: the lone compactable result is cleared (pre-PDF behaviour).
+    compacted = MicroCompactor(keep_recent=0).microcompact(messages)
     first_result_content = compacted[2].content
     second_result_content = compacted[3].content
 
@@ -612,3 +627,236 @@ def test_microcompact_handles_conflicting_duplicate_tool_use_ids_conservatively(
     assert isinstance(compacted_content, list)
     assert isinstance(compacted_content[0], ToolResult)
     assert compacted_content[0].content == "duplicate output"
+
+
+# ---------------------------------------------------------------------------
+# M1 (ctx-pdf): MicroCompactor keep_recent — preserve the N most recent
+# compactable tool_results (PDF §3 "keep latest 5"). Default is 5.
+# ---------------------------------------------------------------------------
+
+def _read_file_exchanges(bodies: list[str]) -> list[Message]:
+    """One read_file tool_use + tool_result message pair per body, in order."""
+    messages: list[Message] = []
+    for i, body in enumerate(bodies):
+        asst, user_r = _make_tool_exchange(
+            f"tc_recent_{i:02d}", body, tool_name="read_file",
+        )
+        messages.extend([asst, user_r])
+    return messages
+
+
+def _result_contents(messages: list[Message]) -> list[str]:
+    """Flatten ToolResult contents in transcript order."""
+    return [
+        item.content
+        for msg in messages
+        if isinstance(msg.content, list)
+        for item in msg.content
+        if isinstance(item, ToolResult)
+    ]
+
+
+def test_microcompact_keep_recent_defaults_to_five() -> None:
+    """Default MicroCompactor preserves the 5 most recent compactable results."""
+    bodies = [f"body-{i}" for i in range(7)]
+    compacted = MicroCompactor().microcompact(_read_file_exchanges(bodies))
+
+    # First 2 (oldest) cleared; last 5 (most recent) preserved untouched.
+    assert _result_contents(compacted) == [
+        CLEARED_TOOL_RESULT_CONTENT,
+        CLEARED_TOOL_RESULT_CONTENT,
+        "body-2",
+        "body-3",
+        "body-4",
+        "body-5",
+        "body-6",
+    ]
+
+
+def test_microcompact_keep_recent_zero_clears_all() -> None:
+    """keep_recent=0 reproduces the pre-PDF clear-everything behaviour."""
+    bodies = [f"body-{i}" for i in range(3)]
+    compacted = MicroCompactor(keep_recent=0).microcompact(
+        _read_file_exchanges(bodies)
+    )
+
+    assert _result_contents(compacted) == [CLEARED_TOOL_RESULT_CONTENT] * 3
+
+
+def test_microcompact_keep_recent_preserves_all_when_fewer_than_keep() -> None:
+    """With fewer compactable results than keep_recent, nothing is cleared."""
+    bodies = [f"body-{i}" for i in range(3)]
+    compacted = MicroCompactor(keep_recent=5).microcompact(
+        _read_file_exchanges(bodies)
+    )
+
+    assert _result_contents(compacted) == ["body-0", "body-1", "body-2"]
+
+
+def test_microcompact_keep_recent_custom_value() -> None:
+    """keep_recent=2 clears all but the 2 most recent compactable results."""
+    bodies = [f"body-{i}" for i in range(5)]
+    compacted = MicroCompactor(keep_recent=2).microcompact(
+        _read_file_exchanges(bodies)
+    )
+
+    assert _result_contents(compacted) == [
+        CLEARED_TOOL_RESULT_CONTENT,
+        CLEARED_TOOL_RESULT_CONTENT,
+        CLEARED_TOOL_RESULT_CONTENT,
+        "body-3",
+        "body-4",
+    ]
+
+
+def test_microcompact_rejects_negative_keep_recent() -> None:
+    with pytest.raises(ValueError, match="keep_recent must be >= 0"):
+        MicroCompactor(keep_recent=-1)
+
+
+# ---------------------------------------------------------------------------
+# M1 (ctx-pdf): should_compact double-headroom formula + min_session floor.
+# New trigger: used >= max_tokens - output_headroom - compact_headroom
+#              AND used >= min_session_tokens.
+# Legacy ratio trigger (used > available_tokens * compact_threshold) is
+# preserved as a second OR'd trigger.
+# ---------------------------------------------------------------------------
+
+def _bulk_transcript(total_chars: int) -> Transcript:
+    """Transcript whose serialized size is ~total_chars (alternating roles).
+
+    Alternating user/assistant avoids same-role merge in _normalize_messages,
+    so the char count maps cleanly to the token estimate (chars / 4).
+    """
+    t = Transcript()
+    chunk_chars = 1_000
+    n = max(1, total_chars // chunk_chars)
+    chunk = "z" * chunk_chars
+    for i in range(n):
+        if i % 2 == 0:
+            t.append(Message.user(chunk))
+        else:
+            t.append(Message.assistant(chunk))
+    return t
+
+
+def test_should_compact_double_headroom_formula_fires() -> None:
+    """New formula fires (floor satisfied) while legacy ratio does NOT.
+
+    max_tokens=40_000 -> formula threshold = 40_000 - 12_000 - 20_000 = 8_000.
+    used ~= 31_000 tokens >= 8_000 AND >= 30_000 floor -> new trigger fires.
+    Legacy: 0.8 * 40_000 = 32_000; used 31_000 is below it, so the legacy
+    ratio does NOT fire — isolating the new formula as the cause.
+    """
+    compactor = ContextCompactor(compact_threshold=0.8)
+    budget = ContextBudget(max_tokens=40_000, reserved_output_tokens=0)
+    t = _bulk_transcript(124_000)  # ~31_000 tokens
+
+    used = _estimate_used(t)
+    assert 30_000 <= used < 32_000, f"fixture drift: used={used}"
+    assert compactor.should_compact(t, budget) is True
+
+
+def test_should_compact_min_session_floor_blocks() -> None:
+    """Formula threshold met but min_session floor not met -> no compaction.
+
+    max_tokens=40_000 -> formula threshold = 8_000. used ~= 15_000 tokens is
+    >= 8_000 (formula threshold met) but < 30_000 (floor not met), so the new
+    trigger is blocked. Legacy 0.8 * 40_000 = 32_000 is also not met.
+    """
+    compactor = ContextCompactor(compact_threshold=0.8)
+    budget = ContextBudget(max_tokens=40_000, reserved_output_tokens=0)
+    t = _bulk_transcript(60_000)  # ~15_000 tokens
+
+    used = _estimate_used(t)
+    assert 8_000 <= used < 30_000, f"fixture drift: used={used}"
+    assert compactor.should_compact(t, budget) is False
+
+
+def test_should_compact_min_session_floor_releases_when_exceeded() -> None:
+    """Crossing the min_session floor flips the new trigger on."""
+    compactor = ContextCompactor(compact_threshold=0.99)
+    budget = ContextBudget(max_tokens=40_000, reserved_output_tokens=0)
+    below = _bulk_transcript(60_000)   # ~15_000 tokens (< 30k floor)
+    above = _bulk_transcript(128_000)  # ~32_000 tokens (>= 30k floor)
+
+    # compact_threshold=0.99 keeps the legacy ratio dormant in both cases
+    # (0.99 * 40_000 = 39_600), so only the floor governs the outcome.
+    assert compactor.should_compact(below, budget) is False
+    assert compactor.should_compact(above, budget) is True
+
+
+def test_should_compact_legacy_ratio_trigger_preserved() -> None:
+    """The legacy compact_threshold ratio still fires on a tiny budget.
+
+    The new formula cannot fire here (used is far below the 30_000 floor),
+    so a True result proves the legacy second trigger is intact — this is the
+    path the aggressive-thresholds preset relies on.
+    """
+    compactor = ContextCompactor(compact_threshold=0.2)
+    budget = ContextBudget(max_tokens=100, reserved_output_tokens=0)
+    t = _make_transcript(3, content_size=80)
+
+    used = _estimate_used(t)
+    assert used < 30_000  # new formula floor cannot be met
+    assert compactor.should_compact(t, budget) is True
+
+
+def test_should_compact_headrooms_are_configurable() -> None:
+    """Custom headrooms shift the formula threshold."""
+    budget = ContextBudget(max_tokens=200_000, reserved_output_tokens=0)
+    t = _bulk_transcript(140_000)  # ~35_000 tokens
+    used = _estimate_used(t)
+    assert used >= 30_000
+
+    # Default headrooms: threshold = 200_000 - 32_000 = 168_000 > used -> off.
+    assert ContextCompactor(compact_threshold=0.99).should_compact(t, budget) is False
+    # Wide headrooms drop the threshold below used -> on (floor also met).
+    wide = ContextCompactor(
+        compact_threshold=0.99,
+        output_headroom=80_000,
+        compact_headroom=100_000,
+    )
+    assert wide.should_compact(t, budget) is True
+
+
+# ---------------------------------------------------------------------------
+# M1 (ctx-pdf): provider-driven default summarizer (PDF §4 "LLM-based").
+# ContextCompactor(provider=...) defaults to LLMSummarizer; provider=None
+# keeps RuleBasedSummarizer (backward compat). Explicit summarizer wins.
+# ---------------------------------------------------------------------------
+
+def test_default_summarizer_with_provider_is_llm() -> None:
+    provider = MockProvider([MockProvider.direct_answer("<summary>x</summary>")])
+    compactor = ContextCompactor(provider=provider)
+
+    assert isinstance(compactor.summarizer, LLMSummarizer)
+    assert compactor.summarizer.provider is provider
+
+
+def test_default_summarizer_without_provider_is_rule_based() -> None:
+    compactor = ContextCompactor()
+    assert isinstance(compactor.summarizer, RuleBasedSummarizer)
+
+
+def test_explicit_summarizer_overrides_provider() -> None:
+    provider = MockProvider([MockProvider.direct_answer("<summary>x</summary>")])
+    fake = FakeSummarizer("explicit wins")
+    compactor = ContextCompactor(provider=provider, summarizer=fake)
+
+    assert compactor.summarizer is fake
+
+
+def test_provider_summarizer_used_in_compact() -> None:
+    """End-to-end: provider-backed default produces the parsed <summary>."""
+    provider = MockProvider([
+        MockProvider.direct_answer("noise <summary>LLM summary body</summary> end"),
+    ])
+    compactor = ContextCompactor(keep_recent=0, provider=provider)
+    budget = ContextBudget(max_tokens=200_000, reserved_output_tokens=0)
+    t = _make_transcript(2)
+
+    result = compactor.compact(t, budget)
+
+    assert result.summary_text == "LLM summary body"
+    assert len(provider.history) == 1

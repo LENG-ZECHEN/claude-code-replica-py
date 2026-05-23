@@ -19,3 +19,12 @@ exists in this file. Deleting or rewriting a prior block halts the loop.
 - **exit gate**: `<gate text from §2 of the milestone prompt>` → PASS (<one-line evidence>)
 - **notes**: <optional, ≤1 line. Anything longer goes in HANDOFF.md.>
 -->
+
+## M1 — done 2026-05-23
+
+- **commit**: `[ctx-pdf/M1]` compact-thresholds-and-llm-default (SHA in git log)
+- **tests**: 615 → 632 (+17; +14 in test_compact.py, +3 in test_repl.py)
+- **mypy**: clean (21 files) | **ruff**: clean
+- **files changed**: `src/simple_coding_agent/compact.py`, `src/simple_coding_agent/cli.py`, `tests/test_compact.py`, `tests/test_repl.py`, `tests/test_loop.py`, `tests/test_metrics_collector.py`, `tests/test_microcompact_runtime.py`, `examples/microcompact_demo.py`
+- **exit gate**: microcompact keep_recent=5 default preserves 5 newest compactable results; should_compact True iff `used >= max_tokens - output_headroom(12k) - compact_headroom(20k)` AND `used >= min_session_tokens(30k)`, legacy ratio preserved as 2nd trigger; ContextCompactor(provider=...) defaults to LLMSummarizer, provider=None keeps RuleBasedSummarizer → PASS (8 named gate tests + 632 green)
+- **notes**: keep_recent=5 default changed runtime; 4 pre-PDF clearing assertions (test_loop/test_metrics_collector/test_microcompact_runtime + microcompact_demo) now construct keep_recent=0 per the exit-gate parenthetical.

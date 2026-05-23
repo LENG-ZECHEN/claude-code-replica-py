@@ -289,20 +289,31 @@ class LLMSummarizer:
 
 
 _DEFAULT_MICROCOMPACT_MINUTES = 60
+_DEFAULT_MICROCOMPACT_KEEP_RECENT = 5
 
 
 class MicroCompactor:
-    """Cold-cache cleanup for old compactable tool results."""
+    """Cold-cache cleanup for old compactable tool results.
+
+    keep_recent: the N most recent compactable tool_results are preserved
+      untouched; only older ones are cleared. Source: PDF §3 microcompact
+      "keep latest 5". keep_recent=0 reproduces the pre-PDF clear-everything
+      behaviour.
+    """
 
     def __init__(
         self,
         *,
         threshold_minutes: int = _DEFAULT_MICROCOMPACT_MINUTES,
+        keep_recent: int = _DEFAULT_MICROCOMPACT_KEEP_RECENT,
         tracer: Tracer | None = None,
     ) -> None:
         if threshold_minutes < 1:
             raise ValueError("threshold_minutes must be >= 1")
+        if keep_recent < 0:
+            raise ValueError("keep_recent must be >= 0")
         self._threshold_minutes = threshold_minutes
+        self._keep_recent = keep_recent
         self._tracer: Tracer = tracer or NullTracer()
 
     def should_microcompact(
@@ -340,21 +351,25 @@ class MicroCompactor:
 
     def microcompact(self, messages: list[Message]) -> list[Message]:
         tool_names_by_id = self._tool_names_by_id(messages)
+        preserved = self._recent_compactable_positions(messages, tool_names_by_id)
         compacted: list[Message] = []
         cleared = 0
 
-        for msg in messages:
+        for msg_index, msg in enumerate(messages):
             if not isinstance(msg.content, list):
                 compacted.append(replace(msg))
                 continue
 
             new_content: list[ToolCall | ToolResult] = []
-            for item in msg.content:
+            for item_index, item in enumerate(msg.content):
                 if isinstance(item, ToolCall):
                     new_content.append(replace(item, input=dict(item.input)))
                     continue
                 tool_name = tool_names_by_id.get(item.tool_use_id)
-                if tool_name in COMPACTABLE_TOOLS:
+                if (
+                    tool_name in COMPACTABLE_TOOLS
+                    and (msg_index, item_index) not in preserved
+                ):
                     new_content.append(replace(
                         item,
                         content=CLEARED_TOOL_RESULT_CONTENT,
@@ -370,6 +385,31 @@ class MicroCompactor:
             messages=len(compacted),
         )
         return compacted
+
+    def _recent_compactable_positions(
+        self,
+        messages: list[Message],
+        tool_names_by_id: dict[str, str | None],
+    ) -> set[tuple[int, int]]:
+        """Return (msg_index, item_index) of the keep_recent newest results.
+
+        Compactable tool_results are collected in transcript order; the last
+        ``keep_recent`` of them are preserved (not cleared). keep_recent=0
+        preserves none, reproducing the pre-PDF clear-everything behaviour.
+        """
+        if self._keep_recent == 0:
+            return set()
+        positions: list[tuple[int, int]] = []
+        for msg_index, msg in enumerate(messages):
+            if not isinstance(msg.content, list):
+                continue
+            for item_index, item in enumerate(msg.content):
+                if (
+                    isinstance(item, ToolResult)
+                    and tool_names_by_id.get(item.tool_use_id) in COMPACTABLE_TOOLS
+                ):
+                    positions.append((msg_index, item_index))
+        return set(positions[-self._keep_recent:])
 
     @staticmethod
     def _parse_timestamp(value: str) -> datetime | None:
@@ -401,14 +441,30 @@ class MicroCompactor:
         return tool_names
 
 
+_DEFAULT_OUTPUT_HEADROOM = 12_000
+_DEFAULT_COMPACT_HEADROOM = 20_000
+_DEFAULT_MIN_SESSION_TOKENS = 30_000
+
+
 class ContextCompactor:
     """Decides when to compact and produces a CompactSummary.
 
-    compact_threshold: fraction of budget.available_tokens above which
-      should_compact() returns True.
+    compact_threshold: fraction of budget.available_tokens above which the
+      legacy ratio trigger fires. Preserved as a SECOND trigger alongside the
+      PDF double-headroom formula (the aggressive-thresholds preset lowers it).
     keep_recent: messages re-appended after the boundary marker.
     summary_max_result_chars: tool result content is truncated to this length
       in the summary to avoid bloating.
+
+    PDF §4 autoCompact threshold (new primary trigger): compaction fires when
+      used >= context_window - output_headroom - compact_headroom
+      AND used >= min_session_tokens, where context_window maps to
+      budget.max_tokens. should_compact() returns True if EITHER this formula
+      OR the legacy ratio fires.
+
+    summarizer selection: an explicit ``summarizer`` always wins; otherwise a
+      supplied ``provider`` selects ``LLMSummarizer`` (PDF §4 "LLM-based"
+      default); with neither, ``RuleBasedSummarizer`` is used (backward compat).
     """
 
     def __init__(
@@ -418,14 +474,26 @@ class ContextCompactor:
         summary_max_result_chars: int = _DEFAULT_SUMMARY_MAX_RESULT_CHARS,
         summarizer: Summarizer | None = None,
         *,
+        output_headroom: int = _DEFAULT_OUTPUT_HEADROOM,
+        compact_headroom: int = _DEFAULT_COMPACT_HEADROOM,
+        min_session_tokens: int = _DEFAULT_MIN_SESSION_TOKENS,
+        provider: Provider | None = None,
         tracer: Tracer | None = None,
     ) -> None:
         self.keep_recent = keep_recent
         self.compact_threshold = compact_threshold
         self.summary_max_result_chars = summary_max_result_chars
-        self.summarizer = summarizer or RuleBasedSummarizer(
-            summary_max_result_chars=summary_max_result_chars,
-        )
+        self.output_headroom = output_headroom
+        self.compact_headroom = compact_headroom
+        self.min_session_tokens = min_session_tokens
+        if summarizer is not None:
+            self.summarizer: Summarizer = summarizer
+        elif provider is not None:
+            self.summarizer = LLMSummarizer(provider)
+        else:
+            self.summarizer = RuleBasedSummarizer(
+                summary_max_result_chars=summary_max_result_chars,
+            )
         self._tracer: Tracer = tracer or NullTracer()
 
     # ------------------------------------------------------------------
@@ -433,14 +501,30 @@ class ContextCompactor:
     # ------------------------------------------------------------------
 
     def should_compact(self, transcript: Transcript, budget: ContextBudget) -> bool:
-        """True when message tokens exceed compact_threshold * available_tokens."""
+        """True when either the PDF formula or the legacy ratio trigger fires.
+
+        Primary (PDF §4): used >= context_window - output_headroom
+          - compact_headroom AND used >= min_session_tokens, with
+          context_window = budget.max_tokens.
+        Legacy (preserved 2nd trigger): used > available_tokens * threshold.
+        """
         messages = transcript.messages_after_compact_boundary()
         if not messages:
             return False
         api_messages = _normalize_messages(messages)
         used = _estimate_messages_tokens(api_messages)
-        threshold = int(budget.available_tokens * self.compact_threshold)
-        return used > threshold
+
+        formula_threshold = (
+            budget.max_tokens - self.output_headroom - self.compact_headroom
+        )
+        formula_fires = (
+            used >= formula_threshold and used >= self.min_session_tokens
+        )
+
+        legacy_threshold = int(budget.available_tokens * self.compact_threshold)
+        legacy_fires = used > legacy_threshold
+
+        return formula_fires or legacy_fires
 
     def compact(self, transcript: Transcript, budget: ContextBudget) -> CompactSummary:
         """Summarize old messages, append boundary + kept messages, return summary.
