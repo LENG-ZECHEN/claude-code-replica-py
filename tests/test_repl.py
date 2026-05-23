@@ -538,3 +538,99 @@ def test_aggressive_thresholds_explicit_context_flag_overrides_preset(
     assert loop._microcompactor._threshold_minutes == 1
 
 
+# ---------------------------------------------------------------------------
+# M2 — full 8-field aggressive-thresholds precedence matrix + bug fix
+# ---------------------------------------------------------------------------
+# Each _AGGRESSIVE_THRESHOLDS key maps to the component attribute that
+# actually takes effect once a loop is built — so a test can read the
+# *effective* value rather than trusting that the preset was wired.
+_FIELD_ACCESSORS = {
+    "compact_threshold": lambda loop: loop._compactor.compact_threshold,
+    "keep_recent": lambda loop: loop._compactor.keep_recent,
+    "microcompact_minutes": lambda loop: loop._microcompactor._threshold_minutes,
+    "max_inline_chars": lambda loop: loop._context_builder._store._max_inline_chars,
+    "total_budget_chars": lambda loop: loop._context_builder._store._total_budget_chars,
+    "snip_keep_recent": lambda loop: loop._snip_tool._keep_recent,
+    "context_tokens": lambda loop: loop._budget.max_tokens,
+    "reserved_output_tokens": lambda loop: loop._budget.reserved_output_tokens,
+}
+
+# State (i) expectation: the built-in default that applies when neither a
+# CLI flag nor --aggressive-thresholds is given. For the two flag-backed
+# fields this is the cli module's named default constant; for the others
+# it is the owning component's own default.
+_FIELD_DEFAULTS = {
+    "compact_threshold": 0.8,
+    "keep_recent": 10,
+    "microcompact_minutes": 60,
+    "max_inline_chars": 50_000,
+    "total_budget_chars": 200_000,
+    "snip_keep_recent": 3,
+    "context_tokens": cli_mod._DEFAULT_CONTEXT_TOKENS,
+    "reserved_output_tokens": cli_mod._DEFAULT_RESERVED_OUTPUT_TOKENS,
+}
+
+# Only these two fields are backed by an explicit CLI flag, so only they
+# get state (iii). The value names the _build_repl_loop keyword to set.
+_FIELD_CLI_FLAG = {
+    "context_tokens": "max_context_tokens",
+    "reserved_output_tokens": "reserved_output_tokens",
+}
+# Explicit values chosen distinct from both default and preset so a wrong
+# branch cannot coincidentally pass.
+_FIELD_EXPLICIT = {"context_tokens": 16_000, "reserved_output_tokens": 999}
+
+
+def _precedence_matrix_cases() -> list[Any]:
+    cases: list[Any] = []
+    for field in _FIELD_DEFAULTS:
+        cases.append(
+            pytest.param(
+                field, "default", None, _FIELD_DEFAULTS[field],
+                id=f"{field}-default",
+            )
+        )
+        cases.append(
+            pytest.param(
+                field, "preset", None, cli_mod._AGGRESSIVE_THRESHOLDS[field],
+                id=f"{field}-preset",
+            )
+        )
+        if field in _FIELD_CLI_FLAG:
+            cases.append(
+                pytest.param(
+                    field, "explicit", _FIELD_EXPLICIT[field],
+                    _FIELD_EXPLICIT[field], id=f"{field}-explicit",
+                )
+            )
+    return cases
+
+
+@pytest.mark.parametrize(
+    "field,state,explicit,expected", _precedence_matrix_cases(),
+)
+def test_aggressive_thresholds_precedence_matrix(
+    field: str,
+    state: str,
+    explicit: int | None,
+    expected: float,
+    tmp_path: Path,
+) -> None:
+    """Every _AGGRESSIVE_THRESHOLDS field resolves to the right effective value.
+
+    Three states per the M2 exit gate:
+      (i)   default     — no flag, no preset            -> built-in default
+      (ii)  preset      — --aggressive-thresholds only  -> preset value
+      (iii) explicit    — explicit flag + preset        -> the explicit value
+
+    State (ii) for ``context_tokens`` / ``reserved_output_tokens`` is the
+    regression guard for the M2 bug: those two were always shadowed by the
+    argparse defaults, so the preset never took effect.
+    """
+    kwargs: dict[str, Any] = {"aggressive_thresholds": state != "default"}
+    if state == "explicit":
+        kwargs[_FIELD_CLI_FLAG[field]] = explicit
+    loop = cli_mod._build_repl_loop(tmp_path, **kwargs)
+    assert _FIELD_ACCESSORS[field](loop) == expected
+
+

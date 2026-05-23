@@ -114,20 +114,30 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-steps",
         type=int,
-        default=_DEFAULT_MAX_STEPS,
+        default=None,
         help="Max tool-using iterations per user turn (REPL only; default: 10).",
     )
     parser.add_argument(
         "--max-context-tokens",
         type=int,
-        default=_DEFAULT_CONTEXT_TOKENS,
-        help="ContextBudget.max_tokens (REPL only; default: 200_000).",
+        default=None,
+        help=(
+            "ContextBudget.max_tokens (REPL only; default: 200_000). If "
+            "--aggressive-thresholds is also set and you do not pass this "
+            "flag, the preset value applies; otherwise the built-in default "
+            "applies."
+        ),
     )
     parser.add_argument(
         "--reserved-output-tokens",
         type=int,
-        default=_DEFAULT_RESERVED_OUTPUT_TOKENS,
-        help="ContextBudget.reserved_output_tokens (REPL only; default: 8_192).",
+        default=None,
+        help=(
+            "ContextBudget.reserved_output_tokens (REPL only; default: 8_192). "
+            "If --aggressive-thresholds is also set and you do not pass this "
+            "flag, the preset value applies; otherwise the built-in default "
+            "applies."
+        ),
     )
     parser.add_argument(
         "--resume",
@@ -307,9 +317,9 @@ def _build_openai_repl_loop(
     *,
     model: str,
     max_tokens: int,
-    max_steps: int,
-    max_context_tokens: int,
-    reserved_output_tokens: int,
+    max_steps: int | None,
+    max_context_tokens: int | None,
+    reserved_output_tokens: int | None,
     session_memory: SessionMemory,
     shell_mode: ShellMode = ShellMode.MOCK,
     tracer: Tracer | None = None,
@@ -348,9 +358,9 @@ def _run_openai_repl(
     workspace: Path,
     model: str,
     max_tokens: int,
-    max_steps: int,
-    max_context_tokens: int,
-    reserved_output_tokens: int,
+    max_steps: int | None,
+    max_context_tokens: int | None,
+    reserved_output_tokens: int | None,
     stream: bool,
     resume: str | None,
     shell_mode: ShellMode = ShellMode.MOCK,
@@ -436,9 +446,9 @@ def main(argv: list[str] | None = None) -> int:
             workspace=workspace,
             model=model,
             max_tokens=max_tokens,
-            max_steps=int(args.max_steps),
-            max_context_tokens=int(args.max_context_tokens),
-            reserved_output_tokens=int(args.reserved_output_tokens),
+            max_steps=args.max_steps,
+            max_context_tokens=args.max_context_tokens,
+            reserved_output_tokens=args.reserved_output_tokens,
             stream=not bool(args.no_stream),
             resume=args.resume,
             shell_mode=shell_mode,

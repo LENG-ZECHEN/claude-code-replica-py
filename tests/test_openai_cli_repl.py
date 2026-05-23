@@ -354,3 +354,73 @@ def test_openai_repl_aggressive_thresholds_omitted_keeps_defaults(
     loop = _captured_loops()[0]
     assert loop._compactor.compact_threshold == 0.8
     assert loop._snip_tool._keep_recent == 3
+
+
+# ---------------------------------------------------------------------------
+# M2 — openai_cli sentinel handling must match cli (no drift)
+# ---------------------------------------------------------------------------
+
+def test_openai_repl_aggressive_budget_matches_cli_sentinel(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """openai_cli honours the preset for the two flag-backed budget fields.
+
+    Regression guard for the M2 bug: ``context_tokens`` /
+    ``reserved_output_tokens`` were always shadowed by the argparse
+    defaults. Because ``openai_cli`` routes through ``cli._build_repl_loop``
+    for threshold resolution, the effective budget here must equal the
+    preset values, exactly as the MockProvider REPL does.
+    """
+    monkeypatch.setattr(openai_cli, "OpenAIProvider", _FakeOpenAIProvider)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _set_stdin_openai(monkeypatch, "/exit")
+
+    rc = openai_cli.main([
+        "--no-dotenv",
+        "--repl",
+        "--aggressive-thresholds",
+        "--workspace", str(tmp_path),
+        "--model", "test-model",
+    ])
+    assert rc == 0, capsys.readouterr().err
+    loop = _captured_loops()[0]
+    preset = cli_mod._AGGRESSIVE_THRESHOLDS
+    assert loop._budget.max_tokens == preset["context_tokens"]
+    assert loop._budget.reserved_output_tokens == preset["reserved_output_tokens"]
+
+
+def test_openai_repl_explicit_budget_overrides_preset_like_cli(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Explicit budget flags win per-field in openai_cli, just like cli.
+
+    Proves the three-state precedence (explicit > preset > default) is the
+    same code path for both REPLs: an explicit ``--max-context-tokens`` /
+    ``--reserved-output-tokens`` beats the preset while unspecified preset
+    fields still apply.
+    """
+    monkeypatch.setattr(openai_cli, "OpenAIProvider", _FakeOpenAIProvider)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _set_stdin_openai(monkeypatch, "/exit")
+
+    rc = openai_cli.main([
+        "--no-dotenv",
+        "--repl",
+        "--aggressive-thresholds",
+        "--max-context-tokens", "16000",
+        "--reserved-output-tokens", "999",
+        "--workspace", str(tmp_path),
+        "--model", "test-model",
+    ])
+    assert rc == 0, capsys.readouterr().err
+    loop = _captured_loops()[0]
+    assert loop._budget.max_tokens == 16000
+    assert loop._budget.reserved_output_tokens == 999
+    # An unspecified preset field still applies.
+    assert loop._snip_tool._keep_recent == cli_mod._AGGRESSIVE_THRESHOLDS[
+        "snip_keep_recent"
+    ]

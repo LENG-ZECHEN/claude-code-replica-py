@@ -143,6 +143,36 @@ _AGGRESSIVE_BANNER: str = (
 )
 
 
+def _resolve_threshold(
+    explicit: int | None,
+    preset_key: str | None,
+    default: int,
+    *,
+    aggressive: bool,
+) -> int:
+    """Resolve one CLI-tunable threshold via three-state precedence.
+
+    Precedence (highest first):
+      1. an explicit user flag (any value, even 0) always wins;
+      2. otherwise, when ``--aggressive-thresholds`` is active and the
+         field has a preset entry, the preset value applies;
+      3. otherwise the built-in default applies.
+
+    ``preset_key=None`` marks a field with no entry in
+    ``_AGGRESSIVE_THRESHOLDS`` (e.g. ``--max-steps``), so such a field
+    falls straight through to ``default`` when no explicit value is given.
+
+    This is the single source of truth for the precedence rule. Both
+    ``_run_repl`` (MockProvider) and ``openai_cli._run_openai_repl`` reach
+    it through ``_build_repl_loop``, so the two REPLs cannot drift.
+    """
+    if explicit is not None:
+        return explicit
+    if aggressive and preset_key is not None:
+        return int(_AGGRESSIVE_THRESHOLDS[preset_key])
+    return default
+
+
 def _format_aggressive_banner() -> str:
     """Render the one-line banner from ``_AGGRESSIVE_THRESHOLDS`` values."""
     return _AGGRESSIVE_BANNER.format(
@@ -317,9 +347,9 @@ def _open_project_memory(
 def _build_repl_loop(
     workspace: Path,
     *,
-    max_steps: int,
-    max_context_tokens: int,
-    reserved_output_tokens: int,
+    max_steps: int | None = None,
+    max_context_tokens: int | None = None,
+    reserved_output_tokens: int | None = None,
     session_memory: SessionMemory | None = None,
     project_memory: ProjectMemory | None = None,
     provider: MockProvider | None = None,
@@ -345,11 +375,25 @@ def _build_repl_loop(
     active_tracer: Tracer = tracer if tracer is not None else NullTracer()
     registry = build_default_registry(workspace, shell_mode=shell_mode)
     executor = ToolExecutor(registry)
-    # When the aggressive preset is on, swap in low thresholds for everything
-    # the caller did NOT pin via an explicit flag. The caller still wins:
-    # an explicit ``--max-context-tokens`` propagates into ``max_context_tokens``
-    # above before this function runs, so the precedence rule is "explicit
-    # flag beats preset on a per-field basis".
+    # Three-state precedence (explicit flag > aggressive preset > default)
+    # is resolved here, the one place both REPLs share. ``None`` means "no
+    # explicit flag"; ``_resolve_threshold`` then falls back to the preset
+    # (when active) or the built-in default. ``--max-steps`` has no preset
+    # entry, so it resolves to its default unless explicitly set.
+    resolved_max_steps = _resolve_threshold(
+        max_steps, None, _DEFAULT_MAX_STEPS, aggressive=aggressive_thresholds,
+    )
+    resolved_context_tokens = _resolve_threshold(
+        max_context_tokens, "context_tokens", _DEFAULT_CONTEXT_TOKENS,
+        aggressive=aggressive_thresholds,
+    )
+    resolved_reserved_output_tokens = _resolve_threshold(
+        reserved_output_tokens, "reserved_output_tokens",
+        _DEFAULT_RESERVED_OUTPUT_TOKENS, aggressive=aggressive_thresholds,
+    )
+    # When the aggressive preset is on, swap in low thresholds for the
+    # non-flag-backed fields (compact / microcompact / snip / externalize).
+    # The flag-backed budget fields above already honour explicit > preset.
     if aggressive_thresholds:
         compact_threshold = float(_AGGRESSIVE_THRESHOLDS["compact_threshold"])
         keep_recent_kept = int(_AGGRESSIVE_THRESHOLDS["keep_recent"])
@@ -379,8 +423,8 @@ def _build_repl_loop(
         snip_tool = SnipTool(tracer=active_tracer)
 
     budget = ContextBudget(
-        max_tokens=max_context_tokens,
-        reserved_output_tokens=reserved_output_tokens,
+        max_tokens=resolved_context_tokens,
+        reserved_output_tokens=resolved_reserved_output_tokens,
     )
     transcript = Transcript()
     builder = ContextBuilder(
@@ -404,7 +448,7 @@ def _build_repl_loop(
         "project_memory": project_memory,
         "metrics": MetricsCollector(),
         "tracer": active_tracer,
-        "max_steps": max_steps,
+        "max_steps": resolved_max_steps,
     }
     if system_prompt is not None:
         loop_kwargs["system_prompt"] = system_prompt
@@ -696,9 +740,9 @@ def _drive_repl_session(
 def _run_repl(
     *,
     workspace: Path,
-    max_steps: int,
-    max_context_tokens: int,
-    reserved_output_tokens: int,
+    max_steps: int | None,
+    max_context_tokens: int | None,
+    reserved_output_tokens: int | None,
     stream: bool,
     resume: str | None = None,
     shell_mode: ShellMode = ShellMode.MOCK,
@@ -806,20 +850,30 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-steps",
         type=int,
-        default=_DEFAULT_MAX_STEPS,
+        default=None,
         help="Max tool-using iterations per user turn (default: 10).",
     )
     parser.add_argument(
         "--max-context-tokens",
         type=int,
-        default=_DEFAULT_CONTEXT_TOKENS,
-        help="ContextBudget.max_tokens (default: 200_000).",
+        default=None,
+        help=(
+            "ContextBudget.max_tokens (default: 200_000). If "
+            "--aggressive-thresholds is also set and you do not pass this "
+            "flag, the preset value applies; otherwise the built-in default "
+            "applies."
+        ),
     )
     parser.add_argument(
         "--reserved-output-tokens",
         type=int,
-        default=_DEFAULT_RESERVED_OUTPUT_TOKENS,
-        help="ContextBudget.reserved_output_tokens (default: 8_192).",
+        default=None,
+        help=(
+            "ContextBudget.reserved_output_tokens (default: 8_192). If "
+            "--aggressive-thresholds is also set and you do not pass this "
+            "flag, the preset value applies; otherwise the built-in default "
+            "applies."
+        ),
     )
     parser.add_argument(
         "--resume",
@@ -877,9 +931,9 @@ def main(argv: list[str] | None = None) -> int:
         workspace = _resolve_workspace_arg(args.workspace)
         return _run_repl(
             workspace=workspace,
-            max_steps=int(args.max_steps),
-            max_context_tokens=int(args.max_context_tokens),
-            reserved_output_tokens=int(args.reserved_output_tokens),
+            max_steps=args.max_steps,
+            max_context_tokens=args.max_context_tokens,
+            reserved_output_tokens=args.reserved_output_tokens,
             stream=bool(args.stream),
             resume=args.resume,
             shell_mode=shell_mode,

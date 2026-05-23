@@ -436,6 +436,17 @@ def test_compact_prompt_template_contains_nine_sections() -> None:
 # MicroCompactor
 # ---------------------------------------------------------------------------
 
+def test_microcompactor_rejects_zero_minutes() -> None:
+    """threshold_minutes < 1 is rejected, mirroring SnipTool(keep_recent=0).
+
+    The aggressive preset uses ``microcompact_minutes=1`` (the floor); a
+    value of 0 is nonsensical for a "latest assistant older than N minutes"
+    cold-cache check and must fail loudly at construction.
+    """
+    with pytest.raises(ValueError, match="threshold_minutes must be >= 1"):
+        MicroCompactor(threshold_minutes=0)
+
+
 def test_should_microcompact_false_for_empty_transcript() -> None:
     assert MicroCompactor().should_microcompact([]) is False
 
