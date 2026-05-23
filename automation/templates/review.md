@@ -284,7 +284,34 @@ prior NOW.md — copy verbatim.)
 Move the row for this initiative from the Active table to the Archived
 table. Fill final commit, period, milestone count.
 
-### Step 10: Commit
+### Step 10: Write review.log
+
+Write a terse session summary to
+`initiatives/_archive/{{ARCHIVE_SLUG}}/logs/review.log` using `Write`.
+Use this content shape (fill in the actual values):
+
+```
+Phase 2B + 2C complete. Summary:
+
+- **All N milestones verified**: `[{{COMMIT_PREFIX}}/M1]` (`<sha>`), …
+- **Quality gates green**: pytest <N> (+<delta> from <baseline>), mypy clean (<N> files), ruff clean
+- **REVIEW.md written** with <N>-dim prompt scorecard, <N>-dim execution scorecard, and <N> Tier C proposals
+- **Tier A auto-applied**: <one line per edit, or "did not fire: <reason>">
+- **Tier B**: <one line per creation, or "did not fire: <reason>">
+- **Archive committed** as `<wrap-sha> [{{COMMIT_PREFIX}}/wrap]`
+- **All 6 wrap-gate checks pass**
+
+Key audit findings flagged in REVIEW.md:
+- <up to 3 bullets from Proposed edits or low scorecard scores>
+```
+
+Then stage it:
+
+```
+git add initiatives/_archive/{{ARCHIVE_SLUG}}/logs/review.log
+```
+
+### Step 11: Commit
 
 Stage **every path** Phase 2C wrap + Step 6 Tier A/B might have
 touched (explicit paths — project convention: no `git add -A`):
@@ -304,13 +331,6 @@ Final pytest: <count>. mypy + ruff clean.
 "
 ```
 
-Do NOT try to stage `logs/review.log` here. The outer shell script writes
-your live stdout to ignored scratch path
-`automation/logs/{{ARCHIVE_SLUG}}-review.log` while this process is still
-running. After you exit, the shell script copies the finalized log into
-`initiatives/_archive/{{ARCHIVE_SLUG}}/logs/review.log` and amends the
-wrap commit when the log produced a staged diff.
-
 **Verify the working tree is clean after the commit.** If anything
 remains unstaged or untracked, a Tier A/B edit slipped through — the
 loop's wrap-gate Check 6 will halt:
@@ -324,8 +344,3 @@ if [ -n "$(git status --short)" ]; then
   exit 1
 fi
 ```
-
-### Step 11: Report
-
-Print the last 30 lines of REVIEW.md to stdout so the shell loop can
-tail it. Exit 0 on success.

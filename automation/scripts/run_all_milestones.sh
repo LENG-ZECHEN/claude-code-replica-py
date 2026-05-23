@@ -627,13 +627,6 @@ printf '\n================================================================\n'
 printf '=== Phase 2B + 2C: review + wrap-up at %s ===\n' "$(date)"
 printf '================================================================\n'
 
-mkdir -p "$SCRATCH_LOGS_DIR"
-
-# Keep the live review stdout outside initiatives/current. The review agent
-# moves current/ into _archive/ and commits while claude --print is still
-# streaming; writing the live tee directly into the archive would dirty the
-# just-created wrap commit after it lands.
-REVIEW_LOG="$SCRATCH_LOGS_DIR/${ARCHIVE_SLUG}-review.log"
 REVIEW_PROMPT="$LOGS_DIR/review_prompt.md"
 
 # Substitute initiative-specific tokens into the review template.
@@ -644,37 +637,29 @@ sed \
   -e "s|{{BASELINE_COMMIT}}|$BASELINE_COMMIT|g" \
   "$REVIEW_TEMPLATE" > "$REVIEW_PROMPT"
 
-# Pre-touch so `tail -F` works immediately — same rationale as the
-# per-milestone log pre-touch above.
-: > "$REVIEW_LOG"
 printf 'Review prompt : %s\n' "$REVIEW_PROMPT"
-printf 'Review log    : %s\n' "$REVIEW_LOG"
-printf 'Live view     : tail -F %s\n\n' "$REVIEW_LOG"
+printf 'Session       : interactive (--remote-control); agent writes review.log\n\n'
 
 CURRENT_STAGE="review: running claude"
-CURRENT_LOG="$REVIEW_LOG"
+CURRENT_LOG=""
 
 notify "🔍 Started final review" \
 "$(notify_run_context)
 
 Review prompt: ${REVIEW_PROMPT}
-Review log: ${REVIEW_LOG}
 Archive target: initiatives/_archive/${ARCHIVE_SLUG}
 
 Started: $(date)" \
   "mag" "default"
 
-# Review runs interactively with --remote-control so the operator can
-# observe and intervene if needed. Unlike the milestone sessions (which
-# use --print), interactive mode reads permissions from
-# ~/.claude/settings.json; --allowedTools / --disallowedTools are passed
-# as CLI overrides for the same effect. --verbose streams tool-call
-# progress to stdout so the tee log is still informative.
-if ! claude --remote-control --verbose --model "$CLAUDE_MODEL" \
+# Review session runs interactively with --remote-control. The agent
+# writes its own log to initiatives/_archive/${ARCHIVE_SLUG}/logs/review.log
+# as part of its Phase 2C Step 10 (see automation/templates/review.md).
+if ! claude --remote-control --model "$CLAUDE_MODEL" \
      --allowedTools "$ALLOWED_TOOLS" \
      --disallowedTools "$DISALLOWED_TOOLS" \
-     < "$REVIEW_PROMPT" 2>&1 | tee "$REVIEW_LOG"; then
-  die "review session exited non-zero (see $REVIEW_LOG)"
+     < "$REVIEW_PROMPT"; then
+  die "review session exited non-zero"
 fi
 
 # Exit gate for the review session. ALL checks must pass.
@@ -707,25 +692,15 @@ if [ -n "$(git -C "$REPLICA_DIR" status --short)" ]; then
 fi
 
 ARCHIVED_REVIEW_LOG="$REPLICA_DIR/initiatives/_archive/$ARCHIVE_SLUG/logs/review.log"
-if [ ! -f "$REVIEW_LOG" ]; then
-  die "review log archival failed: scratch review log missing at $REVIEW_LOG"
-fi
 
-mkdir -p "$(dirname "$ARCHIVED_REVIEW_LOG")"
-cp "$REVIEW_LOG" "$ARCHIVED_REVIEW_LOG"
-git -C "$REPLICA_DIR" add "initiatives/_archive/$ARCHIVE_SLUG/logs/review.log"
-if ! git -C "$REPLICA_DIR" diff --cached --quiet -- "initiatives/_archive/$ARCHIVE_SLUG/logs/review.log"; then
-  git -C "$REPLICA_DIR" commit --amend --no-edit
-fi
-
-if ! git -C "$REPLICA_DIR" log --oneline -1 | grep -qF "[${COMMIT_PREFIX}/wrap]"; then
-  git -C "$REPLICA_DIR" log --oneline -5
-  die "review log archival failed: amended commit no longer has '[${COMMIT_PREFIX}/wrap]' subject"
-fi
-
-if [ -n "$(git -C "$REPLICA_DIR" status --short)" ]; then
-  git -C "$REPLICA_DIR" status --short
-  die "review log archival failed: working tree dirty after adding archived review.log"
+# The agent writes review.log to the archive path as part of Step 10.
+# If it staged the file inside the wrap commit, the add/amend is a no-op.
+# If it wrote the file after the commit, this picks it up and amends.
+if [ -f "$ARCHIVED_REVIEW_LOG" ]; then
+  git -C "$REPLICA_DIR" add "initiatives/_archive/$ARCHIVE_SLUG/logs/review.log"
+  if ! git -C "$REPLICA_DIR" diff --cached --quiet -- "initiatives/_archive/$ARCHIVE_SLUG/logs/review.log"; then
+    git -C "$REPLICA_DIR" commit --amend --no-edit
+  fi
 fi
 
 printf '\n================================================================\n'
