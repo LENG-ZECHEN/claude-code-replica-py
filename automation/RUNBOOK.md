@@ -10,7 +10,7 @@ There are exactly **two user-triggered phases**:
 | Phase | Trigger | Who does it |
 |---|---|---|
 | **Phase 1 — Bootstrap** | You say to a Claude session: **"Run RUNBOOK Phase 1."** | One interactive Claude session |
-| **Phase 2 — Execute + Review + Wrap-up** | You run `./automation/scripts/run_all_milestones.sh` | The script (which spawns N+1 `claude --print` sessions: one per milestone, plus one final review) |
+| **Phase 2 — Execute + Review + Wrap-up** | You run `./automation/scripts/run_all_milestones.sh` | The script (which spawns N `claude --print` sessions for milestones, plus one final interactive `claude --remote-control` review session) |
 
 Phase 2 is fully automatic once you start it. There is no Phase 3.
 
@@ -319,7 +319,7 @@ If you feel an entry could go in either, ask:
 ### Phase 2B — Review (script-spawned final claude session)
 
 After the last milestone's exit gate passes, the script spawns ONE more
-`claude --print` session whose prompt is `automation/templates/review.md`
+interactive `claude --remote-control` session whose prompt is `automation/templates/review.md`
 (with the initiative path substituted in). That session does:
 
 | # | Action |

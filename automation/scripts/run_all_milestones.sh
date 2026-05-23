@@ -664,10 +664,13 @@ Archive target: initiatives/_archive/${ARCHIVE_SLUG}
 Started: $(date)" \
   "mag" "default"
 
-# --verbose: same rationale as the per-milestone invocation above —
-# stream progress so the review log is informative even on early
-# termination.
-if ! claude --print --verbose --model "$CLAUDE_MODEL" \
+# Review runs interactively with --remote-control so the operator can
+# observe and intervene if needed. Unlike the milestone sessions (which
+# use --print), interactive mode reads permissions from
+# ~/.claude/settings.json; --allowedTools / --disallowedTools are passed
+# as CLI overrides for the same effect. --verbose streams tool-call
+# progress to stdout so the tee log is still informative.
+if ! claude --remote-control --verbose --model "$CLAUDE_MODEL" \
      --allowedTools "$ALLOWED_TOOLS" \
      --disallowedTools "$DISALLOWED_TOOLS" \
      < "$REVIEW_PROMPT" 2>&1 | tee "$REVIEW_LOG"; then
