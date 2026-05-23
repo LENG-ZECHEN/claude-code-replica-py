@@ -27,7 +27,15 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from .context import ContextBudget, _estimate_messages_tokens, _normalize_messages
-from .models import CompactSummary, Message, MessageType, Role, ToolCall, ToolResult
+from .models import (
+    CompactSummary,
+    FileSnapshot,
+    Message,
+    MessageType,
+    Role,
+    ToolCall,
+    ToolResult,
+)
 from .provider import PromptTooLongError, Provider
 from .trace import NullTracer, Tracer
 from .transcript import Transcript
@@ -526,13 +534,24 @@ class ContextCompactor:
 
         return formula_fires or legacy_fires
 
-    def compact(self, transcript: Transcript, budget: ContextBudget) -> CompactSummary:
+    def compact(
+        self,
+        transcript: Transcript,
+        budget: ContextBudget,
+        *,
+        snapshots: tuple[FileSnapshot, ...] = (),
+    ) -> CompactSummary:
         """Summarize old messages, append boundary + kept messages, return summary.
 
         Source: compactConversation() in src/services/compact/compact.ts.
         After this call, transcript.messages_after_compact_boundary() returns
         [boundary_marker, *to_keep] so ContextBuilder sees the recent turns.
+
+        ``snapshots`` (M3) are the recent FileSnapshots captured before this
+        compaction; they are stored verbatim on the returned CompactSummary so
+        ContextBuilder.build() can re-attach them as ATTACHMENT messages.
         """
+        recent_file_snapshots = tuple(snapshots)
         current = transcript.messages_after_compact_boundary()
         n = len(current)
 
@@ -552,6 +571,7 @@ class ContextCompactor:
                 messages_summarized=0,
                 pre_token_count=0,
                 post_token_count=0,
+                recent_file_snapshots=recent_file_snapshots,
             )
 
         split = max(0, n - self.keep_recent)
@@ -582,6 +602,7 @@ class ContextCompactor:
             messages_summarized=len(to_summarize),
             pre_token_count=pre_tokens,
             post_token_count=post_tokens,
+            recent_file_snapshots=recent_file_snapshots,
         )
 
     def _summarize(self, messages: list[Message]) -> str:

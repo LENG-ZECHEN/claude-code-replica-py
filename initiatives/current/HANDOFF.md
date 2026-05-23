@@ -1,6 +1,6 @@
-# HANDOFF — Next: M3 (autocompact-recent-files-attachment)
+# HANDOFF — Next: M4 (model-driven-snip-tool)
 
-> Updated by: M2 (engine-snip-orphan-and-ancient-pairs)
+> Updated by: M3 (autocompact-recent-files-attachment)
 > Date: 2026-05-23
 > Re-verify Section 3 numbers before starting work — do not trust this
 > file blindly.
@@ -10,9 +10,9 @@
 ## 1. Current initiative
 
 - **slug**: `ctx-mgmt-pdf-align`
-- **current milestone**: `M2` — DONE
-- **next milestone**: `M3` — autocompact-recent-files-attachment
-- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [next], M4 [pending]
+- **current milestone**: `M3` — DONE
+- **next milestone**: `M4` — model-driven-snip-tool
+- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [done], M4 [next]
 
 ## 2. Completed milestones
 
@@ -152,12 +152,86 @@
     folding their content. The P8 "don't fold side-effecting results"
     invariant is unaffected.
 
+### M3
+
+- **commit**: `[ctx-pdf/M3] autocompact-recent-files-attachment` (SHA in `git log`)
+- **files changed**: `src/simple_coding_agent/models.py`,
+  `src/simple_coding_agent/compact.py`,
+  `src/simple_coding_agent/context.py`,
+  `src/simple_coding_agent/loop.py`, `tests/test_models.py`,
+  `tests/test_compact.py`, `tests/test_context.py`, `tests/test_loop.py`
+- **tests added**: +7 test_models.py, +3 test_compact.py, +6 test_context.py,
+  +7 test_loop.py. Total: 647 → 670 (+23).
+- **behavior implemented**: Recent-file snapshot capture + post-compaction
+  re-attachment (PDF §4 "recent files re-inject"). Four pieces.
+  (1) New `FileSnapshot` frozen dataclass in `models.py` (`path`,
+  `content`, `captured_at`). (2) `AgentLoop` carries
+  `_recent_file_snapshots: deque[FileSnapshot]` (capacity ctor kwarg
+  `recent_files_capacity: int = 5`, validated `>= 1`). `_execute_one`
+  calls a new `_capture_file_snapshot(call, content)` when
+  `call.name == "read_file" and not is_error`, capturing the RAW returned
+  content BEFORE `ToolResultStore` externalization. Eviction is
+  newest-wins per-path (a re-read of an already-tracked path removes the
+  prior entry, then appends; the deque's `maxlen` caps total). (3)
+  `CompactSummary` is now `@dataclass(frozen=True)` with a new
+  `recent_file_snapshots: tuple[FileSnapshot, ...] = ()` field;
+  `ContextCompactor.compact()` gained a keyword-only `snapshots` param
+  stored verbatim on the returned summary (both the n==0 and main paths).
+  `_force_compact()` reads `tuple(self._recent_file_snapshots)` ONCE and
+  passes it in. (4) `Message.attachment(path, content)` factory (USER
+  role, `MessageType.ATTACHMENT`, `is_meta=True`, content
+  `<recent-files>\n<file path="...">CONTENT</file>\n</recent-files>`).
+  `context._normalize_messages()` no longer filters ATTACHMENT (only
+  COMPACT_BOUNDARY/SNIP_BOUNDARY remain in the drop tuple), so attachments
+  serialize as user messages. `ContextBuilder.build()` builds attachment
+  dicts via new module helper `_attachment_dicts(compact_summary)` and
+  PREPENDS them to `api_messages` AFTER the budget-trim loop +
+  `_remove_orphan_tool_results`, so they land after the (stripped) compact
+  boundary, before the kept messages, and are never popped by trimming.
+- **design decisions / deviations from PLAN**:
+  - `attachments injected after trim, not before`: the exit gate says
+    attachments are "NOT counted toward keep_recent budget trimming" and a
+    test asserts "budget-trim does not pop ATTACHMENT preferentially". The
+    cleanest way to honor both is to run the trim loop on the kept messages
+    only, then prepend the attachment dicts. They are therefore never trim
+    candidates and always survive. Their tokens ARE included in the final
+    `estimated_tokens` (accurate reporting) but do not drive trimming.
+  - `attachments normalized individually`: `_attachment_dicts` calls
+    `_normalize_messages([msg])` per snapshot so consecutive same-role
+    (USER) attachments are NOT merged into one block — one snapshot maps to
+    exactly one `<recent-files>` message dict, as the gate requires.
+  - `snapshot captures raw content, not the tool_result`: per the PLAN
+    note, capture happens in `_execute_one` on the value read_file
+    returned, BEFORE externalization / microcompact / snip can alter the
+    in-transcript `tool_result`. So a later-cleared placeholder never
+    overwrites the re-attached body.
+  - `snapshots not persisted by session_store`: `_summary_to_dict` /
+    `_summary_from_dict` were left untouched; the new field defaults to
+    `()`, so a resumed `CompactSummary` simply has empty snapshots. This is
+    deliberate — snapshots are live AgentLoop state re-captured on the next
+    read_file, and a stale cross-process snapshot would be misleading.
+  - `_CountingCompactor test double updated`: its `compact()` override
+    (test_loop.py) now forwards `**kwargs` so the reactive-compact path
+    (which calls `_force_compact()` → `compact(snapshots=...)`) keeps
+    working. Necessary because `snapshots` is a new keyword-only param.
+- **known limitations**:
+  - Snapshot content is captured raw and uncapped in size; a very large
+    read_file body is re-attached in full after compaction (by design —
+    the point is to avoid a re-read). The budget-trim loop does not bound
+    attachments, so a pathologically large recent-file set could exceed the
+    nominal budget in the rebuilt context. Acceptable for the replica;
+    real Claude Code bounds the recent-files set similarly by count (5).
+  - Attachments are re-emitted on EVERY `build()` while the same
+    `CompactSummary` is the active `_last_summary` — they persist across
+    turns until the next compaction replaces the summary. This matches the
+    "re-inject after restoration" intent.
+
 ## 3. Current repo state
 
 > Re-verify these numbers before starting work.
 
-- **last commit**: `[ctx-pdf/M2] ...` (run `git -C python-replica log --oneline -3`)
-- **tests**: 647 passing
+- **last commit**: `[ctx-pdf/M3] ...` (run `git -C python-replica log --oneline -3`)
+- **tests**: 670 passing
 - **mypy**: clean (21 source files)
 - **ruff**: clean
 - **branch**: main
@@ -210,55 +284,80 @@
     never create new orphans (orphan-result delete leaves no use to
     re-orphan; pair delete removes both halves). Preserve this if snip
     phases are extended.
+  - **(added by M3)** `CompactSummary` is now `@dataclass(frozen=True)`
+    with a `recent_file_snapshots: tuple[FileSnapshot, ...] = ()` field.
+    This is part of the CompactSummary contract — M4 must NOT break it:
+    do not unfreeze it, do not change the field to a list, and do not drop
+    it from `compact()`'s output. Callers must rebind (not mutate) summary
+    instances (use `dataclasses.replace` if a copy-with-change is needed).
+  - **(added by M3)** `MessageType.ATTACHMENT` MUST stay filtered-IN: it
+    passes through `context._normalize_messages()` to API serialization
+    (it is real user-role content), UNLIKE COMPACT_BOUNDARY and
+    SNIP_BOUNDARY which stay filtered OUT. M4 must NOT add ATTACHMENT back
+    into the normalize drop tuple, and any new serialization path must
+    likewise let ATTACHMENT through while dropping the two boundary types.
+  - **(added by M3)** `FileSnapshot` is frozen and lives in `models.py`.
+    The `AgentLoop._recent_file_snapshots` deque is mutable (that is its
+    job) but each snapshot inside it is immutable. Capture happens ONLY for
+    successful `read_file` calls (not write_file/edit/etc.), in
+    `_execute_one`, on the raw pre-externalization content.
 
 ## 5. Next milestone guidance
 
-For `M3` — autocompact-recent-files-attachment:
+For `M4` — model-driven-snip-tool:
 
 - **next scope** (paraphrased from PLAN; config.yaml is authoritative):
-  snapshot recent `read_file` contents BEFORE compaction and re-inject
-  them into the rebuilt context as ATTACHMENT messages — do NOT have the
-  model re-read. Three pieces: (1) `AgentLoop` carries
-  `_recent_file_snapshots: deque[FileSnapshot]` (cap N, default 5),
-  populated inside `_execute_one()` on a successful `read_file` call;
-  `FileSnapshot` = frozen dataclass `path: str`, `content: str`,
-  `captured_at: str`. (2) `_force_compact()` passes the deque into
-  `ContextCompactor.compact(snapshots=...)`, which stores it on the
-  returned `CompactSummary.recent_file_snapshots: tuple` (CompactSummary
-  becomes frozen, new field defaults to `()`). (3) `ContextBuilder.build()`
-  reads `compact_summary.recent_file_snapshots` and emits one
-  `MessageType.ATTACHMENT` user-role message per snapshot, immediately
-  after COMPACT_BOUNDARY and before the keep_recent messages, content
-  `<recent-files>\n<file path="...">CONTENT</file>\n</recent-files>`,
-  `is_meta=True`, NOT counted toward keep_recent trimming. Exit gate:
-  pytest +>=8 from baseline.
-- **relevant files**: `loop.py` (snapshot capture hook in `_execute_one`
-  after read_file success; pass deque into `_force_compact`),
-  `compact.py` (`CompactSummary` → frozen + new field;
-  `ContextCompactor.compact(snapshots=...)`), `context.py`
-  (`ContextBuilder.build` emits ATTACHMENT messages from the summary),
-  `models.py` (verify `MessageType.ATTACHMENT` already exists — it does,
-  at the enum; `FileSnapshot` likely lives in models or compact).
-- **CONFIRMED for M3**: `MessageType.ATTACHMENT` already exists in the
-  enum (models.py). **But** `context._normalize_messages()` currently
-  FILTERS ATTACHMENT out alongside COMPACT_BOUNDARY/SNIP_BOUNDARY (M2
-  left that filter as-is, since attachments are unused today). M3 MUST
-  change that filter so ATTACHMENT messages PASS THROUGH to API
-  serialization (they are real user-role content the model must see),
-  while keeping COMPACT_BOUNDARY and SNIP_BOUNDARY filtered. This is the
-  single biggest gotcha for M3 — the PLAN risk note flagged it and M2
-  confirms it: ATTACHMENT is in the drop tuple right now.
-- **interaction with M2's snip phase that M3 should know**: engine snip
-  runs (`loop.py:215`) BEFORE `_maybe_compact()` (loop.py:216), so any
-  SNIP_BOUNDARY is already in the transcript when compaction slices at
-  the COMPACT_BOUNDARY. `messages_after_compact_boundary()` returns
-  everything after the latest compact boundary, which can include a
-  SNIP_BOUNDARY — harmless, it is filtered at normalize. M3's ATTACHMENT
-  injection happens in `build()` AFTER the post-compact slice, so it
-  does not interact with snip. Also: the build-time
-  `_remove_orphan_tool_results()` runs after the trim loop; ATTACHMENT
-  messages are user-role with string content, so they are not affected
-  by orphan removal.
+  add the model-driven `snip_history` tool + `<msg uuid="...">`
+  serialization + a 10k-token nudge. Pieces: (1) new
+  `snip_history` tool registered by
+  `tool_registry_factory.build_default_registry()` with
+  `input_schema = {"type":"object","properties":{"message_uuids":
+  {"type":"array","items":{"type":"string"}}},"required":["message_uuids"]}`;
+  invoking it removes those messages from the AgentLoop's live Transcript
+  via `Transcript.replace_all(filtered)` and returns `"Snipped <N>
+  messages"`. (2) `context._normalize_messages()` wraps each user-role
+  tool_result message body with `<msg uuid="<uuid>">...</msg>` so the
+  model can target uuids (OpenAI Chat Completions strips arbitrary
+  per-message metadata). (3) `AgentLoop` tracks
+  `_tokens_since_last_snip` updated after every `_handle_tool_calls()`
+  return; when growth >= `snip_nudge_growth_tokens` (default 10_000), the
+  next `build()` prepends an `is_meta=True` system-reminder user message
+  describing `snip_history` and listing currently-snippable uuids
+  (compactable tool_results older than the latest 5). Resets on any snip
+  (engine or model) and any full compact. Suppressed for the loop's
+  lifetime once `reactive_compact_attempted` flips True. Exit gate:
+  pytest +>=15 from baseline (655+ → expect ~685+ given M3 landed at 670).
+- **likely-touched files**: new `src/simple_coding_agent/snip_tool_model.py`
+  (exports `register_snip_history_tool(registry, transcript)`),
+  `tool_registry_factory.py` (calls the register helper),
+  `loop.py` (`_tokens_since_last_snip` state + reset points + nudge
+  arming after `_handle_tool_calls`), `context.py`
+  (`<msg uuid="...">` wrapping in `_normalize_messages` + a new
+  `build(snip_nudge=...)` kwarg that prepends one is_meta message before
+  the first kept message), plus `SnipNudge` dataclass.
+- **M3 surprises M4 must know about `build()` + attachment placement**:
+  - M3 prepends recent-file ATTACHMENT dicts at the FRONT of
+    `api_messages`, AFTER the trim loop + `_remove_orphan_tool_results`.
+    M4's snip-nudge message is ALSO supposed to be prepended "before the
+    first kept message". DECIDE the relative order of nudge vs
+    attachments deliberately — the PDF intent is: compact boundary →
+    (recent-files attachments) → (snip nudge / kept turns). Cleanest is to
+    prepend the nudge AFTER the attachments are prepended so the final
+    front-to-back order is `[*attachments, nudge, *kept]`, OR
+    `[nudge, *attachments, *kept]` if you treat the nudge as the very
+    first system-reminder. Either is defensible; pick one and pin it with
+    a test. The existing `_attachment_dicts(compact_summary)` helper is
+    the integration point — do not re-merge attachments with kept messages.
+  - `_normalize_messages` is the shared serialization choke point. M3 made
+    it pass ATTACHMENT through. M4's `<msg uuid="...">` wrapping must wrap
+    ONLY the tool_result-bearing USER messages and must NOT wrap ATTACHMENT
+    messages (those are recent-file content, not snippable history) — gate
+    on `msg.type == TOOL_RESULT` (or the `is_meta + only-ToolResult-blocks`
+    shape the PLAN names), NOT on `role == USER` alone, or you will wrap
+    the M3 attachments too.
+  - `CompactSummary` is frozen now (see Section 4). If M4 needs to attach
+    nudge state to the summary (it should NOT — nudge is AgentLoop state),
+    use AgentLoop fields, not summary mutation.
 - **risks / surprises carried forward**:
   - **GateGuard fact-forcing hook**: the first Edit/Write to each file
     is blocked once by a `pre:edit-write` "Fact-Forcing Gate" requiring
@@ -266,24 +365,28 @@ For `M3` — autocompact-recent-files-attachment:
     instruction, then retry the SAME edit verbatim. The first Bash call
     is likewise blocked by `pre:bash:gateguard-fact-force`. Budget one
     rejected attempt per file + one for the first bash. (Confirmed again
-    in M2 — fired on models.py, context.py, snip.py, test_snip.py,
-    PROGRESS.md, HANDOFF.md, and the first bash.)
+    in M3 — fired on every src + test file edited, PROGRESS.md,
+    HANDOFF.md, and the first bash.) Also note: `cd python-replica`
+    persists working dir across Bash calls, so a second `cd python-replica`
+    fails with "no such file or directory" — use absolute paths or rely on
+    the persisted cwd.
   - **`should_compact` legacy path**: keep the M1 legacy
     `compact_threshold` second-trigger alive — the aggressive preset and
     tiny-budget demos fire compaction purely through it (the 30k
     min_session_tokens floor blocks the PDF formula in small budgets).
-    M3 touches `_force_compact`/`compact()` signatures; do not disturb
-    `should_compact`.
-  - **CompactSummary going frozen**: it is constructed in `compact.py`
-    and read in `context.py`/`loop.py`/session persistence
-    (`session_store.py`, `transcript.py` round-trips). Grep every
-    `CompactSummary(` construction + every field write before freezing
-    it; `restored_files` already exists as a list field, so the
-    persistence layer already serializes summary fields — confirm
-    `recent_file_snapshots` round-trips or is excluded deliberately.
+    Do not disturb `should_compact`.
+  - **`Transcript.replace_all()` is the only mutation API** — M4's
+    `snip_history` tool fn uses it (same as engine snip/microcompact). The
+    tool captures the live Transcript by closure; pairing works because
+    the registry and AgentLoop share one Transcript instance in
+    `_build_repl_loop`.
+  - **M4 is the sizing-borderline milestone** (PLAN flagged 5–6 src files,
+    ~15 new tests). The PLAN documents an M4a/M4b split seam (tool+uuid
+    first, nudge second) if Phase 2 thrash occurs. M4a is shippable
+    independently; M4b depends on it.
 
 The full ready-to-run prompt is at:
-`initiatives/current/prompts/M3.md`
+`initiatives/current/prompts/M4.md`
 
 The autonomous loop (`automation/scripts/run_all_milestones.sh`) reads
 that prompt file directly. This Section 5 exists for manual

@@ -27,6 +27,7 @@ fields on the returned LoopResult so callers can react without try/except.
 from __future__ import annotations
 
 import uuid as _uuid
+from collections import deque
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -39,6 +40,7 @@ from .metrics import MetricsCollector
 from .models import (
     AgentStep,
     CompactSummary,
+    FileSnapshot,
     Message,
     MessageType,
     Role,
@@ -58,6 +60,7 @@ from .transcript import Transcript
 
 _DEFAULT_MAX_STEPS: int = 10
 _DEFAULT_SYSTEM_PROMPT: str = "You are a coding assistant."
+_DEFAULT_RECENT_FILES_CAPACITY: int = 5
 
 
 def _now_iso() -> str:
@@ -166,9 +169,14 @@ class AgentLoop:
         tracer: Tracer | None = None,
         system_prompt: str = _DEFAULT_SYSTEM_PROMPT,
         max_steps: int = _DEFAULT_MAX_STEPS,
+        recent_files_capacity: int = _DEFAULT_RECENT_FILES_CAPACITY,
     ) -> None:
         if max_steps < 1:
             raise ValueError(f"max_steps must be >= 1, got {max_steps}")
+        if recent_files_capacity < 1:
+            raise ValueError(
+                f"recent_files_capacity must be >= 1, got {recent_files_capacity}"
+            )
         self._provider = provider
         self._tool_executor = tool_executor
         self._transcript = transcript
@@ -195,6 +203,13 @@ class AgentLoop:
         self._system_prompt = system_prompt
         self._max_steps = max_steps
         self._last_summary: CompactSummary | None = None
+        # M3: live snapshots of recently read files, captured in _execute_one
+        # at read_file success time. Survives across compactions so each
+        # compact can re-attach the same / updated set. Newest-wins per path.
+        self._recent_files_capacity = recent_files_capacity
+        self._recent_file_snapshots: deque[FileSnapshot] = deque(
+            maxlen=recent_files_capacity
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -522,10 +537,18 @@ class AgentLoop:
         return True
 
     def _force_compact(self) -> bool:
-        """Run compaction without checking the threshold."""
+        """Run compaction without checking the threshold.
+
+        M3: the recent-file snapshot deque is read ONCE here (as a tuple) and
+        passed into compact(), so reads that happen later in the session do
+        not retroactively change this compaction's re-attached files.
+        """
         if self._compactor is None:
             return False
-        self._last_summary = self._compactor.compact(self._transcript, self._budget)
+        snapshots = tuple(self._recent_file_snapshots)
+        self._last_summary = self._compactor.compact(
+            self._transcript, self._budget, snapshots=snapshots
+        )
         self._metrics.record_full_compact()
         return True
 
@@ -623,6 +646,24 @@ class AgentLoop:
         self._transcript.append(results_msg)
         return asst_msg, tool_results
 
+    def _capture_file_snapshot(self, call: ToolCall, content: str) -> None:
+        """Record a read_file result as a recent FileSnapshot (M3).
+
+        Captures the live content returned by read_file BEFORE any
+        externalization / microcompact / snip can alter the in-transcript
+        tool_result. Newest-wins per path: a fresh read of an already-tracked
+        path replaces its prior entry; the deque is capped at
+        ``recent_files_capacity`` (oldest evicted).
+        """
+        path = call.input.get("path")
+        if not isinstance(path, str):
+            return
+        kept = [s for s in self._recent_file_snapshots if s.path != path]
+        kept.append(FileSnapshot(path=path, content=content, captured_at=_now_iso()))
+        refreshed: deque[FileSnapshot] = deque(maxlen=self._recent_files_capacity)
+        refreshed.extend(kept)
+        self._recent_file_snapshots = refreshed
+
     def _execute_one(self, call: ToolCall) -> ToolResult:
         """Execute a single tool call; capture unknown-tool and runtime errors."""
         try:
@@ -630,6 +671,9 @@ class AgentLoop:
         except UnknownToolError:
             content = f"Unknown tool: {call.name}"
             is_error = True
+
+        if call.name == "read_file" and not is_error:
+            self._capture_file_snapshot(call, content)
 
         if self._tool_result_store is None:
             return ToolResult(

@@ -37,3 +37,12 @@ exists in this file. Deleting or rewriting a prior block halts the loop.
 - **files changed**: `src/simple_coding_agent/snip.py`, `src/simple_coding_agent/models.py`, `src/simple_coding_agent/context.py`, `tests/test_snip.py`
 - **exit gate**: snip() deletes orphan tool_use AND orphan tool_result blocks; deletes paired cleared (tool_use,tool_result) oldest-first once summed cleared tokens >= `ancient_cleared_threshold_tokens` (default 10_000), evicting only until below threshold; inserts exactly one `SNIP_BOUNDARY` (new MessageType + Message.snip_boundary(), is_meta=True) at earliest deletion; SNIP_BOUNDARY filtered in `_normalize_messages` beside COMPACT_BOUNDARY → PASS (647 green, +15; 13 existing snip cases unmodified)
 - **notes**: orphan delete applies to all tools (API-validity GC, not P8 folding); deletion never creates new orphans so re-snip is a no-op (no double boundary).
+
+## M3 — done 2026-05-23
+
+- **commit**: `[ctx-pdf/M3]` autocompact-recent-files-attachment (SHA in git log)
+- **tests**: 647 → 670 (+23; +7 test_models.py, +3 test_compact.py, +6 test_context.py, +7 test_loop.py)
+- **mypy**: clean (21 files) | **ruff**: clean
+- **files changed**: `src/simple_coding_agent/models.py`, `src/simple_coding_agent/compact.py`, `src/simple_coding_agent/context.py`, `src/simple_coding_agent/loop.py`, `tests/test_models.py`, `tests/test_compact.py`, `tests/test_context.py`, `tests/test_loop.py`
+- **exit gate**: AgentLoop carries `_recent_file_snapshots: deque[FileSnapshot]` (default cap 5) populated in `_execute_one()` on read_file success (FileSnapshot frozen, path/content/captured_at); `_force_compact()` reads the deque once as a tuple and passes it into `ContextCompactor.compact(snapshots=...)` which stores it on the frozen `CompactSummary.recent_file_snapshots: tuple`; `ContextBuilder.build()` emits one ATTACHMENT user message per snapshot after the compact boundary, before kept messages, content `<recent-files>\n<file path="...">CONTENT</file>\n</recent-files>`, is_meta=True, never trimmed; `_normalize_messages()` now passes ATTACHMENT through (COMPACT_BOUNDARY/SNIP_BOUNDARY still filtered) → PASS (670 green, +23)
+- **notes**: snapshot captures raw read content BEFORE externalization; newest-wins per-path eviction; snapshots intentionally NOT persisted by session_store (re-captured on read).

@@ -5,9 +5,11 @@ from __future__ import annotations
 from simple_coding_agent.context import (
     ContextBudget,
     ContextBuilder,
+    _normalize_messages,
 )
 from simple_coding_agent.models import (
     CompactSummary,
+    FileSnapshot,
     Message,
     MessageType,
     Role,
@@ -127,6 +129,107 @@ def test_build_no_extras_returns_bare_system() -> None:
     assert result.system == "clean system"
     assert result.dropped_message_count == 0
     assert result.externalized_tool_results == 0
+
+
+# ---------------------------------------------------------------------------
+# M3: recent-file ATTACHMENT injection
+# ---------------------------------------------------------------------------
+
+_ATTACH_A = '<recent-files>\n<file path="a.py">AAA</file>\n</recent-files>'
+_ATTACH_B = '<recent-files>\n<file path="b.py">BBB</file>\n</recent-files>'
+
+
+def _summary_with_snapshots(*snaps: FileSnapshot) -> CompactSummary:
+    return CompactSummary(
+        boundary_uuid="b",
+        summary_text="summary body",
+        messages_summarized=1,
+        pre_token_count=100,
+        post_token_count=10,
+        recent_file_snapshots=tuple(snaps),
+    )
+
+
+def test_normalize_passes_attachment_through() -> None:
+    msg = Message.attachment("a.py", "AAA")
+    out = _normalize_messages([msg])
+    assert len(out) == 1
+    assert out[0]["role"] == "user"
+    assert out[0]["content"] == _ATTACH_A
+
+
+def test_normalize_still_filters_boundaries() -> None:
+    out = _normalize_messages([Message.compact_boundary(), Message.snip_boundary()])
+    assert out == []
+
+
+def test_build_emits_one_attachment_per_snapshot() -> None:
+    builder = ContextBuilder(budget=_large_budget())
+    t = Transcript()
+    t.append(Message.user("old turn"))
+    t.append(Message.compact_boundary())
+    t.append(Message.user("kept user turn"))
+    summary = _summary_with_snapshots(
+        FileSnapshot(path="a.py", content="AAA", captured_at="t1"),
+        FileSnapshot(path="b.py", content="BBB", captured_at="t2"),
+    )
+    result = builder.build(t, system="sys", compact_summary=summary)
+    assert result.messages[0]["content"] == _ATTACH_A
+    assert result.messages[1]["content"] == _ATTACH_B
+    assert result.messages[0]["role"] == "user"
+
+
+def test_build_attachments_precede_kept_messages() -> None:
+    builder = ContextBuilder(budget=_large_budget())
+    t = Transcript()
+    t.append(Message.compact_boundary())
+    t.append(Message.user("kept user turn"))
+    summary = _summary_with_snapshots(
+        FileSnapshot(path="a.py", content="AAA", captured_at="t1"),
+    )
+    result = builder.build(t, system="sys", compact_summary=summary)
+    assert result.messages[0]["content"] == _ATTACH_A
+    assert result.messages[1]["content"] == "kept user turn"
+
+
+def test_build_no_attachments_when_no_snapshots() -> None:
+    builder = ContextBuilder(budget=_large_budget())
+    t = Transcript()
+    t.append(Message.user("kept user turn"))
+    summary = CompactSummary(
+        boundary_uuid="b",
+        summary_text="s",
+        messages_summarized=1,
+        pre_token_count=10,
+        post_token_count=1,
+    )
+    result = builder.build(t, system="sys", compact_summary=summary)
+    assert all("recent-files" not in str(m["content"]) for m in result.messages)
+
+
+def test_build_no_attachments_when_summary_none() -> None:
+    builder = ContextBuilder(budget=_large_budget())
+    t = Transcript()
+    t.append(Message.user("kept user turn"))
+    result = builder.build(t, system="sys")
+    assert all("recent-files" not in str(m["content"]) for m in result.messages)
+
+
+def test_build_attachment_not_popped_preferentially_by_trim() -> None:
+    # Tiny budget forces the trim loop to drop kept messages, but the
+    # injected attachment must survive (it is added after trimming).
+    builder = ContextBuilder(budget=ContextBudget(max_tokens=200, reserved_output_tokens=0))
+    t = Transcript()
+    t.append(Message.compact_boundary())
+    for i in range(8):
+        t.append(Message.user("padding " + "z" * 400))
+        t.append(Message.assistant("reply " + "y" * 400))
+    summary = _summary_with_snapshots(
+        FileSnapshot(path="a.py", content="AAA", captured_at="t1"),
+    )
+    result = builder.build(t, system="sys", compact_summary=summary)
+    assert result.dropped_message_count > 0
+    assert result.messages[0]["content"] == _ATTACH_A
 
 
 # ---------------------------------------------------------------------------

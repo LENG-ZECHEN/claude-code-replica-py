@@ -208,6 +208,38 @@ def test_compact_returns_compact_summary() -> None:
     assert isinstance(result, CompactSummary)
 
 
+def test_compact_default_recent_file_snapshots_empty() -> None:
+    compactor = ContextCompactor(keep_recent=2)
+    budget = ContextBudget(max_tokens=200_000, reserved_output_tokens=0)
+    t = _make_transcript(3)
+    result = compactor.compact(t, budget)
+    assert result.recent_file_snapshots == ()
+
+
+def test_compact_stores_passed_snapshots() -> None:
+    from simple_coding_agent.models import FileSnapshot
+    snaps = (
+        FileSnapshot(path="a.py", content="AAA", captured_at="t1"),
+        FileSnapshot(path="b.py", content="BBB", captured_at="t2"),
+    )
+    compactor = ContextCompactor(keep_recent=2)
+    budget = ContextBudget(max_tokens=200_000, reserved_output_tokens=0)
+    t = _make_transcript(3)
+    result = compactor.compact(t, budget, snapshots=snaps)
+    assert result.recent_file_snapshots == snaps
+
+
+def test_compact_stores_snapshots_on_empty_transcript() -> None:
+    from simple_coding_agent.models import FileSnapshot
+    snaps = (FileSnapshot(path="a.py", content="AAA", captured_at="t1"),)
+    compactor = ContextCompactor(keep_recent=2)
+    budget = ContextBudget(max_tokens=200_000, reserved_output_tokens=0)
+    t = Transcript()
+    result = compactor.compact(t, budget, snapshots=snaps)
+    assert result.messages_summarized == 0
+    assert result.recent_file_snapshots == snaps
+
+
 def test_compact_summary_messages_summarized_count() -> None:
     compactor = ContextCompactor(keep_recent=4)
     budget = ContextBudget(max_tokens=200_000, reserved_output_tokens=0)

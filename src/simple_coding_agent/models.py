@@ -40,17 +40,18 @@ class Role(StrEnum):
 
 class MessageType(StrEnum):
     """Internal message classification.
-    Only TEXT / TOOL_USE / TOOL_RESULT messages ever reach the API.
-    COMPACT_BOUNDARY, SNIP_BOUNDARY, and ATTACHMENT are internal bookkeeping
-    types stripped by Transcript.normalize_for_api(), mirroring the filtering
-    in src/utils/messages.ts:normalizeMessagesForAPI().
+    TEXT / TOOL_USE / TOOL_RESULT messages reach the API. ATTACHMENT messages
+    also reach the API: they carry recent-file re-injection content and are
+    serialized as user-role messages (M3). COMPACT_BOUNDARY and SNIP_BOUNDARY
+    are internal bookkeeping markers stripped by _normalize_messages(),
+    mirroring the filtering in src/utils/messages.ts:normalizeMessagesForAPI().
     """
     TEXT = "text"
     TOOL_USE = "tool_use"
     TOOL_RESULT = "tool_result"
     COMPACT_BOUNDARY = "compact_boundary"
     SNIP_BOUNDARY = "snip_boundary"
-    ATTACHMENT = "attachment"
+    ATTACHMENT = "attachment"  # recent-file re-injection; serialized as a user message
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +175,27 @@ class Message:
             is_meta=True,
         )
 
+    @classmethod
+    def attachment(cls, path: str, content: str) -> Message:
+        """Create a recent-file re-injection message (M3).
+
+        Source: PDF §4 autoCompact post-restoration "recent files re-inject".
+        Unlike compact_boundary()/snip_boundary(), this is a USER-role message
+        that DOES reach the API: _normalize_messages() passes ATTACHMENT
+        through so the model sees the snapshotted file content without
+        re-reading. ContextBuilder.build() emits one per recent FileSnapshot
+        immediately after the compact boundary.
+        """
+        body = f'<recent-files>\n<file path="{path}">{content}</file>\n</recent-files>'
+        return cls(
+            uuid=_new_uuid(),
+            role=Role.USER,
+            content=body,
+            timestamp=_now_iso(),
+            type=MessageType.ATTACHMENT,
+            is_meta=True,
+        )
+
 
 # ---------------------------------------------------------------------------
 # AgentStep
@@ -195,15 +217,38 @@ class AgentStep:
 
 
 # ---------------------------------------------------------------------------
+# FileSnapshot
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class FileSnapshot:
+    """Point-in-time capture of a file's content at read_file time (M3).
+
+    Source: the "recent files" set re-injected after autoCompact in
+    src/services/compact/compact.ts. Captured live in AgentLoop._execute_one()
+    when a read_file call succeeds — BEFORE microcompact/snip can clear or
+    fold the in-transcript tool_result — so the content re-attached after
+    compaction is the genuine file body, not a cleared placeholder.
+    Immutable so a captured snapshot cannot drift after the fact.
+    """
+    path: str
+    content: str
+    captured_at: str
+
+
+# ---------------------------------------------------------------------------
 # CompactSummary
 # ---------------------------------------------------------------------------
 
-@dataclass
+@dataclass(frozen=True)
 class CompactSummary:
     """Result of a full compaction run.
 
     Source: CompactionResult in src/services/compact/compact.ts.
     The boundary_uuid links this summary to its Message.compact_boundary() marker.
+    Frozen (M3): callers rebind self._last_summary rather than mutate fields.
+    recent_file_snapshots carries the FileSnapshots captured before this
+    compaction so ContextBuilder.build() can re-attach them.
     """
     boundary_uuid: str
     summary_text: str           # model-generated 9-section summary (<analysis> stripped)
@@ -212,3 +257,4 @@ class CompactSummary:
     post_token_count: int
     restored_files: list[str] = field(default_factory=list)
     timestamp: str = field(default_factory=_now_iso)
+    recent_file_snapshots: tuple[FileSnapshot, ...] = ()

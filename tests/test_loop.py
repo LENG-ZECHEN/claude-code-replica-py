@@ -84,6 +84,19 @@ def _make_loop(
     return loop, real_transcript, registry
 
 
+def _read_file_tool(content: str = "FILE BODY", *, name: str = "read_file") -> Tool:
+    return Tool(
+        name=name,
+        description="read a file",
+        input_schema={
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+        fn=lambda path: content,
+    )
+
+
 class _PromptTooLongThenProvider:
     def __init__(self, script: list[PromptTooLongError | ProviderResponse]) -> None:
         self._script = list(script)
@@ -128,9 +141,9 @@ class _CountingCompactor(ContextCompactor):
     def should_compact(self, transcript: Transcript, budget: ContextBudget) -> bool:
         return False
 
-    def compact(self, transcript: Transcript, budget: ContextBudget):
+    def compact(self, transcript: Transcript, budget: ContextBudget, **kwargs):
         self.compact_calls += 1
-        return super().compact(transcript, budget)
+        return super().compact(transcript, budget, **kwargs)
 
 
 class _RecordingProjectMemory:
@@ -1058,3 +1071,105 @@ def test_provider_history_grows_with_each_step() -> None:
     loop, _, _ = _make_loop(p, tools=[t])
     loop.run("test")
     assert len(p.history) == 3
+
+
+# ---------------------------------------------------------------------------
+# M3: recent-file snapshot capture in _execute_one
+# ---------------------------------------------------------------------------
+
+def test_execute_one_captures_read_file_snapshot() -> None:
+    loop, _, _ = _make_loop(MockProvider([]), tools=[_read_file_tool("HELLO BODY")])
+    loop._execute_one(ToolCall(id="t1", name="read_file", input={"path": "a.py"}))
+    snaps = list(loop._recent_file_snapshots)
+    assert len(snaps) == 1
+    assert snaps[0].path == "a.py"
+    assert snaps[0].content == "HELLO BODY"
+    assert snaps[0].captured_at != ""
+
+
+def test_execute_one_skips_non_read_file_tool() -> None:
+    write_tool = Tool(
+        name="write_file",
+        description="write",
+        input_schema={"type": "object"},
+        fn=lambda path, content: "ok",
+    )
+    loop, _, _ = _make_loop(MockProvider([]), tools=[write_tool])
+    loop._execute_one(
+        ToolCall(id="t1", name="write_file", input={"path": "a.py", "content": "x"})
+    )
+    assert len(loop._recent_file_snapshots) == 0
+
+
+def test_execute_one_skips_failed_read_file() -> None:
+    def boom(path: str) -> str:
+        raise RuntimeError("cannot read")
+
+    failing = Tool(
+        name="read_file",
+        description="read",
+        input_schema={"type": "object", "properties": {"path": {"type": "string"}}},
+        fn=boom,
+    )
+    loop, _, _ = _make_loop(MockProvider([]), tools=[failing])
+    result = loop._execute_one(ToolCall(id="t1", name="read_file", input={"path": "a.py"}))
+    assert result.is_error is True
+    assert len(loop._recent_file_snapshots) == 0
+
+
+def test_recent_file_snapshots_capped_at_five() -> None:
+    loop, _, _ = _make_loop(MockProvider([]), tools=[_read_file_tool("BODY")])
+    for i in range(6):
+        loop._execute_one(
+            ToolCall(id=f"t{i}", name="read_file", input={"path": f"f{i}.py"})
+        )
+    snaps = list(loop._recent_file_snapshots)
+    assert len(snaps) == 5
+    # Oldest (f0.py) evicted; newest five retained.
+    assert [s.path for s in snaps] == ["f1.py", "f2.py", "f3.py", "f4.py", "f5.py"]
+
+
+def test_recent_file_snapshots_newest_wins_per_path() -> None:
+    loop, _, _ = _make_loop(MockProvider([]), tools=[_read_file_tool("OLD")])
+    loop._execute_one(ToolCall(id="t1", name="read_file", input={"path": "a.py"}))
+    # Swap the tool to return new content for the same path.
+    loop._tool_executor = ToolExecutor(_registry_with(_read_file_tool("NEW")))
+    loop._execute_one(ToolCall(id="t2", name="read_file", input={"path": "a.py"}))
+    snaps = list(loop._recent_file_snapshots)
+    assert len(snaps) == 1
+    assert snaps[0].content == "NEW"
+
+
+def test_force_compact_passes_snapshots_into_summary() -> None:
+    compactor = ContextCompactor(keep_recent=1, compact_threshold=1.0)
+    loop, t, _ = _make_loop(
+        MockProvider([]), tools=[_read_file_tool("BODY")], compactor=compactor
+    )
+    t.append(Message.user("hello there"))
+    loop._execute_one(ToolCall(id="t1", name="read_file", input={"path": "a.py"}))
+    loop._force_compact()
+    assert loop._last_summary is not None
+    assert [s.path for s in loop._last_summary.recent_file_snapshots] == ["a.py"]
+
+
+def test_force_compact_snapshot_is_point_in_time() -> None:
+    compactor = ContextCompactor(keep_recent=1, compact_threshold=1.0)
+    loop, t, _ = _make_loop(
+        MockProvider([]), tools=[_read_file_tool("BODY")], compactor=compactor
+    )
+    t.append(Message.user("hello there"))
+    loop._execute_one(ToolCall(id="t1", name="read_file", input={"path": "a.py"}))
+    loop._force_compact()
+    # A read AFTER compaction must not retroactively mutate the prior summary.
+    loop._execute_one(ToolCall(id="t2", name="read_file", input={"path": "b.py"}))
+    assert loop._last_summary is not None
+    assert [s.path for s in loop._last_summary.recent_file_snapshots] == ["a.py"]
+    # ...but the live deque now carries both.
+    assert {s.path for s in loop._recent_file_snapshots} == {"a.py", "b.py"}
+
+
+def _registry_with(*tools: Tool) -> ToolRegistry:
+    registry = ToolRegistry()
+    for t in tools:
+        registry.register(t)
+    return registry

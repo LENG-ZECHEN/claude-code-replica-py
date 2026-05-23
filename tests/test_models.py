@@ -1,8 +1,13 @@
 """Phase 2: data structure tests — written before implementation (TDD)."""
 
+import dataclasses
+
+import pytest
+
 from simple_coding_agent.models import (
     AgentStep,
     CompactSummary,
+    FileSnapshot,
     Message,
     MessageType,
     Role,
@@ -162,3 +167,77 @@ def test_compact_summary_with_restored_files() -> None:
         restored_files=["src/main.py", "README.md"],
     )
     assert len(s.restored_files) == 2
+
+
+# --- M3: FileSnapshot ---
+
+def test_file_snapshot_fields() -> None:
+    snap = FileSnapshot(
+        path="src/main.py",
+        content="print('hi')",
+        captured_at="2026-05-23T12:00:00+00:00",
+    )
+    assert snap.path == "src/main.py"
+    assert snap.content == "print('hi')"
+    assert snap.captured_at == "2026-05-23T12:00:00+00:00"
+
+
+def test_file_snapshot_is_frozen() -> None:
+    snap = FileSnapshot(path="a.py", content="x", captured_at="t")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        snap.content = "mutated"  # type: ignore[misc]
+
+
+# --- M3: Message.attachment factory ---
+
+def test_message_attachment_factory() -> None:
+    msg = Message.attachment("src/main.py", "print('hi')")
+    assert msg.role == Role.USER
+    assert msg.type == MessageType.ATTACHMENT
+    assert msg.is_meta is True
+    assert msg.content == (
+        '<recent-files>\n<file path="src/main.py">print(\'hi\')</file>\n'
+        "</recent-files>"
+    )
+
+
+# --- M3: CompactSummary.recent_file_snapshots ---
+
+def test_compact_summary_recent_file_snapshots_defaults_empty() -> None:
+    s = CompactSummary(
+        boundary_uuid="b",
+        summary_text="s",
+        messages_summarized=1,
+        pre_token_count=10,
+        post_token_count=1,
+    )
+    assert s.recent_file_snapshots == ()
+
+
+def test_compact_summary_is_frozen() -> None:
+    s = CompactSummary(
+        boundary_uuid="b",
+        summary_text="s",
+        messages_summarized=1,
+        pre_token_count=10,
+        post_token_count=1,
+    )
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        s.summary_text = "mutated"  # type: ignore[misc]
+
+
+def test_compact_summary_stores_recent_file_snapshots() -> None:
+    snaps = (
+        FileSnapshot(path="a.py", content="A", captured_at="t1"),
+        FileSnapshot(path="b.py", content="B", captured_at="t2"),
+    )
+    s = CompactSummary(
+        boundary_uuid="b",
+        summary_text="s",
+        messages_summarized=1,
+        pre_token_count=10,
+        post_token_count=1,
+        recent_file_snapshots=snaps,
+    )
+    assert s.recent_file_snapshots == snaps
+    assert isinstance(s.recent_file_snapshots, tuple)

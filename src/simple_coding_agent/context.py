@@ -79,7 +79,9 @@ def _normalize_messages(messages: list[Message]) -> list[dict[str, Any]]:
     """Convert a Message list to Anthropic API dicts, merging consecutive same-role.
 
     Mirrors normalizeMessagesForAPI() in src/utils/messages.ts:1989.
-    Filters: is_virtual, COMPACT_BOUNDARY, SNIP_BOUNDARY, ATTACHMENT, SYSTEM role.
+    Filters: is_virtual, COMPACT_BOUNDARY, SNIP_BOUNDARY, SYSTEM role.
+    ATTACHMENT messages (M3 recent-file re-injection) are NOT filtered — they
+    are user-role content the model must see and pass through unchanged.
     """
     result: list[dict[str, Any]] = []
 
@@ -89,7 +91,6 @@ def _normalize_messages(messages: list[Message]) -> list[dict[str, Any]]:
         if msg.type in (
             MessageType.COMPACT_BOUNDARY,
             MessageType.SNIP_BOUNDARY,
-            MessageType.ATTACHMENT,
         ):
             continue
         if msg.role == Role.SYSTEM:
@@ -133,6 +134,24 @@ def _normalize_messages(messages: list[Message]) -> list[dict[str, Any]]:
 
 def _estimate_messages_tokens(messages: list[dict[str, Any]]) -> int:
     return sum(ContextBudget.estimate_tokens(json.dumps(m)) for m in messages)
+
+
+def _attachment_dicts(
+    compact_summary: CompactSummary | None,
+) -> list[dict[str, Any]]:
+    """Build one API dict per recent FileSnapshot on the compact summary (M3).
+
+    Each snapshot becomes a separate ATTACHMENT user-role message; they are
+    normalized individually so consecutive attachments are not merged into a
+    single block (one snapshot == one ``<recent-files>`` message). Empty when
+    there is no summary or no snapshots.
+    """
+    if compact_summary is None:
+        return []
+    dicts: list[dict[str, Any]] = []
+    for snap in compact_summary.recent_file_snapshots:
+        dicts.extend(_normalize_messages([Message.attachment(snap.path, snap.content)]))
+    return dicts
 
 
 def _remove_orphan_tool_results(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -225,6 +244,13 @@ class ContextBuilder:
             api_messages.pop(0)
             dropped += 1
         api_messages = _remove_orphan_tool_results(api_messages)
+
+        # M3: re-attach recent-file snapshots immediately after the compact
+        # boundary (i.e. at the front, before the kept messages). They are
+        # added AFTER trimming so they are never popped to satisfy the budget
+        # and never counted toward keep_recent trimming decisions.
+        attachment_messages = _attachment_dicts(compact_summary)
+        api_messages = attachment_messages + api_messages
 
         estimated = system_tokens + _estimate_messages_tokens(api_messages)
 
