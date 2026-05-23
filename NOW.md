@@ -6,39 +6,24 @@
 
 ## Active initiative
 
-**ctx-mgmt-pdf-align** — see
-[`initiatives/current/`](./initiatives/current/).
+**None.**
 
-| | |
-|---|---|
-| Bootstrapped | 2026-05-23 |
-| Milestones | M1 → M4 |
-| Baseline commit | `8f1d98f` |
-| Baseline pytest | 615 passing |
-| Status | Bootstrapped, awaiting Phase 2 execution |
-
-Goal: align the 5-mechanism context-management pipeline with Claude
-Code v2.1.88's behaviour per the user's `claude_code_notes.pdf` rubric.
-Closes every gap except forked-agent + prompt-cache sharing.
-
-Next command:
-
-```
-./automation/scripts/run_all_milestones.sh
-```
+`initiatives/current/` is empty (`.gitkeep` only).
 
 ## Last completed initiative
 
-**obs-thr-harden** — see
-[`initiatives/_archive/2026-05-obs-thr-harden/`](./initiatives/_archive/2026-05-obs-thr-harden/).
+**ctx-mgmt-pdf-align** — see
+[`initiatives/_archive/2026-05-ctx-mgmt-pdf-align/`](./initiatives/_archive/2026-05-ctx-mgmt-pdf-align/).
 
 | | |
 |---|---|
-| Period | 2026-05-23–2026-05-23 |
-| Milestones | M1 → M3 |
-| Final commit | `4582997` |
-| pytest | 557 → 615 (+58) |
+| Period | 2026-05-23 – 2026-05-23 |
+| Milestones | M1 → M4 |
+| Final commit | `02f17f6` |
+| pytest | 615 → 704 (+89) |
 | mypy + ruff | clean |
+| English review | [`REVIEW.md`](./initiatives/_archive/2026-05-ctx-mgmt-pdf-align/REVIEW.md) |
+| Owner brief 中文 | [`OWNER_BRIEF.zh-CN.md`](./initiatives/_archive/2026-05-ctx-mgmt-pdf-align/OWNER_BRIEF.zh-CN.md) |
 
 ## How to start a new initiative
 

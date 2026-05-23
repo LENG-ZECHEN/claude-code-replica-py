@@ -1,0 +1,20 @@
+Append-only contract satisfied, working tree clean. **M2 complete.**
+
+## Exit-gate verification (each AND-clause, objectively)
+
+| Exit-gate clause | Evidence |
+|---|---|
+| pytest `--tb=no -q` count grown ≥12 from M1-post | `647 passed` vs M1-post **632** = **+15** ✓ |
+| snip() **deletes** orphan tool_use (missing result) AND orphan tool_result (missing use) | `test_snip_deletes_orphan_tool_use`, `..._orphan_tool_result`, `..._orphans_both_directions` pass ✓ |
+| snip() deletes paired cleared `(tool_use, tool_result)` once summed tokens ≥ `ancient_cleared_threshold_tokens` (default `10000`) | `test_snip_deletes_all_cleared_pairs_when_threshold_low`, `..._keeps_..._below_threshold`, `..._evicts_oldest_..._first`; default verified = `10000` ✓ |
+| every deleting snip() inserts exactly one `SNIP_BOUNDARY` at earliest deletion; new `MessageType.SNIP_BOUNDARY` + `Message.snip_boundary()` `is_meta=True`; filtered in `_normalize_messages()` like `COMPACT_BOUNDARY` | `test_snip_inserts_one_boundary_at_earliest_deletion`, `..._no_boundary_when_nothing_deleted`, `..._boundary_filtered_from_api_normalization`, `..._boundary_factory_properties`; factory prints `snip_boundary system is_meta= True` ✓ |
+
+## Summary
+
+- **Commit:** `70be001 [ctx-pdf/M2] engine-snip-orphan-and-ancient-pairs`
+- **Files:** `snip.py`, `models.py`, `context.py`, `tests/test_snip.py` (+15 cases), `PROGRESS.md`, `HANDOFF.md`
+- **Tests:** 632 → **647** (+15); mypy clean (21 files); ruff clean
+- **Scope honored:** no loop/cli/compact/tool_result_store changes; `_remove_orphan_tool_results()` left intact as backstop; engine snip call site `loop.py:215` unchanged; existing 13 snip cases unmodified.
+- **Append-only:** M1's PROGRESS block and `### M1` HANDOFF subsection both still present verbatim.
+
+One in-scope note logged for M3 in HANDOFF §5: `MessageType.ATTACHMENT` is currently in the `_normalize_messages` drop tuple — M3 must let ATTACHMENT pass through while keeping COMPACT_BOUNDARY/SNIP_BOUNDARY filtered. The shell loop can proceed to M3.

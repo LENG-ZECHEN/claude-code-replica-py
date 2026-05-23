@@ -1,0 +1,22 @@
+Committed as `646bf2c [ctx-pdf/M3]`. M3 is complete. Here is the exit-gate verification with each §2 AND-clause quoted against evidence:
+
+## Exit gate — verified
+
+**Clause 1** — *"pytest --tb=no -q passes with count grown by >=8 from M2-post baseline"*
+→ **PASS**: 647 → **670 (+23)**, mypy clean (21 files), ruff clean.
+
+**Clause 2** — *"AgentLoop carries a `_recent_file_snapshots: deque[FileSnapshot]` capped at N (default 5) populated inside `_execute_one()` when a `read_file` call succeeds (FileSnapshot = frozen dataclass with `path`, `content`, `captured_at`)"*
+→ **PASS**: `loop.py:__init__` adds the deque (`recent_files_capacity=5`, validated `≥1`); `_capture_file_snapshot` hook in `_execute_one` fires on `call.name == "read_file" and not is_error`. Tests: `test_execute_one_captures_read_file_snapshot`, `test_recent_file_snapshots_capped_at_five`, `test_recent_file_snapshots_newest_wins_per_path`, `test_file_snapshot_is_frozen`, `test_execute_one_skips_failed_read_file`.
+
+**Clause 3** — *"`_force_compact()` reads the current snapshot deque and passes it into `ContextCompactor.compact(snapshots=...)`, which stores it on the returned `CompactSummary.recent_file_snapshots: tuple`"*
+→ **PASS**: `_force_compact` reads `tuple(self._recent_file_snapshots)` once; `compact()` stores it on both construction paths; `CompactSummary` is frozen. Tests: `test_force_compact_passes_snapshots_into_summary`, `test_force_compact_snapshot_is_point_in_time`, `test_compact_stores_passed_snapshots`, `test_compact_stores_snapshots_on_empty_transcript`.
+
+**Clause 4** — *"`ContextBuilder.build()` … emits one `MessageType.ATTACHMENT` message per snapshot immediately after `COMPACT_BOUNDARY` and before the keep_recent messages; content `<recent-files>\n<file path="...">CONTENT</file>\n</recent-files>`, `is_meta=True`, NOT counted toward keep_recent budget trimming"*
+→ **PASS**: `_normalize_messages` no longer filters ATTACHMENT (only COMPACT_BOUNDARY/SNIP_BOUNDARY); `build()` prepends attachment dicts after the trim loop. Tests: `test_normalize_passes_attachment_through`, `test_normalize_still_filters_boundaries`, `test_build_emits_one_attachment_per_snapshot`, `test_build_attachments_precede_kept_messages`, `test_build_attachment_not_popped_preferentially_by_trim`, `test_message_attachment_factory`.
+
+## Exit ritual — done
+- **Commit**: `646bf2c [ctx-pdf/M3] autocompact-recent-files-attachment` (explicit paths, no `git add -A`).
+- **PROGRESS.md**: M3 block appended; M1 + M2 blocks preserved verbatim (append-only contract intact).
+- **HANDOFF.md**: `### M3` subsection appended (M1/M2 verbatim); Section 3 → 670; Section 4 adds the frozen-CompactSummary + ATTACHMENT-filtered-IN invariants; Section 5 rewritten for M4 (snip_history tool, `<msg uuid>` wrapping, 10k nudge) including the attachment-placement gotcha for `build()`.
+
+The shell loop can proceed to M4.

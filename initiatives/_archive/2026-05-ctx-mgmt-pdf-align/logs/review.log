@@ -1,0 +1,19 @@
+Phase 2B + 2C complete (staged multi-agent flow). Summary:
+
+- **All 4 milestones verified**: `[ctx-pdf/M1]` (`f4b9596`), `[ctx-pdf/M2]` (`70be001`), `[ctx-pdf/M3]` (`646bf2c`), `[ctx-pdf/M4]` (`02f17f6`)
+- **Quality gates green**: pytest 704 (+89 from baseline 615), mypy clean (22 source files), ruff clean
+- **Stage A subagents spawned in parallel**: code-reviewer + doc-curator-candidate-finder
+- **Main-agent reconciliation completed**: 4 code findings retained (2 MEDIUM + 2 LOW); 0 conflicts between subagents; phantom-685 finding independently verified via git worktree at 646bf2c (670 collected); 2 doc candidates applied, 1 subsystem-doc downgraded/skipped, 2 Tier C proposed
+- **Stage B narrator spawned after reconciliation**: demo-narrator (Chinese owner brief)
+- **REVIEW.md**: scorecards (prompt M1/M2 40, M3/M4 39; exec M1/M2 45, M3 44, M4 41), reconciled detail findings, Tier A/B/C decisions, wrap-up actions
+- **OWNER_BRIEF.zh-CN.md**: delivered features, demo commands, Before/After, owner-facing findings, resume/interview talking points
+- **Tier A auto-applied**: CLAUDE.md `### snip_tool_model.py` per-file summary appended
+- **Tier B**: created docs/DECISIONS/0002-coexisting-engine-and-model-snip.md + appended index row; standalone subsystem doc skipped (would duplicate)
+- **Archive committed** as `[ctx-pdf/wrap]`
+- **All wrap-gate checks pass**
+- **Main session stayed alive on --remote-control** for user attach.
+
+Key audit findings flagged in REVIEW.md / OWNER_BRIEF.zh-CN.md:
+- M4 self-reported a phantom test baseline (685 → 704 +19); true is 670 → 704 (+34). Doc-accuracy defect, gate still satisfied. (MEDIUM)
+- Prepended attachment/nudge user-role dicts (context.py:278-281) can yield consecutive same-role API messages; never exercised against a real endpoint. (MEDIUM)
+- evaluate_snip_request([]) succeeds with a no-op replace_all instead of refusing; schema lacks minItems:1. (LOW)

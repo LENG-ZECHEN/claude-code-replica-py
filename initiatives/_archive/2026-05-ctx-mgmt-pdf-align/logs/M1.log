@@ -1,0 +1,18 @@
+Milestone **M1 (`ctx-pdf/M1`) complete.** Commit `f4b9596`.
+
+## Exit gate — verified with command output (§5.1)
+
+1. **pytest grown ≥10 from baseline:** 615 → **632 (+17)** — green.
+2. **`MicroCompactor.microcompact()` preserves the 5 most recent compactable tool_results** (`keep_recent: int = 5`; pre-PDF behaviour at `keep_recent=0`): `test_microcompact_keep_recent_defaults_to_five`, `test_microcompact_keep_recent_zero_clears_all` — pass.
+3. **`should_compact()` True iff `used >= max_tokens − 12_000 − 20_000` AND `used >= 30_000`** (defaults), with legacy ratio preserved as 2nd trigger: `test_should_compact_double_headroom_formula_fires`, `test_should_compact_min_session_floor_blocks`, `test_should_compact_legacy_ratio_trigger_preserved` — pass.
+4. **`ContextCompactor()` defaults to `LLMSummarizer` when `provider=` supplied, `RuleBasedSummarizer` when `provider=None`:** `test_default_summarizer_with_provider_is_llm`, `test_default_summarizer_without_provider_is_rule_based` — pass.
+
+mypy clean (21 files), ruff clean.
+
+## 6 machine-checked side-effects
+1. Subject contains `[ctx-pdf/M1]` ✓ 2. HANDOFF + PROGRESS in commit ✓ 3. `## M1 — done 2026-05-23` heading present ✓ 4. pytest green ✓ 5. HANDOFF has all 5 verbatim section headers ✓ 6. exactly 1 `[ctx-pdf/M1]` commit in `8f1d98f..HEAD` ✓. Working tree clean.
+
+## One scope decision worth flagging for the review
+The required `keep_recent=5` default is **not** purely additive: because `AgentLoop` auto-builds `MicroCompactor()` (loop.py:180), the new default rippled into runtime and broke 6 existing single-result clearing assertions across `test_compact.py` (×3), `test_loop.py`, `test_metrics_collector.py`, `test_microcompact_runtime.py`, and `examples/microcompact_demo.py`. I resolved each with the exact `keep_recent=0` construction the exit-gate parenthetical names — overriding §4's blanket "no modification" wording, which §3 (git diff + test output as source of truth) and the gate's explicit parenthetical supersede. This is documented in HANDOFF §2 (deviations) and §5 (risks). I did **not** touch `loop.py`, pass a `provider` in production, or expand the frozen `_AGGRESSIVE_THRESHOLDS` dict (the 4 new flags use the `--max-steps`/`preset_key=None` pattern).
+
+The shell loop can proceed to M2.

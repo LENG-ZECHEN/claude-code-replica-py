@@ -12,7 +12,7 @@ For the active-initiative pointer and the bootstrap procedure, see
 
 | Slug | Status | Period | Milestones | Final commit |
 |---|---|---|---|---|
-| [ctx-mgmt-pdf-align](./current/) | bootstrapped | 2026-05-23 – | M1 → M4 | `(pending)` |
+| _(none)_ | — | — | — | — |
 
 ## Archived
 
@@ -21,6 +21,7 @@ For the active-initiative pointer and the bootstrap procedure, see
 | [2026-05-runtime-activation](./_archive/2026-05-runtime-activation/) | complete | 2026-05-21 | M1 → M5 | `de3ecad` |
 | [2026-05-observable-thresholds](./_archive/2026-05-observable-thresholds/) | complete | 2026-05-22 – 2026-05-23 | M1 → M3 | `026db2e` |
 | [2026-05-obs-thr-harden](./_archive/2026-05-obs-thr-harden/) | complete | 2026-05-23 | M1 → M3 | `4582997` |
+| [2026-05-ctx-mgmt-pdf-align](./_archive/2026-05-ctx-mgmt-pdf-align/) | complete | 2026-05-23 | M1 → M4 | `02f17f6` |
 
 ## Folder shape (per initiative)
 
