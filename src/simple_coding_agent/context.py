@@ -79,14 +79,18 @@ def _normalize_messages(messages: list[Message]) -> list[dict[str, Any]]:
     """Convert a Message list to Anthropic API dicts, merging consecutive same-role.
 
     Mirrors normalizeMessagesForAPI() in src/utils/messages.ts:1989.
-    Filters: is_virtual, COMPACT_BOUNDARY, ATTACHMENT, SYSTEM role.
+    Filters: is_virtual, COMPACT_BOUNDARY, SNIP_BOUNDARY, ATTACHMENT, SYSTEM role.
     """
     result: list[dict[str, Any]] = []
 
     for msg in messages:
         if msg.is_virtual:
             continue
-        if msg.type in (MessageType.COMPACT_BOUNDARY, MessageType.ATTACHMENT):
+        if msg.type in (
+            MessageType.COMPACT_BOUNDARY,
+            MessageType.SNIP_BOUNDARY,
+            MessageType.ATTACHMENT,
+        ):
             continue
         if msg.role == Role.SYSTEM:
             continue

@@ -7,10 +7,12 @@ redundant tool_result bodies with a stable marker.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, replace
 from typing import Any
 
 from .compact import CLEARED_TOOL_RESULT_CONTENT
+from .context import ContextBudget
 from .models import Message, Role, ToolCall, ToolResult
 from .trace import NullTracer, Tracer
 
@@ -31,6 +33,52 @@ _DEFAULT_KEEP_RECENT = 3
 _COMPACTABLE_TOOLS = KEEP_LATEST_PER_PATH | frozenset(KEEP_LATEST_GLOBAL)
 _PATH_THRESHOLD = 3
 _TOTAL_PAIR_THRESHOLD = 10
+
+# Engine snip deletes microcompact-cleared (tool_use, tool_result) pairs once
+# the summed estimated tokens of all such placeholders reach this threshold.
+_DEFAULT_ANCIENT_CLEARED_THRESHOLD_TOKENS = 10_000
+
+
+def _estimate_message_tokens(message: Message) -> int:
+    """Estimate the token cost of one message via the char/4 API heuristic.
+
+    Serializes the message in the same shape ``_normalize_messages`` uses
+    (role + content blocks) so the estimate tracks what is actually sent to
+    the API, then defers to ``ContextBudget.estimate_tokens``.
+    """
+    if isinstance(message.content, str):
+        payload: dict[str, Any] = {"role": message.role.value, "content": message.content}
+    else:
+        blocks: list[dict[str, Any]] = []
+        for item in message.content:
+            if isinstance(item, ToolCall):
+                blocks.append(
+                    {"type": "tool_use", "id": item.id, "name": item.name, "input": item.input}
+                )
+            elif isinstance(item, ToolResult):
+                blocks.append(item.to_api_block())
+        payload = {"role": message.role.value, "content": blocks}
+    return ContextBudget.estimate_tokens(json.dumps(payload))
+
+
+def _cleared_messages(messages: list[Message]) -> list[tuple[int, int]]:
+    """Return ``(message_index, estimated_tokens)`` for each message that holds
+    at least one microcompact-cleared ToolResult, oldest-first (ascending)."""
+    out: list[tuple[int, int]] = []
+    for index, msg in enumerate(messages):
+        if not isinstance(msg.content, list):
+            continue
+        if any(
+            isinstance(item, ToolResult) and item.content == CLEARED_TOOL_RESULT_CONTENT
+            for item in msg.content
+        ):
+            out.append((index, _estimate_message_tokens(msg)))
+    return out
+
+
+def _cleared_token_total(messages: list[Message]) -> int:
+    """Sum of estimated tokens across all messages bearing a cleared ToolResult."""
+    return sum(tokens for _, tokens in _cleared_messages(messages))
 
 
 @dataclass(frozen=True)
@@ -70,14 +118,21 @@ class SnipTool:
         self,
         *,
         keep_recent: int = _DEFAULT_KEEP_RECENT,
+        ancient_cleared_threshold_tokens: int = _DEFAULT_ANCIENT_CLEARED_THRESHOLD_TOKENS,
         tracer: Tracer | None = None,
     ) -> None:
         if keep_recent < 1:
             raise ValueError("keep_recent must be >= 1")
+        if ancient_cleared_threshold_tokens < 1:
+            raise ValueError("ancient_cleared_threshold_tokens must be >= 1")
         self._keep_recent = keep_recent
+        self._ancient_cleared_threshold_tokens = ancient_cleared_threshold_tokens
         self._tracer: Tracer = tracer or NullTracer()
 
     def should_snip(self, messages: list[Message]) -> bool:
+        if _cleared_token_total(messages) >= self._ancient_cleared_threshold_tokens:
+            return True
+
         path_counts: dict[str, int] = {}
         for msg in messages:
             if msg.role != Role.ASSISTANT or not isinstance(msg.content, list):
@@ -116,32 +171,120 @@ class SnipTool:
         positions_to_snip = self._positions_to_snip(
             messages, tool_infos, keep_recent=self._keep_recent
         )
+        positions_to_delete, earliest_deletion = self._deletion_plan(messages)
 
         snipped: list[Message] = []
+        boundary_inserted = False
         for message_index, msg in enumerate(messages):
+            if (
+                earliest_deletion is not None
+                and not boundary_inserted
+                and message_index == earliest_deletion
+            ):
+                snipped.append(Message.snip_boundary())
+                boundary_inserted = True
+
             if not isinstance(msg.content, list):
                 snipped.append(replace(msg))
                 continue
 
             new_content: list[ToolCall | ToolResult] = []
             for item_index, item in enumerate(msg.content):
+                if (message_index, item_index) in positions_to_delete:
+                    continue
                 if isinstance(item, ToolCall):
                     new_content.append(_copy_tool_call(item))
-                    continue
-
-                if (message_index, item_index) in positions_to_snip:
+                elif (message_index, item_index) in positions_to_snip:
                     new_content.append(replace(item, content=SNIPPED_CONTENT))
                 else:
                     new_content.append(replace(item))
 
+            # A message whose block list is emptied purely by deletion is
+            # dropped; messages that still carry blocks survive intact.
+            if msg.content and not new_content:
+                continue
             snipped.append(replace(msg, content=new_content))
 
         self._tracer.emit(
             "snip",
             messages=len(snipped),
             snipped=len(positions_to_snip),
+            deleted=len(positions_to_delete),
         )
         return snipped
+
+    def _deletion_plan(
+        self, messages: list[Message]
+    ) -> tuple[set[tuple[int, int]], int | None]:
+        """Compute block positions to delete and the earliest deletion index.
+
+        Two deletion phases: (1) orphan ``tool_use`` / ``tool_result`` blocks
+        whose paired counterpart is missing, deleted unconditionally; and
+        (2) paired microcompact-cleared ``(tool_use, tool_result)`` blocks,
+        deleted oldest-first once their summed token estimate reaches the
+        configured threshold and only until it drops back below it.
+        """
+        use_ids: set[str] = set()
+        result_ids: set[str] = set()
+        use_positions: dict[str, tuple[int, int]] = {}
+        for message_index, msg in enumerate(messages):
+            if not isinstance(msg.content, list):
+                continue
+            for item_index, item in enumerate(msg.content):
+                if isinstance(item, ToolCall):
+                    use_ids.add(item.id)
+                    use_positions[item.id] = (message_index, item_index)
+                elif isinstance(item, ToolResult):
+                    result_ids.add(item.tool_use_id)
+
+        to_delete: set[tuple[int, int]] = set()
+
+        # Phase 2: orphans (both directions).
+        for message_index, msg in enumerate(messages):
+            if not isinstance(msg.content, list):
+                continue
+            for item_index, item in enumerate(msg.content):
+                if isinstance(item, ToolCall) and item.id not in result_ids:
+                    to_delete.add((message_index, item_index))
+                elif isinstance(item, ToolResult) and item.tool_use_id not in use_ids:
+                    to_delete.add((message_index, item_index))
+
+        # Phase 3: ancient cleared pairs, evicted oldest-first under threshold.
+        cleared = _cleared_messages(messages)
+        running_total = sum(tokens for _, tokens in cleared)
+        if running_total >= self._ancient_cleared_threshold_tokens:
+            for message_index, tokens in cleared:
+                if running_total < self._ancient_cleared_threshold_tokens:
+                    break
+                if self._delete_cleared_pair(messages[message_index], message_index,
+                                             use_positions, to_delete):
+                    running_total -= tokens
+
+        earliest_deletion = min((mi for mi, _ in to_delete), default=None)
+        return to_delete, earliest_deletion
+
+    @staticmethod
+    def _delete_cleared_pair(
+        msg: Message,
+        message_index: int,
+        use_positions: dict[str, tuple[int, int]],
+        to_delete: set[tuple[int, int]],
+    ) -> bool:
+        """Mark every paired cleared ToolResult in ``msg`` plus its tool_use for
+        deletion. Returns True if at least one pair was marked."""
+        removed = False
+        if not isinstance(msg.content, list):
+            return False
+        for item_index, item in enumerate(msg.content):
+            if (
+                isinstance(item, ToolResult)
+                and item.content == CLEARED_TOOL_RESULT_CONTENT
+                and item.tool_use_id in use_positions
+            ):
+                to_delete.add((message_index, item_index))
+                to_delete.add(use_positions[item.tool_use_id])
+                removed = True
+        return removed
 
     @staticmethod
     def _tool_infos_by_id(messages: list[Message]) -> dict[str, _ToolInfo | None]:

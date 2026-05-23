@@ -41,14 +41,15 @@ class Role(StrEnum):
 class MessageType(StrEnum):
     """Internal message classification.
     Only TEXT / TOOL_USE / TOOL_RESULT messages ever reach the API.
-    COMPACT_BOUNDARY and ATTACHMENT are internal bookkeeping types stripped
-    by Transcript.normalize_for_api(), mirroring the filtering in
-    src/utils/messages.ts:normalizeMessagesForAPI().
+    COMPACT_BOUNDARY, SNIP_BOUNDARY, and ATTACHMENT are internal bookkeeping
+    types stripped by Transcript.normalize_for_api(), mirroring the filtering
+    in src/utils/messages.ts:normalizeMessagesForAPI().
     """
     TEXT = "text"
     TOOL_USE = "tool_use"
     TOOL_RESULT = "tool_result"
     COMPACT_BOUNDARY = "compact_boundary"
+    SNIP_BOUNDARY = "snip_boundary"
     ATTACHMENT = "attachment"
 
 
@@ -152,6 +153,24 @@ class Message:
             content="Conversation compacted",
             timestamp=_now_iso(),
             type=MessageType.COMPACT_BOUNDARY,
+            is_meta=True,
+        )
+
+    @classmethod
+    def snip_boundary(cls) -> Message:
+        """Create the fence marker inserted where engine snip deleted blocks.
+
+        Source: snip_boundary marker in the engine-side SnipTool (PDF §3
+        snip "真删除 — 不留占位 + snip_boundary marker"). Like
+        compact_boundary(), it is a SYSTEM-role, is_meta=True message that is
+        filtered out of API serialization by _normalize_messages().
+        """
+        return cls(
+            uuid=_new_uuid(),
+            role=Role.SYSTEM,
+            content="History snipped",
+            timestamp=_now_iso(),
+            type=MessageType.SNIP_BOUNDARY,
             is_meta=True,
         )
 
