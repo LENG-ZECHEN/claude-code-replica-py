@@ -48,6 +48,28 @@ class Tracer(Protocol):
         ...
 
 
+def _render_value(value: Any) -> str:
+    """Render one trace field value as a single, parse-stable token.
+
+    - ``bool`` / ``int`` / ``float`` / ``None`` -> ``str(value)``
+    - ``str`` without whitespace                -> the string unchanged
+    - ``str`` with whitespace, or any other type -> ``repr(value)``
+
+    Whitespace-containing strings and structured values (dict / list /
+    ...) are repr-quoted so the surrounding wrappers (``'`` / ``"`` / ``{``)
+    let a downstream parser distinguish "value continues" from "next
+    field" even though the locked line itself stays space-separated.
+    ``visibility_full_demo._parse_trace_events`` drops ``=``-less
+    fragments, so adjacent ``k=v`` fields survive; M3 extends that parser
+    to read the quoted form whole.
+    """
+    if isinstance(value, str):
+        return repr(value) if any(ch.isspace() for ch in value) else value
+    if value is None or isinstance(value, (bool, int, float)):
+        return str(value)
+    return repr(value)
+
+
 class NullTracer:
     """No-op tracer used everywhere by default.
 
@@ -69,12 +91,19 @@ class StderrTracer:
     def emit(self, channel: str, /, **fields: Any) -> None:
         if fields:
             rendered = " ".join(
-                f"{key}={fields[key]}" for key in sorted(fields)
+                f"{key}={_render_value(fields[key])}" for key in sorted(fields)
             )
             line = f"[trace] [{channel}] {rendered}\n"
         else:
             line = f"[trace] [{channel}]\n"
-        self._stream.write(line)
+        try:
+            self._stream.write(line)
+        except (OSError, ValueError):
+            # A closed file handle or broken pipe raises here. The tracer is
+            # advisory diagnostic output and must never propagate a writer
+            # error into the agent turn. Only (OSError, ValueError) are
+            # swallowed; KeyboardInterrupt / SystemExit / other errors flow.
+            return
         # Flush so live REPL viewers see the line immediately rather than
         # only when the buffer fills. ``sys.stderr`` is line-buffered when
         # connected to a terminal but block-buffered when redirected.

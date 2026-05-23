@@ -20,3 +20,12 @@ Block shape (per automation/templates/progress_entry.md):
 - exit gate: <quote from §2 of the milestone prompt> -> PASS (<one-line evidence>)
 - notes: <optional, ≤1 line>
 -->
+
+## M1 — done 2026-05-23
+
+- commit: `71d3c80` `[obs-thr-hd/M1] harden StderrTracer + expand leak/roundtrip coverage`
+- tests: 557 -> 584 (+27)
+- mypy: clean | ruff: clean
+- files changed: `src/simple_coding_agent/trace.py`, `tests/test_trace.py`
+- exit gate: pytest green total >= 565 + test_trace.py gains 4-shape secret-leak parametrize, closed-stream guard test, reactive e2e, whitespace/non-string demo-parser roundtrip -> PASS (584 passed; named tests green; mypy+ruff clean)
+- notes: closed-stream guard catches only (OSError, ValueError); `_render_value` repr-quotes whitespace/non-scalar values.
