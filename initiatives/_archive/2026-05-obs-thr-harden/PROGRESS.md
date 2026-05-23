@@ -23,7 +23,7 @@ Block shape (per automation/templates/progress_entry.md):
 
 ## M1 — done 2026-05-23
 
-- commit: `71d3c80` `[obs-thr-hd/M1] harden StderrTracer + expand leak/roundtrip coverage`
+- commit: `6284ea8` `[obs-thr-hd/M1] harden StderrTracer + expand leak/roundtrip coverage`
 - tests: 557 -> 584 (+27)
 - mypy: clean | ruff: clean
 - files changed: `src/simple_coding_agent/trace.py`, `tests/test_trace.py`
@@ -32,7 +32,7 @@ Block shape (per automation/templates/progress_entry.md):
 
 ## M2 — done 2026-05-23
 
-- commit: `30945de` [obs-thr-hd/M2] fix preset bug + 8-field precedence matrix + MicroCompactor guard test
+- commit: `4056370` [obs-thr-hd/M2] fix preset bug + 8-field precedence matrix + MicroCompactor guard test
 - tests: 584 -> 605 (+21)
 - mypy: clean | ruff: clean
 - files changed: `src/simple_coding_agent/cli.py`,

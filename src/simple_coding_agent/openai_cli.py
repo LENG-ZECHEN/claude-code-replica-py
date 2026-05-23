@@ -38,7 +38,6 @@ from .transcript import Transcript
 _DEFAULT_MAX_TOKENS = 1024
 _DEFAULT_CONTEXT_TOKENS = 200_000
 _DEFAULT_RESERVED_OUTPUT_TOKENS = 8_192
-_DEFAULT_MAX_STEPS = 10
 _DEFAULT_SYSTEM_PROMPT = (
     "You are a coding assistant. Use the provided tools when you need "
     "to inspect or write workspace files."

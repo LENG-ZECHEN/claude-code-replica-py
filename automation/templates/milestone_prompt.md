@@ -197,6 +197,27 @@ The shell loop's first exit-gate check is `git log -1 | grep -qF
 "[{{COMMIT_PREFIX}}/{{MILESTONE_ID}}]"`. Without this commit the
 loop halts and subsequent milestones will NOT run.
 
+**Do NOT `git commit --amend` to embed this commit's own SHA into
+PROGRESS.md / HANDOFF.md.** Reading `git rev-parse HEAD` before
+amending captures the pre-amend SHA, which becomes unreachable after
+the amend rewrites the commit (`git merge-base --is-ancestor` will
+return false for the recorded SHA). The garbage collector will
+eventually delete that object, breaking `git show <sha>`
+traceability. If you need the SHA in PROGRESS.md / HANDOFF.md,
+choose one of:
+
+- **Omit the SHA** entirely from the body — cite "HEAD at commit
+  time" and rely on `[{{COMMIT_PREFIX}}/{{MILESTONE_ID}}]` to locate
+  the commit; or
+- **Add a second** `[{{COMMIT_PREFIX}}/{{MILESTONE_ID}}]` commit
+  that fills in the first commit's SHA. See `obs-thr-harden` M3 →
+  `4582997` ("fill M3 commit SHA (9b00767) into roadmap + handoff +
+  progress") for the canonical two-commit pattern.
+
+The shell loop's exit-gate check counts ALL `[{{COMMIT_PREFIX}}/{{MILESTONE_ID}}]`
+commits in `baseline_commit..HEAD`, so a follow-up SHA-fill commit
+does not interfere.
+
 ### 3. Append a block to `initiatives/current/PROGRESS.md`
 
 Use the terse format in `automation/templates/progress_entry.md`. One

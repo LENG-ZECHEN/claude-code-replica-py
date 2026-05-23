@@ -18,7 +18,7 @@
 
 ### M1
 
-- **commit**: `71d3c80` `[obs-thr-hd/M1] harden StderrTracer + expand leak/roundtrip coverage`
+- **commit**: `6284ea8` `[obs-thr-hd/M1] harden StderrTracer + expand leak/roundtrip coverage`
 - **files changed**: `src/simple_coding_agent/trace.py`, `tests/test_trace.py`
 - **tests added**: `tests/test_trace.py` (+27 cases: 13 `_render_value` units, 4-shape `test_secret_leak_negative` parametrize, 2 closed-stream guards, 1 reactive e2e, 1 whitespace roundtrip + 3 non-string roundtrip, 1 nine-channel scalar-format regression, plus helper-edge cases). Total: 557 → 584
 - **behavior implemented**: `StderrTracer.emit` no longer crashes the
@@ -52,7 +52,7 @@
 
 ### M2
 
-- **commit**: `30945de` `[obs-thr-hd/M2] fix preset bug + 8-field precedence matrix + MicroCompactor guard test`
+- **commit**: `4056370` `[obs-thr-hd/M2] fix preset bug + 8-field precedence matrix + MicroCompactor guard test`
 - **files changed**: `src/simple_coding_agent/cli.py`,
   `src/simple_coding_agent/openai_cli.py`, `tests/test_repl.py`,
   `tests/test_openai_cli_repl.py`, `tests/test_compact.py`
