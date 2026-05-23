@@ -43,7 +43,7 @@ Block shape (per automation/templates/progress_entry.md):
 
 ## M3 — done 2026-05-23
 
-- commit: `PENDING_M3` `[obs-thr-hd/M3] demo collision fences + NullTracer perf assert + doc sync` (HEAD is source of truth; sha recorded pre-amend)
+- commit: `9b00767` `[obs-thr-hd/M3] demo collision fences + NullTracer perf assert + doc sync` (HEAD is source of truth; sha recorded pre-amend)
 - tests: 605 -> 615 (+10)
 - mypy: clean | ruff: clean
 - files changed: `examples/visibility_full_demo.py`,

@@ -114,7 +114,7 @@
 
 ### M3
 
-- **commit**: `PENDING_M3` `[obs-thr-hd/M3] demo collision fences + NullTracer perf assert + doc sync` (HEAD is source of truth; sha recorded pre-amend)
+- **commit**: `9b00767` `[obs-thr-hd/M3] demo collision fences + NullTracer perf assert + doc sync` (HEAD is source of truth; sha recorded pre-amend)
 - **files changed**: `examples/visibility_full_demo.py`,
   `tests/test_visibility_full_demo.py`, `tests/test_trace.py`,
   `tests/test_cli.py`, `README.md`, `CLAUDE.md` (plus the three
@@ -168,7 +168,7 @@
     `preset value applies`), which is more robust to argparse line-wrap
     than a raw-block snapshot. The M2-pinned phrase is matched exactly.
 - **known limitations**:
-  - The recorded commit sha `PENDING_M3` is substituted post-commit and
+  - The recorded commit sha `9b00767` is substituted post-commit and
     then folded in via `git commit --amend`, so the value written here
     is one amend-generation behind the final HEAD (same convention M1's
     `71d3c80` followed). `git -C python-replica log -1` is authoritative.
@@ -177,7 +177,7 @@
 
 > Re-verify these numbers before starting. Do not trust this list blindly.
 
-- **last commit**: `PENDING_M3` — `git -C python-replica log --oneline -1`
+- **last commit**: `9b00767` — `git -C python-replica log --oneline -1`
   (HEAD is the source of truth; the recorded sha is pre-amend)
 - **tests**: 615 passing (was 605 after `M2`, delta +10)
 - **mypy**: clean
