@@ -1,0 +1,328 @@
+{
+  "version": 1,
+  "transcript": {
+    "version": 1,
+    "messages": [
+      {
+        "uuid": "83d3ba2d-1c92-4885-990e-d9423e38f73a",
+        "role": "user",
+        "timestamp": "2026-05-23T17:51:22.756470+00:00",
+        "type": "text",
+        "is_meta": false,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": "Read f1.py, f2.py, f3.py, f4.py, f5.py, f6.py, f7.py one at a time using read_file, then tell me which file defines TARGET_FUNC."
+      },
+      {
+        "uuid": "914848e9-34f2-49e0-9f70-918f8b1f64eb",
+        "role": "assistant",
+        "timestamp": "2026-05-23T17:51:26.340483+00:00",
+        "type": "tool_use",
+        "is_meta": false,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "call_52d9b30b506d414db3826b90",
+            "name": "read_file",
+            "input": {
+              "path": "f1.py"
+            }
+          }
+        ]
+      },
+      {
+        "uuid": "b9aa3d89-bb8d-458e-b2f9-b21d48547a55",
+        "role": "assistant",
+        "timestamp": "2026-05-23T17:51:28.226798+00:00",
+        "type": "tool_use",
+        "is_meta": false,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "call_49c0f97f2ad842a28539e930",
+            "name": "read_file",
+            "input": {
+              "path": "f2.py"
+            }
+          }
+        ]
+      },
+      {
+        "uuid": "9a2f9aa5-5c0b-4a3c-adfa-13e204fc9421",
+        "role": "assistant",
+        "timestamp": "2026-05-23T17:51:29.900763+00:00",
+        "type": "tool_use",
+        "is_meta": false,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "call_55787549e6cd494093edcd41",
+            "name": "read_file",
+            "input": {
+              "path": "f3.py"
+            }
+          }
+        ]
+      },
+      {
+        "uuid": "9d02fda3-a331-4842-bdbf-bfbcc9fc48de",
+        "role": "user",
+        "timestamp": "2026-05-23T17:51:29.901976+00:00",
+        "type": "tool_result",
+        "is_meta": true,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "call_55787549e6cd494093edcd41",
+            "content": "# module f3\nVALUE_3_1 = 301  # filler to grow the read result past the nudge window\nVALUE_3_2 = 302  # filler to grow the read result past the nudge window\nVALUE_3_3 = 303  # filler to grow the read result past the nudge window\nVALUE_3_4 = 304  # filler to grow the read result past the nudge window\nVALUE_3_5 = 305  # filler to grow the read result past the nudge window\nVALUE_3_6 = 306  # filler to grow the read result past the nudge window\nVALUE_3_7 = 307  # filler to grow the read result past the nudge window\nVALUE_3_8 = 308  # filler to grow the read result past the nudge window\nVALUE_3_9 = 309  # filler to grow the read result past the nudge window\nVALUE_3_10 = 310  # filler to grow the read result past the nudge window\nVALUE_3_11 = 311  # filler to grow the read result past the nudge window\nVALUE_3_12 = 312  # filler to grow the read result past the nudge window\nVALUE_3_13 = 313  # filler to grow the read result past the nudge window\nVALUE_3_14 = 314  # filler to grow the read result past the nudge window\nVALUE_3_15 = 315  # filler to grow the read result past the nudge window\nVALUE_3_16 = 316  # filler to grow the read result past the nudge window\nVALUE_3_17 = 317  # filler to grow the read result past the nudge window\nVALUE_3_18 = 318  # filler to grow the read result past the nudge window\nVALUE_3_19 = 319  # filler to grow the read result past the nudge window\nVALUE_3_20 = 320  # filler to grow the read result past the nudge window\n",
+            "is_error": false,
+            "persisted_path": null,
+            "original_size": null
+          }
+        ]
+      },
+      {
+        "uuid": "cbabc798-c669-40f6-9fd0-61861f5dbbfd",
+        "role": "assistant",
+        "timestamp": "2026-05-23T17:51:33.468323+00:00",
+        "type": "tool_use",
+        "is_meta": false,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "call_6d1ded81b1cc442087c0e7fc",
+            "name": "read_file",
+            "input": {
+              "path": "f4.py"
+            }
+          }
+        ]
+      },
+      {
+        "uuid": "3f107437-2326-4642-bac5-b5fd1d085c07",
+        "role": "user",
+        "timestamp": "2026-05-23T17:51:33.469724+00:00",
+        "type": "tool_result",
+        "is_meta": true,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "call_6d1ded81b1cc442087c0e7fc",
+            "content": "# module f4\nVALUE_4_1 = 401  # filler to grow the read result past the nudge window\nVALUE_4_2 = 402  # filler to grow the read result past the nudge window\nVALUE_4_3 = 403  # filler to grow the read result past the nudge window\nVALUE_4_4 = 404  # filler to grow the read result past the nudge window\nVALUE_4_5 = 405  # filler to grow the read result past the nudge window\nVALUE_4_6 = 406  # filler to grow the read result past the nudge window\nVALUE_4_7 = 407  # filler to grow the read result past the nudge window\nVALUE_4_8 = 408  # filler to grow the read result past the nudge window\nVALUE_4_9 = 409  # filler to grow the read result past the nudge window\nVALUE_4_10 = 410  # filler to grow the read result past the nudge window\nVALUE_4_11 = 411  # filler to grow the read result past the nudge window\nVALUE_4_12 = 412  # filler to grow the read result past the nudge window\nVALUE_4_13 = 413  # filler to grow the read result past the nudge window\nVALUE_4_14 = 414  # filler to grow the read result past the nudge window\nVALUE_4_15 = 415  # filler to grow the read result past the nudge window\nVALUE_4_16 = 416  # filler to grow the read result past the nudge window\nVALUE_4_17 = 417  # filler to grow the read result past the nudge window\nVALUE_4_18 = 418  # filler to grow the read result past the nudge window\nVALUE_4_19 = 419  # filler to grow the read result past the nudge window\nVALUE_4_20 = 420  # filler to grow the read result past the nudge window\ndef TARGET_FUNC(): return 'found-in-f4'\n",
+            "is_error": false,
+            "persisted_path": null,
+            "original_size": null
+          }
+        ]
+      },
+      {
+        "uuid": "d26ad61d-a6c9-4a90-b702-126a8105dd55",
+        "role": "assistant",
+        "timestamp": "2026-05-23T17:51:36.136963+00:00",
+        "type": "text",
+        "is_meta": false,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": "Found it! **`TARGET_FUNC` is defined in `f4.py`**.\n\nLet me still read the remaining files as requested:\n\n"
+      },
+      {
+        "uuid": "a902748b-6b7e-4e5f-a48c-a966dd4de5d9",
+        "role": "assistant",
+        "timestamp": "2026-05-23T17:51:36.136995+00:00",
+        "type": "tool_use",
+        "is_meta": false,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "call_3278739d7fd54dea8ba75647",
+            "name": "read_file",
+            "input": {
+              "path": "f5.py"
+            }
+          }
+        ]
+      },
+      {
+        "uuid": "4b6788e3-6981-4a7c-a5f4-219bc7225d6b",
+        "role": "user",
+        "timestamp": "2026-05-23T17:51:36.137811+00:00",
+        "type": "tool_result",
+        "is_meta": true,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "call_3278739d7fd54dea8ba75647",
+            "content": "# module f5\nVALUE_5_1 = 501  # filler to grow the read result past the nudge window\nVALUE_5_2 = 502  # filler to grow the read result past the nudge window\nVALUE_5_3 = 503  # filler to grow the read result past the nudge window\nVALUE_5_4 = 504  # filler to grow the read result past the nudge window\nVALUE_5_5 = 505  # filler to grow the read result past the nudge window\nVALUE_5_6 = 506  # filler to grow the read result past the nudge window\nVALUE_5_7 = 507  # filler to grow the read result past the nudge window\nVALUE_5_8 = 508  # filler to grow the read result past the nudge window\nVALUE_5_9 = 509  # filler to grow the read result past the nudge window\nVALUE_5_10 = 510  # filler to grow the read result past the nudge window\nVALUE_5_11 = 511  # filler to grow the read result past the nudge window\nVALUE_5_12 = 512  # filler to grow the read result past the nudge window\nVALUE_5_13 = 513  # filler to grow the read result past the nudge window\nVALUE_5_14 = 514  # filler to grow the read result past the nudge window\nVALUE_5_15 = 515  # filler to grow the read result past the nudge window\nVALUE_5_16 = 516  # filler to grow the read result past the nudge window\nVALUE_5_17 = 517  # filler to grow the read result past the nudge window\nVALUE_5_18 = 518  # filler to grow the read result past the nudge window\nVALUE_5_19 = 519  # filler to grow the read result past the nudge window\nVALUE_5_20 = 520  # filler to grow the read result past the nudge window\n",
+            "is_error": false,
+            "persisted_path": null,
+            "original_size": null
+          }
+        ]
+      },
+      {
+        "uuid": "51981214-c934-4f0f-a5eb-ec39f45d1a61",
+        "role": "assistant",
+        "timestamp": "2026-05-23T17:51:37.586370+00:00",
+        "type": "tool_use",
+        "is_meta": false,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "call_f3808c63886b4ee6b8f01d4d",
+            "name": "read_file",
+            "input": {
+              "path": "f6.py"
+            }
+          }
+        ]
+      },
+      {
+        "uuid": "5f3f7a93-3e7b-48ca-90e2-c52edd3be07a",
+        "role": "user",
+        "timestamp": "2026-05-23T17:51:37.587650+00:00",
+        "type": "tool_result",
+        "is_meta": true,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "call_f3808c63886b4ee6b8f01d4d",
+            "content": "# module f6\nVALUE_6_1 = 601  # filler to grow the read result past the nudge window\nVALUE_6_2 = 602  # filler to grow the read result past the nudge window\nVALUE_6_3 = 603  # filler to grow the read result past the nudge window\nVALUE_6_4 = 604  # filler to grow the read result past the nudge window\nVALUE_6_5 = 605  # filler to grow the read result past the nudge window\nVALUE_6_6 = 606  # filler to grow the read result past the nudge window\nVALUE_6_7 = 607  # filler to grow the read result past the nudge window\nVALUE_6_8 = 608  # filler to grow the read result past the nudge window\nVALUE_6_9 = 609  # filler to grow the read result past the nudge window\nVALUE_6_10 = 610  # filler to grow the read result past the nudge window\nVALUE_6_11 = 611  # filler to grow the read result past the nudge window\nVALUE_6_12 = 612  # filler to grow the read result past the nudge window\nVALUE_6_13 = 613  # filler to grow the read result past the nudge window\nVALUE_6_14 = 614  # filler to grow the read result past the nudge window\nVALUE_6_15 = 615  # filler to grow the read result past the nudge window\nVALUE_6_16 = 616  # filler to grow the read result past the nudge window\nVALUE_6_17 = 617  # filler to grow the read result past the nudge window\nVALUE_6_18 = 618  # filler to grow the read result past the nudge window\nVALUE_6_19 = 619  # filler to grow the read result past the nudge window\nVALUE_6_20 = 620  # filler to grow the read result past the nudge window\n",
+            "is_error": false,
+            "persisted_path": null,
+            "original_size": null
+          }
+        ]
+      },
+      {
+        "uuid": "e9386108-eb0c-4543-b69b-1faf97ecff8d",
+        "role": "assistant",
+        "timestamp": "2026-05-23T17:51:40.527521+00:00",
+        "type": "tool_use",
+        "is_meta": false,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "call_d7ca5437c9fc4fcc8f6495d3",
+            "name": "read_file",
+            "input": {
+              "path": "f7.py"
+            }
+          }
+        ]
+      },
+      {
+        "uuid": "1084825e-3ce7-41c5-9f0b-53411f104fad",
+        "role": "user",
+        "timestamp": "2026-05-23T17:51:40.529046+00:00",
+        "type": "tool_result",
+        "is_meta": true,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "call_d7ca5437c9fc4fcc8f6495d3",
+            "content": "# module f7\nVALUE_7_1 = 701  # filler to grow the read result past the nudge window\nVALUE_7_2 = 702  # filler to grow the read result past the nudge window\nVALUE_7_3 = 703  # filler to grow the read result past the nudge window\nVALUE_7_4 = 704  # filler to grow the read result past the nudge window\nVALUE_7_5 = 705  # filler to grow the read result past the nudge window\nVALUE_7_6 = 706  # filler to grow the read result past the nudge window\nVALUE_7_7 = 707  # filler to grow the read result past the nudge window\nVALUE_7_8 = 708  # filler to grow the read result past the nudge window\nVALUE_7_9 = 709  # filler to grow the read result past the nudge window\nVALUE_7_10 = 710  # filler to grow the read result past the nudge window\nVALUE_7_11 = 711  # filler to grow the read result past the nudge window\nVALUE_7_12 = 712  # filler to grow the read result past the nudge window\nVALUE_7_13 = 713  # filler to grow the read result past the nudge window\nVALUE_7_14 = 714  # filler to grow the read result past the nudge window\nVALUE_7_15 = 715  # filler to grow the read result past the nudge window\nVALUE_7_16 = 716  # filler to grow the read result past the nudge window\nVALUE_7_17 = 717  # filler to grow the read result past the nudge window\nVALUE_7_18 = 718  # filler to grow the read result past the nudge window\nVALUE_7_19 = 719  # filler to grow the read result past the nudge window\nVALUE_7_20 = 720  # filler to grow the read result past the nudge window\n",
+            "is_error": false,
+            "persisted_path": null,
+            "original_size": null
+          }
+        ]
+      },
+      {
+        "uuid": "384ce7d9-1635-4940-b4a5-650f61a35a2d",
+        "role": "assistant",
+        "timestamp": "2026-05-23T17:51:43.240968+00:00",
+        "type": "text",
+        "is_meta": false,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": "I've read all seven files one at a time. **`TARGET_FUNC` is defined in `f4.py`**. \n\nThe definition found in f4.py is:\n```python\ndef TARGET_FUNC(): return 'found-in-f4'\n```"
+      },
+      {
+        "uuid": "725addfd-be9e-4dc9-901c-f888e5b57e42",
+        "role": "user",
+        "timestamp": "2026-05-23T17:51:43.241384+00:00",
+        "type": "text",
+        "is_meta": false,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": "If you just received a system-reminder that you can free context by calling snip_history with old tool_result message uuids, call snip_history now with the snippable uuids it listed."
+      },
+      {
+        "uuid": "4eddee3a-fa2f-434c-b44f-c3dbbe47989b",
+        "role": "assistant",
+        "timestamp": "2026-05-23T17:51:47.974862+00:00",
+        "type": "tool_use",
+        "is_meta": false,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "call_c1c41da9cfb84e0a859fb806",
+            "name": "snip_history",
+            "input": {
+              "message_uuids": [
+                "b74be773-c0df-4332-b7d3-7a5f4aba0e46",
+                "4ed3a249-ba0a-494d-9ba5-68b17dd5d558"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "uuid": "c72ff461-0b1d-4ca9-8611-bbad182425bb",
+        "role": "user",
+        "timestamp": "2026-05-23T17:51:47.975102+00:00",
+        "type": "tool_result",
+        "is_meta": true,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "call_c1c41da9cfb84e0a859fb806",
+            "content": "Snipped 2 messages",
+            "is_error": false,
+            "persisted_path": null,
+            "original_size": null
+          }
+        ]
+      },
+      {
+        "uuid": "c167bcac-5ec8-41aa-93d8-d900df5698df",
+        "role": "assistant",
+        "timestamp": "2026-05-23T17:52:02.152813+00:00",
+        "type": "text",
+        "is_meta": false,
+        "is_virtual": false,
+        "is_compact_summary": false,
+        "content": "I've successfully snipped 2 messages from the conversation history."
+      }
+    ]
+  },
+  "last_summary": null
+}

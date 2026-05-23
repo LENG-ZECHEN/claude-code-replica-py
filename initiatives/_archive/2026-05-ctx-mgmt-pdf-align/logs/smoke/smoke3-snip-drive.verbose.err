@@ -1,0 +1,46 @@
+[trace] [microcompact] cleared=0 messages=1
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=0 chars=0 read_error=0 sections=0
+[trace] [budget] available=191808 dropped=0 estimated_tokens=64 externalized=0 messages=1 system_tokens=25
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=191808 dropped=0 estimated_tokens=519 externalized=0 messages=3 system_tokens=25
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=191808 dropped=0 estimated_tokens=974 externalized=0 messages=5 system_tokens=25
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=191808 dropped=0 estimated_tokens=1429 externalized=0 messages=7 system_tokens=25
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=191808 dropped=0 estimated_tokens=1894 externalized=0 messages=9 system_tokens=25
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=191808 dropped=0 estimated_tokens=2349 externalized=0 messages=11 system_tokens=25
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=191808 dropped=0 estimated_tokens=2804 externalized=0 messages=13 system_tokens=25
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=191808 dropped=0 estimated_tokens=3259 externalized=0 messages=15 system_tokens=25
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=191808 dropped=0 estimated_tokens=3471 externalized=0 messages=17 system_tokens=25
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=191808 dropped=0 estimated_tokens=2654 externalized=0 messages=15 system_tokens=25
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=191808 dropped=0 estimated_tokens=2814 externalized=0 messages=17 system_tokens=25
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=191808 dropped=0 estimated_tokens=2964 externalized=0 messages=19 system_tokens=25
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=191808 dropped=0 estimated_tokens=2635 externalized=0 messages=19 system_tokens=25
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=191808 dropped=0 estimated_tokens=2775 externalized=0 messages=21 system_tokens=25
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=191808 dropped=0 estimated_tokens=2029 externalized=0 messages=19 system_tokens=25

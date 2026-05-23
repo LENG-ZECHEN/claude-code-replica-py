@@ -1,0 +1,41 @@
+[trace] [microcompact] cleared=0 messages=1
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=0 chars=0 read_error=0 sections=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=44 externalized=0 messages=1 system_tokens=25
+[trace] [compact] messages=3 post_tokens=1806 pre_tokens=1825 summarized=1
+[trace] [memory_select] selected=0 total=0
+[trace] [externalize] bytes=6814 tool_use_id=call_3c5fa10c2f53430a81fc5ab8
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=2525 externalized=1 messages=3 system_tokens=145
+[trace] [compact] messages=5 post_tokens=68 pre_tokens=1874 summarized=3
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=2000 externalized=0 messages=3 system_tokens=187
+[trace] [compact] messages=5 post_tokens=1008 pre_tokens=1076 summarized=3
+[trace] [memory_select] selected=0 total=0
+[trace] [externalize] bytes=3641 tool_use_id=call_42a46ce4f9b54e39b68cc339
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=3502 externalized=1 messages=3 system_tokens=182
+[trace] [compact] messages=5 post_tokens=96 pre_tokens=1104 summarized=3
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=2967 externalized=0 messages=3 system_tokens=187
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=3081 externalized=0 messages=5 system_tokens=187
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=3171 externalized=0 messages=7 system_tokens=187
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=3560 externalized=0 messages=9 system_tokens=187
+[trace] [compact] messages=11 post_tokens=144 pre_tokens=833 summarized=9
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=3421 externalized=0 messages=3 system_tokens=271
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=3810 externalized=0 messages=5 system_tokens=271
+[trace] [memory_select] selected=0 total=0
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=3864 externalized=0 messages=7 system_tokens=271
