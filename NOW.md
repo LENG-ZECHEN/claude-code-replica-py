@@ -6,9 +6,22 @@
 
 ## Active initiative
 
-**None.**
+**obs-thr-harden** — see
+[`initiatives/current/`](./initiatives/current/).
 
-`initiatives/current/` is empty (`.gitkeep` only).
+| | |
+|---|---|
+| Slug | `obs-thr-harden` |
+| Started | 2026-05-23 |
+| Milestones | M1 → M3 (3 total) |
+| Status | bootstrapped (Phase 1 complete; M1 pending) |
+| Baseline commit | `e8e2206c2fc6737f509229b2414bb578dc4d99e1` |
+| Baseline pytest | 557 passing |
+| Target pytest | M1 >= 565, M2 >= 577, M3 >= 587 |
+| Goal | Hardening pass over `observable-thresholds` (M1+M2+M3): fix the `_AGGRESSIVE_THRESHOLDS` preset bug, expand precedence + leak coverage, add demo collision fences, pin NullTracer zero-overhead. |
+
+Next action: run `./automation/scripts/run_all_milestones.sh` from the
+`python-replica/` directory to execute Phase 2 (M1 → M2 → M3 → review).
 
 ## Last completed initiative
 

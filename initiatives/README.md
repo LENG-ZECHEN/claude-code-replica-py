@@ -12,7 +12,7 @@ For the active-initiative pointer and the bootstrap procedure, see
 
 | Slug | Status | Started | Goal |
 |---|---|---|---|
-| _(none)_ | — | — | — |
+| [obs-thr-harden](./current/) | bootstrapped (M1 pending) | 2026-05-23 | Hardening pass over `observable-thresholds`: fix `_AGGRESSIVE_THRESHOLDS` preset bug, expand precedence + leak coverage, demo collision fences, pin `NullTracer` zero-overhead. |
 
 ## Archived
 

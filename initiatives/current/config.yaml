@@ -1,0 +1,300 @@
+slug: obs-thr-harden
+commit_prefix: obs-thr-hd
+archive_slug: 2026-05-obs-thr-harden
+baseline_commit: e8e2206c2fc6737f509229b2414bb578dc4d99e1
+
+milestones:
+  M1:
+    name: trace-robustness-and-leak-coverage
+    phase_ids: [A1, A2]
+    exit_gate: |
+      `pytest --tb=no -q` is green with total >= 565 (baseline 557, +8).
+      `tests/test_trace.py` must include the following new coverage:
+      (a) >= 3 parametrize cases covering different secret shapes
+          (Bearer token, AWS access key, long OpenAI key,
+          Unicode username / Chinese-character secret string).
+          None of the secret substrings may appear in captured stderr
+          after the value passes through the REPL.
+      (b) one stream-closed negative test: construct an already-closed
+          `io.StringIO`, call `StderrTracer(stream=closed).emit("budget", ...)`
+          and assert no `ValueError` / `OSError` propagates and the agent
+          does not crash.
+      (c) one reactive end-to-end test: a MockProvider whose first call
+          raises `PromptTooLongError` and whose second call succeeds;
+          run a one-turn CLI REPL session and assert captured stderr
+          contains at least one `[trace] [reactive]` line.
+      (d) one value-with-whitespace test: emit a field whose value
+          contains whitespace (for example `tracer.emit("budget",
+          payload={"a": 1, "b": 2})`); the emitted line, when parsed by
+          `examples/visibility_full_demo._parse_trace_events`, must not
+          break adjacent fields.
+      `mypy src` and `ruff check .` are clean.
+    notes: |
+      Touch list (ceiling):
+        src: src/simple_coding_agent/trace.py (core change)
+        test: tests/test_trace.py
+      Do NOT touch cli.py / openai_cli.py / any of the other 9 fire-site
+      components, do NOT change the `Tracer` Protocol signature, do NOT
+      change `NullTracer.emit` body (it must remain literally `pass`).
+
+      Change 1: wrap `StderrTracer.emit`'s `self._stream.write(line)` in
+        `try: ... except (OSError, ValueError): return`
+      Catch only `OSError` / `ValueError` (covers "I/O on closed file"
+      and broken-pipe). Do NOT catch `KeyboardInterrupt` / `SystemExit`
+      or `Exception`. `flush` is already defensive — leave it alone.
+
+      Change 2: add a module-level helper `_render_value(value)`:
+        - bool / int / float / None  -> `str(value)`
+        - str without whitespace     -> `value`
+        - str with whitespace, OR any other type -> `repr(value)` (quoted)
+      Replace the bare `fields[key]` read in `emit` with this helper.
+      Keep the line ASCII so `visibility_full_demo._parse_trace_events`
+      keeps working; M3 will extend that parser to tolerate the quoted
+      form.
+
+      Reactive end-to-end fixture: a MockProvider subclass whose Nth
+      call raises `PromptTooLongError` and others return normally. The
+      pattern already exists in `tests/test_stress_full_compact.py` --
+      reuse rather than reinvent.
+
+      Test cases added (~8): 4-shape secret-leak parametrize counts as
+      one parametrize block + closed-stream + reactive-e2e +
+      whitespace-roundtrip + non-string value (dict / list / None)
+      roundtrip + a 9-channel format regression + `_render_value`
+      unit tests + bool/int edge cases.
+
+      Risk assessment: touches 1 src + 1 test only. Single-file
+      deep-hardening. No cross-component wiring, no new Protocol, no
+      CLI surface change. Every red line from the M1-243-turn lesson
+      (>6 src / >4 components changing protocol / >15 tests / the
+      "abstraction + wire + CLI" triple-combo) is far below threshold.
+
+      pytest baseline: 557 -> >= 565 (+8 minimum).
+
+  M2:
+    name: aggressive-thresholds-precedence-matrix-and-bug-fix
+    phase_ids: [B1, B2, B3]
+    exit_gate: |
+      `pytest --tb=no -q` is green with total >= 577 (after M1, 565, +12).
+      `tests/test_repl.py` must contain a `@pytest.mark.parametrize`
+      matrix covering the effective value of every field in
+      `_AGGRESSIVE_THRESHOLDS` (all 8 keys) under three states:
+        (i)   user passes no relevant flag, no --aggressive-thresholds
+              -> expected: the `_DEFAULT_*` constant
+        (ii)  user passes no relevant flag, --aggressive-thresholds set
+              -> expected: `_AGGRESSIVE_THRESHOLDS[<field>]`
+        (iii) user passes the relevant flag explicitly,
+              --aggressive-thresholds also set
+              -> expected: the user's explicit value (preset overridden)
+      Field set: compact_threshold, keep_recent, microcompact_minutes,
+        max_inline_chars, total_budget_chars, snip_keep_recent,
+        context_tokens, reserved_output_tokens.
+      Fields without a CLI flag backing (snip_keep_recent,
+      max_inline_chars, etc.) only need states (i) and (ii).
+      `MicroCompactor(threshold_minutes=0)` must raise `ValueError`
+      mirroring `SnipTool(keep_recent=0)`; `tests/test_compact.py`
+      gains one negative test.
+      `tests/test_openai_cli_repl.py` must include at least one case
+      verifying that `openai_cli`'s sentinel handling matches `cli`'s
+      (so the two REPLs cannot drift apart).
+      `mypy src` and `ruff check .` are clean.
+    notes: |
+      Touch list (ceiling):
+        src: src/simple_coding_agent/cli.py (sentinel handling in
+             `_run_repl`), src/simple_coding_agent/openai_cli.py
+             (mirror the same logic), src/simple_coding_agent/compact.py
+             (`MicroCompactor.__init__` ~3-line guard)
+        test: tests/test_repl.py, tests/test_openai_cli_repl.py,
+              tests/test_compact.py
+      Do NOT touch trace.py, do NOT touch the 9-channel list, do NOT
+      add or remove keys from `_AGGRESSIVE_THRESHOLDS` (values may be
+      tweaked but the key set is frozen).
+
+      Core bug fix (M2 MUST fix this -- it is a real bug that was
+      masked by the way the M3 demo reads the preset dict directly):
+
+      Change the argparse defaults to a `None` sentinel:
+        --max-context-tokens: default=None (was 200_000)
+        --reserved-output-tokens: default=None (was 8_192)
+        --max-steps: default=None (if applicable -- confirm during prompt)
+      At the top of `_run_repl`, unify a three-state decision:
+        explicit_value = args.max_context_tokens  # or None
+        if explicit_value is not None:
+            ctx_tokens = explicit_value
+        elif args.aggressive_thresholds:
+            ctx_tokens = _AGGRESSIVE_THRESHOLDS["context_tokens"]
+        else:
+            ctx_tokens = _DEFAULT_MAX_CONTEXT_TOKENS
+      Apply the same shape to the other two int flags. Add
+      `_DEFAULT_MAX_CONTEXT_TOKENS = 200_000`,
+      `_DEFAULT_RESERVED_OUTPUT_TOKENS = 8_192`, and
+      `_DEFAULT_MAX_STEPS = 50` (if applicable) at module level so the
+      old defaults are preserved as named constants.
+
+      `--help` text gets one new line:
+        "If --aggressive-thresholds is also set and you do not pass
+         this flag, the preset value applies; otherwise the built-in
+         default applies."
+
+      `openai_cli.py` must mirror this change inside `_run_openai_repl`,
+      otherwise the two REPLs drift and the review session will catch
+      it immediately. The M5 P9 record explicitly states "the slash
+      command surface is identical between MockProvider and live-
+      provider REPLs" -- sentinel handling must preserve that symmetry.
+
+      MicroCompactor guard:
+        if threshold_minutes < 1:
+            raise ValueError(
+                f"threshold_minutes must be >= 1, got {threshold_minutes}"
+            )
+      Add one `pytest.raises(ValueError)` case to `tests/test_compact.py`.
+
+      Precedence matrix assertion strategy: construct a loop via
+      `cli._build_repl_loop` directly, then read internal attributes
+      (`loop._max_steps`, `loop._budget.max_tokens`,
+      `loop._budget.reserved_output_tokens`, the underlying
+      `_tool_result_store._max_inline_chars`,
+      `loop._snip_tool._keep_recent`, etc.) and assert the expected
+      effective value. The `_LAST_LOOPS` hook introduced in M1 of the
+      previous initiative (cli.py:161) supports this -- reuse it.
+
+      Test cases added (~12): precedence matrix 8-10 rows +
+      microcompact guard 1 + openai_cli symmetry 1-2.
+
+      Regression scan checklist (the M2 prompt must include this):
+        grep -rn "200_000\|8_192" /Users/leng/my-cc-py/python-replica/tests
+      Find existing tests that rely on the old argparse defaults and
+      update them (expect 2-4 hits).
+
+      Risk assessment: touches 3 src + 3 test files. Per-file diff is
+      small (~10 lines of sentinel logic in cli.py and openai_cli.py
+      plus a module-level constant; +3 guard lines in compact.py).
+      No new protocol, no new module, no `NullTracer.emit` change.
+      Changing argparse defaults to `None` is a user-visible behavioural
+      shift, but `--help` text is updated in sync and the change fixes
+      a real bug (the preset never being honoured).
+
+      pytest baseline: 565 -> >= 577 (+12 minimum).
+
+  M3:
+    name: demo-fences-zero-overhead-and-doc-sync
+    phase_ids: [C1, C2, C3]
+    exit_gate: |
+      `pytest --tb=no -q` is green with total >= 587 (after M2, 577, +10).
+      `examples/visibility_full_demo.py` must:
+      (a) `_new_run_dir` handles same-second timestamp collisions by
+          appending a `-2` / `-3` ... `-9` suffix; if all 9 suffixes
+          are taken in one second, exit non-zero with a clear message.
+      (b) `_parse_trace_events` tolerates the repr-quoted values that
+          M1 introduces (whitespace-containing strings, dict / list
+          reprs).
+      `tests/test_visibility_full_demo.py` adds:
+        - a directory-collision case (two demo runs in the same second)
+        - a parser-tolerates-quoted-values case
+      `tests/test_trace.py` adds a `NullTracer` performance assertion:
+        timeit 100_000 calls of `tracer.emit("compact", count=1,
+        tokens=42)`; total elapsed must be < 20ms (mean < 200ns/call).
+        Skip under coverage instrumentation (detect via
+        `os.environ.get("COVERAGE_RUN")` or `sys.gettrace()`) so the
+        gate doesn't false-fail under `pytest --cov`.
+      `tests/test_cli.py` adds a `--help` snapshot test pinning the
+      key phrases for --verbose, --aggressive-thresholds, and
+      --max-context-tokens (including the M2-added precedence line).
+      `README.md` "Examples" section must explicitly reference
+      `aggressive_thresholds_demo.py` (currently absent) and
+      `visibility_full_demo.py`.
+      `python-replica/CLAUDE.md` "Implementation Roadmap" gets one new
+      entry for this hardening initiative listing the SHA range and
+      pytest delta.
+      `mypy src` and `ruff check .` are clean.
+    notes: |
+      Touch list (ceiling):
+        src: none (this milestone is doc + demo + test hardening only)
+        examples: examples/visibility_full_demo.py (extend
+                  `_new_run_dir` and `_parse_trace_events` only -- do
+                  NOT create new example files)
+        test: tests/test_visibility_full_demo.py, tests/test_trace.py
+              (perf assert), tests/test_cli.py (--help snapshot)
+        docs: README.md, python-replica/CLAUDE.md
+      Do NOT touch trace.py, do NOT touch cli.py / openai_cli.py (M2
+      already did), do NOT introduce new dependencies (the perf assert
+      uses the stdlib `timeit`).
+
+      `_new_run_dir` collision logic:
+        base = examples/_artifacts / f"visibility-demo-{timestamp}"
+        if not base.exists():
+            base.mkdir(parents=True)
+            return base
+        for suffix in range(2, 10):
+            candidate = base.with_name(base.name + f"-{suffix}")
+            if not candidate.exists():
+                candidate.mkdir(parents=True)
+                return candidate
+        raise SystemExit(
+            f"too many demo runs in the same second; clean "
+            f"{base.parent} or wait a second"
+        )
+
+      `_parse_trace_events` quoted-value tolerance:
+        The current implementation uses `token.partition("=")` plus a
+        line-level `split()`, which assumes every value is whitespace-
+        free. Change the scan so that, after `=`, if the next character
+        is `'` or `"`, read until the matching closing quote (handles
+        `repr({...})`-shaped values); otherwise split on the next
+        whitespace as before. Preserve backward compatibility for
+        unquoted values.
+
+      `NullTracer` perf assertion:
+        import timeit
+        from simple_coding_agent.trace import NullTracer
+        t = NullTracer()
+        elapsed = timeit.timeit(
+            lambda: t.emit("compact", count=1, tokens=42),
+            number=100_000,
+        )
+        assert elapsed < 0.020, f"{elapsed=}s exceeds 20ms budget"
+        Guard with a coverage-mode skip at the top of the test
+        (`pytest.skip(...)` if `os.environ.get("COVERAGE_RUN")` set or
+        `sys.gettrace() is not None`).
+
+      `--help` snapshot test shape:
+        Capture help text via `cli.main(["--help"])` + `SystemExit` +
+        `capsys`. Assert it contains:
+          "--verbose"
+          either "Stream [trace]" or "verbose trace"
+          "--aggressive-thresholds"
+          "preset"
+          "preset value applies"   (the M2-added wording)
+        Pin key phrases, not the whole block, so future innocent
+        help-text rewording doesn't break the snapshot.
+
+      `README.md` "Examples" section:
+        - Confirm `visibility_full_demo.py` is described (the previous
+          M3 inbox requested this; verify and fix if missing).
+        - Add a one-line link for `aggressive_thresholds_demo.py`.
+        - Add `stress_demo.py` and `microcompact_demo.py` links if
+          they are not already there.
+
+      `python-replica/CLAUDE.md` "Implementation Roadmap" addition:
+        - **observable-thresholds-harden initiative -- M1-M3**
+          (`<SHA1>`-`<SHA3>`, 2026-05-23). M1 hardens `trace.py`
+          against closed streams and unsafe value serialisation; M2
+          fixes the `_AGGRESSIVE_THRESHOLDS` bug where
+          `context_tokens` / `reserved_output_tokens` were always
+          shadowed by argparse defaults, and adds the full 8-field
+          precedence matrix; M3 hardens `visibility_full_demo`
+          against directory collision and parser fragility, asserts
+          `NullTracer` zero overhead via timeit, and syncs README +
+          CLAUDE.md. pytest 557 -> ~587 (+30).
+
+      Test cases added (~10): directory collision 1-2 + parser
+      tolerance 2 + perf assert 1 + --help snapshot 2-3 + README
+      reference check 1 + regression coverage 1-2.
+
+      Risk assessment: zero source-code change. Surface is examples /
+      docs / tests only -- the lowest-risk milestone. The perf
+      assertion is sensitive to interpreter version (Python 3.14 noop
+      `emit` is ~50-100ns/call on the harness CI); the 200ns budget
+      leaves 2-3x headroom and the test skips under coverage.
+
+      pytest baseline: 577 -> >= 587 (+10 minimum).
