@@ -243,9 +243,13 @@
   `tests/test_loop.py`, `tests/test_context.py`,
   `tests/test_agent_integration.py`
 - **tests added**: +16 `tests/test_snip_tool_model.py` (new), +12
-  `tests/test_loop.py`, +6 `tests/test_context.py`, +1
-  `tests/test_agent_integration.py` (six-tool registry). Total: 685 →
-  704 (+19, above the >=15 floor).
+  `tests/test_loop.py`, +6 `tests/test_context.py`, +0
+  `tests/test_agent_integration.py` (an existing case modified in place
+  for the six-tool registry, no net add). Total: 670 →
+  704 (+34, above the >=15 floor). [corrected 2026-05-24: the original
+  record claimed `685 → 704 (+19)`; the true M3-post baseline at commit
+  `646bf2c` is 670 and the real delta is +34, verified via `git worktree`
+  + `pytest --collect-only` per file.]
 - **behavior implemented**: Model-driven `snip_history` tool +
   `<msg uuid="...">` wrap + 10k-token nudge. Five pieces.
   (1) New `src/simple_coding_agent/snip_tool_model.py` exports a pure

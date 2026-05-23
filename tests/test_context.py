@@ -175,9 +175,13 @@ def test_build_emits_one_attachment_per_snapshot() -> None:
         FileSnapshot(path="b.py", content="BBB", captured_at="t2"),
     )
     result = builder.build(t, system="sys", compact_summary=summary)
-    assert result.messages[0]["content"] == _ATTACH_A
-    assert result.messages[1]["content"] == _ATTACH_B
+    # Both snapshots are emitted in order; same-role (user) attachments and
+    # the kept user turn are coalesced into one Anthropic-compatible message.
+    assert len(result.messages) == 1
     assert result.messages[0]["role"] == "user"
+    assert result.messages[0]["content"] == (
+        _ATTACH_A + "\n" + _ATTACH_B + "\n" + "kept user turn"
+    )
 
 
 def test_build_attachments_precede_kept_messages() -> None:
@@ -189,8 +193,9 @@ def test_build_attachments_precede_kept_messages() -> None:
         FileSnapshot(path="a.py", content="AAA", captured_at="t1"),
     )
     result = builder.build(t, system="sys", compact_summary=summary)
-    assert result.messages[0]["content"] == _ATTACH_A
-    assert result.messages[1]["content"] == "kept user turn"
+    # Attachment precedes kept content; both coalesced into one user message.
+    assert len(result.messages) == 1
+    assert result.messages[0]["content"] == _ATTACH_A + "\n" + "kept user turn"
 
 
 def test_build_no_attachments_when_no_snapshots() -> None:
@@ -230,7 +235,9 @@ def test_build_attachment_not_popped_preferentially_by_trim() -> None:
     )
     result = builder.build(t, system="sys", compact_summary=summary)
     assert result.dropped_message_count > 0
-    assert result.messages[0]["content"] == _ATTACH_A
+    # Attachment is prepended after trimming, so it always leads the payload
+    # (coalesced with the first kept message when that message is user-role).
+    assert result.messages[0]["content"].startswith(_ATTACH_A)
 
 
 # ---------------------------------------------------------------------------
@@ -548,10 +555,15 @@ def test_build_prepends_snip_nudge_before_kept_messages() -> None:
     t.append(Message.user("current turn"))
     nudge = SnipNudge(candidate_uuids=("r-0", "r-1"))
     result = builder.build(t, system="sys", snip_nudge=nudge)
+    # Nudge + the user turn are same-role, coalesced into one message with the
+    # nudge leading.
+    assert len(result.messages) == 1
     assert result.messages[0]["role"] == "user"
-    assert "snip_history" in result.messages[0]["content"]
-    assert "r-0" in result.messages[0]["content"]
-    assert result.messages[1]["content"] == "current turn"
+    body = result.messages[0]["content"]
+    assert "snip_history" in body
+    assert "r-0" in body
+    assert body.index("snip_history") < body.index("current turn")
+    assert body.endswith("current turn")
 
 
 def test_build_no_nudge_when_none() -> None:
@@ -573,9 +585,29 @@ def test_build_nudge_follows_attachments_precedes_kept() -> None:
     )
     nudge = SnipNudge(candidate_uuids=("r-0",))
     result = builder.build(t, system="sys", compact_summary=summary, snip_nudge=nudge)
-    assert result.messages[0]["content"] == _ATTACH_A
-    assert "snip_history" in result.messages[1]["content"]
-    assert result.messages[2]["content"] == "kept user turn"
+    # All three are user-role and coalesce into one message preserving the
+    # [*attachments, nudge, *kept] front-to-back order.
+    assert len(result.messages) == 1
+    body = result.messages[0]["content"]
+    assert body.startswith(_ATTACH_A)
+    assert body.index(_ATTACH_A) < body.index("snip_history") < body.index("kept user turn")
+
+
+def test_build_coalesces_consecutive_same_role_into_anthropic_compatible() -> None:
+    # The post-trim prepend of attachments (M3) + nudge (M4) ahead of a
+    # user-role kept message must NOT yield adjacent same-role API messages.
+    builder = ContextBuilder(budget=_large_budget())
+    t = Transcript()
+    t.append(Message.compact_boundary())
+    t.append(Message.user("kept user turn"))
+    summary = _summary_with_snapshots(
+        FileSnapshot(path="a.py", content="AAA", captured_at="t1"),
+        FileSnapshot(path="b.py", content="BBB", captured_at="t2"),
+    )
+    nudge = SnipNudge(candidate_uuids=("r-0",))
+    result = builder.build(t, system="sys", compact_summary=summary, snip_nudge=nudge)
+    roles = [m["role"] for m in result.messages]
+    assert all(roles[i] != roles[i + 1] for i in range(len(roles) - 1))
 
 
 def test_snip_nudge_body_lists_only_candidate_uuids() -> None:

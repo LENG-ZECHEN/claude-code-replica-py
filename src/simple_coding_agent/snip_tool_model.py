@@ -49,7 +49,11 @@ _TOOL_DESCRIPTION = (
 _TOOL_INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "message_uuids": {"type": "array", "items": {"type": "string"}},
+        "message_uuids": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+        },
     },
     "required": ["message_uuids"],
 }
@@ -165,9 +169,15 @@ def evaluate_snip_request(
 ) -> SnipOutcome:
     """Validate a snip_history request without mutating ``messages``.
 
-    Returns a refusing :class:`SnipOutcome` on the first invalid uuid, else an
-    accepting outcome whose ``removed_uuids`` lists the (de-duplicated) targets.
+    Refuses an empty ``message_uuids`` list (a no-op snip is treated as an
+    error so the model gets corrective feedback, not a misleading success).
+    Otherwise returns a refusing :class:`SnipOutcome` on the first invalid
+    uuid, else an accepting outcome whose ``removed_uuids`` lists the
+    (de-duplicated) targets.
     """
+    if not message_uuids:
+        return SnipOutcome(refused=True, reason="no message_uuids provided")
+
     by_uuid = {m.uuid: (i, m) for i, m in enumerate(messages)}
     cutoff = _latest_user_text_index(messages)
     protected = _protected_recent_uuids(messages, keep_recent)

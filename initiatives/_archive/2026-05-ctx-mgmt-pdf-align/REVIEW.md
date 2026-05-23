@@ -128,3 +128,33 @@
 The decision-maker-facing Chinese owner brief lives in
 [`OWNER_BRIEF.zh-CN.md`](./OWNER_BRIEF.zh-CN.md). Read that file for
 "what was built / how to demo it / before-after / how to talk about it".
+
+## Post-review follow-up (2026-05-24, user-directed)
+
+After reading this review the owner directed fixes for all three surfaced
+findings. Quality after the follow-up: **pytest 704 → 707**, mypy clean (22
+files), ruff clean.
+
+- **Finding 2 (consecutive same-role payload) — RESOLVED, contract changed.**
+  The owner chose Anthropic-compatibility over the prior OpenAI-only adjacency.
+  `context.build()` now runs a final `_coalesce_same_role()` pass (new helper,
+  sharing a factored-out `_merge_content`) so prepended attachments + nudge +
+  a user-role first-kept message merge into one user message preserving
+  `[*attachments, nudge, *kept]` order. Three pinning tests were rewritten and
+  one added (`test_build_coalesces_consecutive_same_role_into_anthropic_compatible`).
+  NOTE: this supersedes the M4 HANDOFF §4 invariant that pinned *separate*
+  `[*attachments, nudge, *kept]` messages — order is preserved, but they are
+  now coalesced.
+- **Finding 3 (empty `snip_history` list) — RESOLVED.** `evaluate_snip_request`
+  now refuses an empty list (`reason="no message_uuids provided"`); the tool fn
+  raises `SnipRefusedError` (is_error). Added `"minItems": 1` to the tool schema
+  (the exact-schema test was updated accordingly). +2 tests.
+- **Finding 1 / Proposed edit #3 (phantom 685) — APPLIED.** Archived
+  `PROGRESS.md` + `HANDOFF.md` M4 records corrected to `670 → 704 (+34)` with a
+  dated marker. Real per-file deltas verified via `git worktree` + collect:
+  +16 snip_tool_model [new], +12 loop, +6 context, +0 agent_integration (the
+  original's "+1 agent_integration" was also wrong — that file is 12→12).
+- **OpenAI live smoke run — NOT RUN.** No `OPENAI_API_KEY` in the environment.
+  Still recommended before relying on `<msg uuid="...">` survival end-to-end.
+- **Proposed edits #1 (README flags) and #2 (CLAUDE.md roadmap entry)** remain
+  open for human review (not in scope of this follow-up).

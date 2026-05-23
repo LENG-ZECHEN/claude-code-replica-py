@@ -134,6 +134,16 @@ def test_evaluate_refuses_future_after_latest_user_text() -> None:
     assert "current turn" in outcome.reason
 
 
+def test_evaluate_refuses_empty_uuid_list() -> None:
+    # An empty message_uuids list must refuse rather than "succeed" with a
+    # pointless full-transcript replace_all (no targets == nothing to snip).
+    t = _transcript_with_n_results(8)
+    outcome = evaluate_snip_request(t.all_messages(), [])
+    assert outcome.refused is True
+    assert outcome.reason is not None
+    assert "no message_uuids" in outcome.reason
+
+
 # ---------------------------------------------------------------------------
 # snippable_candidate_uuids
 # ---------------------------------------------------------------------------
@@ -163,7 +173,11 @@ def test_register_adds_snip_history_with_exact_schema() -> None:
     assert tool.input_schema == {
         "type": "object",
         "properties": {
-            "message_uuids": {"type": "array", "items": {"type": "string"}},
+            "message_uuids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+            },
         },
         "required": ["message_uuids"],
     }
@@ -203,6 +217,21 @@ def test_tool_refusal_surfaces_as_is_error() -> None:
     assert is_error is True
     assert content.startswith("snip refused:")
     # Transcript untouched on refusal.
+    assert len(t) == before
+
+
+def test_tool_refuses_empty_list_as_is_error() -> None:
+    t = _transcript_with_n_results(8)
+    registry = ToolRegistry()
+    register_snip_history_tool(registry, t)
+    executor = ToolExecutor(registry)
+
+    before = len(t)
+    content, is_error = executor.execute("snip_history", {"message_uuids": []})
+    assert is_error is True
+    assert content.startswith("snip refused:")
+    assert "no message_uuids" in content
+    # Empty list must not trigger a no-op replace_all.
     assert len(t) == before
 
 

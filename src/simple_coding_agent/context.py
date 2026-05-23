@@ -129,18 +129,52 @@ def _normalize_messages(messages: list[Message]) -> list[dict[str, Any]]:
 
         if result and result[-1]["role"] == api_msg["role"]:
             prev = result[-1]
-            p, n = prev["content"], api_msg["content"]
-            if isinstance(p, str) and isinstance(n, str):
-                prev["content"] = p + "\n" + n
-            elif isinstance(p, list) and isinstance(n, list):
-                prev["content"] = p + n
-            elif isinstance(p, str) and isinstance(n, list):
-                prev["content"] = [{"type": "text", "text": p}] + n
-            else:
-                prev["content"] = p + [{"type": "text", "text": n}]
+            prev["content"] = _merge_content(prev["content"], api_msg["content"])
         else:
             result.append(api_msg)
 
+    return result
+
+
+def _merge_content(
+    prev: str | list[dict[str, Any]],
+    nxt: str | list[dict[str, Any]],
+) -> str | list[dict[str, Any]]:
+    """Combine two API message contents of the same role into one.
+
+    String pair -> newline-joined string; block-list pair -> concatenated
+    blocks; mixed -> the string side is wrapped as a ``text`` block so the
+    result is always a single coherent content value. Returns a NEW object;
+    never mutates either input.
+    """
+    if isinstance(prev, str) and isinstance(nxt, str):
+        return prev + "\n" + nxt
+    if isinstance(prev, list) and isinstance(nxt, list):
+        return prev + nxt
+    if isinstance(prev, str) and isinstance(nxt, list):
+        return [{"type": "text", "text": prev}] + nxt
+    # prev is list, nxt is str
+    assert isinstance(prev, list)
+    return prev + [{"type": "text", "text": nxt}]
+
+
+def _coalesce_same_role(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge consecutive same-role API dicts so the payload has no adjacent
+    same-role turns (the Anthropic Messages API rejects them; OpenAI tolerates
+    them).
+
+    Applied once to the fully assembled payload because the post-trim prepend
+    of recent-file attachments (M3) and the snip nudge (M4) can place several
+    user-role dicts ahead of a user-role kept message, bypassing the merge in
+    :func:`_normalize_messages`. Idempotent: a payload that already alternates
+    roles passes through unchanged.
+    """
+    result: list[dict[str, Any]] = []
+    for msg in messages:
+        if result and result[-1]["role"] == msg["role"]:
+            result[-1]["content"] = _merge_content(result[-1]["content"], msg["content"])
+        else:
+            result.append(msg)
     return result
 
 
@@ -279,6 +313,13 @@ class ContextBuilder:
             api_messages = [_snip_nudge_dict(snip_nudge)] + api_messages
         attachment_messages = _attachment_dicts(compact_summary)
         api_messages = attachment_messages + api_messages
+
+        # The prepend above can place several user-role dicts (attachments,
+        # nudge) ahead of a user-role kept message. Coalesce consecutive
+        # same-role dicts so the payload is Anthropic-Messages-API compatible
+        # (OpenAI tolerates adjacency; Anthropic rejects it). Order within the
+        # merged content preserves [*attachments, nudge, *kept].
+        api_messages = _coalesce_same_role(api_messages)
 
         estimated = system_tokens + _estimate_messages_tokens(api_messages)
 
