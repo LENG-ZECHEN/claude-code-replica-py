@@ -74,6 +74,8 @@ After install:
 | `simple-agent` | `simple_coding_agent.cli` | MockProvider end-to-end demo in a tempdir. No API call. |
 | `simple-agent-openai` | `simple_coding_agent.openai_cli` | **Calls the real OpenAI-compatible Chat Completions API.** Loads `.env` by default; pass `--no-dotenv` to skip. |
 
+Both entry points support `--verbose` (stream `[trace] [<channel>] …` events to stderr) and `--aggressive-thresholds` (lower compact/snip/microcompact thresholds for demo-friendly behavior; prints a banner summarizing the preset).
+
 ## Running the demo (safe, no API key required)
 
 ```bash

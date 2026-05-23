@@ -21,7 +21,7 @@ exists in this file. Deleting or rewriting a prior block halts the loop.
 
 ## M1 — done 2026-05-22
 
-- **commit**: `a052056` `[obs-thr/M1] wire Tracer Protocol + --verbose flag across context/memory pipeline`
+- **commit**: `063d5d9` `[obs-thr/M1] wire Tracer Protocol + --verbose flag across context/memory pipeline`
 - **tests**: 520 → 542 (+22)
 - **mypy**: clean | **ruff**: clean
 - **files changed**: `src/simple_coding_agent/trace.py` (new), `src/simple_coding_agent/{auto_learn,claude_md,cli,compact,context,loop,memory,openai_cli,snip,tool_result_store}.py`, `examples/microcompact_demo.py`, `tests/test_trace.py` (new), `tests/test_{cli,loop,microcompact_runtime,openai_cli_repl,repl}.py`
@@ -30,7 +30,7 @@ exists in this file. Deleting or rewriting a prior block halts the loop.
 
 ## M2 — done 2026-05-23
 
-- **commit**: `14299af` `[obs-thr/M2] add --aggressive-thresholds preset + SnipTool/MicroCompactor constructor params`
+- **commit**: `43e6ee8` `[obs-thr/M2] add --aggressive-thresholds preset + SnipTool/MicroCompactor constructor params`
 - **tests**: 542 → 551 (+9)
 - **mypy**: clean | **ruff**: clean
 - **files changed**: `src/simple_coding_agent/cli.py`, `src/simple_coding_agent/compact.py`, `src/simple_coding_agent/openai_cli.py`, `src/simple_coding_agent/snip.py`, `examples/aggressive_thresholds_demo.py` (new), `tests/test_snip.py`, `tests/test_repl.py`, `tests/test_openai_cli_repl.py`, `tests/test_aggressive_thresholds_demo.py` (new)
@@ -39,7 +39,7 @@ exists in this file. Deleting or rewriting a prior block halts the loop.
 
 ## M3 — done 2026-05-22
 
-- **commit**: `TBD` `[obs-thr/M3] visibility_full_demo.py + artifact guard + .gitignore`
+- **commit**: `026db2e` `[obs-thr/M3] visibility_full_demo.py + artifact guard + .gitignore`
 - **tests**: 551 → 557 (+6)
 - **mypy**: clean | **ruff**: clean
 - **files changed**: `examples/visibility_full_demo.py` (new), `tests/test_visibility_full_demo.py` (new), `.gitignore`, `README.md`, `initiatives/current/PLAN.md`, `initiatives/current/HANDOFF.md`, `initiatives/current/PROGRESS.md`
