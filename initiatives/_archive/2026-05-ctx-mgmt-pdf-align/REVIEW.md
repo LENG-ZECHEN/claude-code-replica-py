@@ -154,7 +154,24 @@ files), ruff clean.
   dated marker. Real per-file deltas verified via `git worktree` + collect:
   +16 snip_tool_model [new], +12 loop, +6 context, +0 agent_integration (the
   original's "+1 agent_integration" was also wrong — that file is 12→12).
-- **OpenAI live smoke run — NOT RUN.** No `OPENAI_API_KEY` in the environment.
-  Still recommended before relying on `<msg uuid="...">` survival end-to-end.
+- **OpenAI live smoke run — DONE (via DashScope `qwen3.6-plus`).** The `.env`
+  carries `DASHSCOPE_API_KEY` + `OPENAI_BASE_URL`, so the OpenAI-compatible path
+  was exercised live:
+  - **Smoke 1:** one-shot `read_file` task — the `<msg uuid="...">` wrap survived
+    serialization; the model read through it correctly.
+  - **Smoke 2:** `--aggressive-thresholds` REPL — full compaction + recent-file
+    re-injection fired live; the coalesced (P1) attachment payload was accepted
+    with no API error; the model answered a post-compaction question whose answer
+    lived only in the re-attached snapshot (byte 6781, beyond the externalize
+    preview).
+  - **Smoke 3 (model-driven snip, audit item a):** required a new flag —
+    `--snip-nudge-growth-tokens` (added this round to both CLIs; `preset_key=None`
+    so `--aggressive-thresholds` does NOT touch it, because aggressive compaction
+    resets the nudge window every step). A 2-turn REPL with `--snip-nudge-growth-tokens 500`
+    and the default roomy budget armed the nudge; the model emitted a valid
+    `snip_history` call and the executor returned `"Snipped 2 messages"` against the
+    live transcript. Confirmed by inspecting the saved session JSON
+    (`"name": "snip_history"` + `Snipped 2 messages`, no refusal).
+  - All audit items (a)/(b) and findings 1/2/3 are now validated live.
 - **Proposed edits #1 (README flags) and #2 (CLAUDE.md roadmap entry)** remain
   open for human review (not in scope of this follow-up).

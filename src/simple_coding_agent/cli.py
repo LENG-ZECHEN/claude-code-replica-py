@@ -93,6 +93,7 @@ _PREVIEW_CHARS: int = 200
 # ---------------------------------------------------------------------------
 
 _DEFAULT_MAX_STEPS: int = 10
+_DEFAULT_SNIP_NUDGE_GROWTH_TOKENS: int = 10_000
 _DEFAULT_CONTEXT_TOKENS: int = 200_000
 _DEFAULT_RESERVED_OUTPUT_TOKENS: int = 8_192
 # M1 (ctx-pdf): built-in defaults for the four PDF-threshold flags. These
@@ -363,6 +364,7 @@ def _build_repl_loop(
     output_headroom: int | None = None,
     compact_headroom: int | None = None,
     min_session_tokens: int | None = None,
+    snip_nudge_growth_tokens: int | None = None,
     session_memory: SessionMemory | None = None,
     project_memory: ProjectMemory | None = None,
     provider: MockProvider | None = None,
@@ -426,6 +428,15 @@ def _build_repl_loop(
     )
     resolved_min_session_tokens = _resolve_threshold(
         min_session_tokens, None, _DEFAULT_MIN_SESSION_TOKENS,
+        aggressive=aggressive_thresholds,
+    )
+    # snip-nudge growth threshold. preset_key=None (the --max-steps pattern):
+    # it has no _AGGRESSIVE_THRESHOLDS entry because the model-snip nudge is
+    # the lighter alternative to a full compact, so it only fires in the
+    # no-auto-compaction regime. Drive it with an explicit low value plus a
+    # roomy context budget (i.e. WITHOUT --aggressive-thresholds).
+    resolved_snip_nudge_growth_tokens = _resolve_threshold(
+        snip_nudge_growth_tokens, None, _DEFAULT_SNIP_NUDGE_GROWTH_TOKENS,
         aggressive=aggressive_thresholds,
     )
     # When the aggressive preset is on, swap in low thresholds for the
@@ -497,6 +508,7 @@ def _build_repl_loop(
         "metrics": MetricsCollector(),
         "tracer": active_tracer,
         "max_steps": resolved_max_steps,
+        "snip_nudge_growth_tokens": resolved_snip_nudge_growth_tokens,
     }
     if system_prompt is not None:
         loop_kwargs["system_prompt"] = system_prompt
@@ -796,6 +808,7 @@ def _run_repl(
     output_headroom: int | None = None,
     compact_headroom: int | None = None,
     min_session_tokens: int | None = None,
+    snip_nudge_growth_tokens: int | None = None,
     resume: str | None = None,
     shell_mode: ShellMode = ShellMode.MOCK,
     verbose: bool = False,
@@ -837,6 +850,7 @@ def _run_repl(
         output_headroom=output_headroom,
         compact_headroom=compact_headroom,
         min_session_tokens=min_session_tokens,
+        snip_nudge_growth_tokens=snip_nudge_growth_tokens,
         session_memory=session_memory,
         project_memory=project_memory,
         shell_mode=shell_mode,
@@ -968,6 +982,18 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--snip-nudge-growth-tokens",
+        type=int,
+        default=None,
+        help=(
+            "AgentLoop.snip_nudge_growth_tokens: arm the model-driven "
+            "snip_history nudge once context grows this many tokens since the "
+            "last snip (default: 10_000). Lower it (e.g. 500) WITH a roomy "
+            "--max-context-tokens to exercise model snips without auto-compact "
+            "preempting them. Not part of --aggressive-thresholds."
+        ),
+    )
+    parser.add_argument(
         "--resume",
         default=None,
         metavar="NAME",
@@ -1030,6 +1056,7 @@ def main(argv: list[str] | None = None) -> int:
             output_headroom=args.output_headroom,
             compact_headroom=args.compact_headroom,
             min_session_tokens=args.min_session_tokens,
+            snip_nudge_growth_tokens=args.snip_nudge_growth_tokens,
             stream=bool(args.stream),
             resume=args.resume,
             shell_mode=shell_mode,

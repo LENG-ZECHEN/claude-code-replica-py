@@ -128,6 +128,18 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--snip-nudge-growth-tokens",
+        type=int,
+        default=None,
+        help=(
+            "AgentLoop.snip_nudge_growth_tokens (REPL only; default: 10_000): "
+            "arm the model-driven snip_history nudge once context grows this "
+            "many tokens since the last snip. Lower it (e.g. 500) WITH a roomy "
+            "--max-context-tokens to exercise model snips without auto-compact "
+            "preempting them. Not part of --aggressive-thresholds."
+        ),
+    )
+    parser.add_argument(
         "--reserved-output-tokens",
         type=int,
         default=None,
@@ -322,6 +334,7 @@ def _build_openai_repl_loop(
     max_steps: int | None,
     max_context_tokens: int | None,
     reserved_output_tokens: int | None,
+    snip_nudge_growth_tokens: int | None = None,
     session_memory: SessionMemory,
     shell_mode: ShellMode = ShellMode.MOCK,
     tracer: Tracer | None = None,
@@ -345,6 +358,7 @@ def _build_openai_repl_loop(
         max_steps=max_steps,
         max_context_tokens=max_context_tokens,
         reserved_output_tokens=reserved_output_tokens,
+        snip_nudge_growth_tokens=snip_nudge_growth_tokens,
         session_memory=session_memory,
         project_memory=project_memory,
         provider=provider,  # type: ignore[arg-type]
@@ -363,6 +377,7 @@ def _run_openai_repl(
     max_steps: int | None,
     max_context_tokens: int | None,
     reserved_output_tokens: int | None,
+    snip_nudge_growth_tokens: int | None = None,
     stream: bool,
     resume: str | None,
     shell_mode: ShellMode = ShellMode.MOCK,
@@ -393,6 +408,7 @@ def _run_openai_repl(
         max_steps=max_steps,
         max_context_tokens=max_context_tokens,
         reserved_output_tokens=reserved_output_tokens,
+        snip_nudge_growth_tokens=snip_nudge_growth_tokens,
         session_memory=session_memory,
         shell_mode=shell_mode,
         tracer=tracer,
@@ -451,6 +467,7 @@ def main(argv: list[str] | None = None) -> int:
             max_steps=args.max_steps,
             max_context_tokens=args.max_context_tokens,
             reserved_output_tokens=args.reserved_output_tokens,
+            snip_nudge_growth_tokens=args.snip_nudge_growth_tokens,
             stream=not bool(args.no_stream),
             resume=args.resume,
             shell_mode=shell_mode,

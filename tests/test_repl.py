@@ -684,3 +684,41 @@ def test_pdf_threshold_flags_parsed_by_main(
     assert loop._compactor.min_session_tokens == 9_000
 
 
+# ---------------------------------------------------------------------------
+# ctx-pdf follow-up: --snip-nudge-growth-tokens (drives the model-snip nudge).
+# preset_key=None (the --max-steps pattern): explicit flag or default only,
+# NOT lowered by --aggressive-thresholds.
+# ---------------------------------------------------------------------------
+
+def test_snip_nudge_growth_tokens_defaults_when_omitted(tmp_path: Path) -> None:
+    loop = cli_mod._build_repl_loop(tmp_path)
+    assert loop._snip_nudge_growth_tokens == cli_mod._DEFAULT_SNIP_NUDGE_GROWTH_TOKENS
+
+
+def test_snip_nudge_growth_tokens_explicit_value_propagates(tmp_path: Path) -> None:
+    loop = cli_mod._build_repl_loop(tmp_path, snip_nudge_growth_tokens=500)
+    assert loop._snip_nudge_growth_tokens == 500
+
+
+def test_snip_nudge_growth_tokens_not_lowered_by_aggressive(tmp_path: Path) -> None:
+    # The nudge has no _AGGRESSIVE_THRESHOLDS entry (snip is the lighter
+    # alternative to a full compact, which aggressive mode fires constantly),
+    # so the aggressive preset must NOT change it.
+    loop = cli_mod._build_repl_loop(tmp_path, aggressive_thresholds=True)
+    assert loop._snip_nudge_growth_tokens == cli_mod._DEFAULT_SNIP_NUDGE_GROWTH_TOKENS
+
+
+def test_snip_nudge_growth_tokens_parsed_by_main(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    _set_stdin(monkeypatch, "/exit")
+    rc = main([
+        "--repl",
+        "--workspace", str(tmp_path),
+        "--snip-nudge-growth-tokens", "500",
+    ])
+    assert rc == 0
+    loop = _captured_loops()[0]
+    assert loop._snip_nudge_growth_tokens == 500
+
+
