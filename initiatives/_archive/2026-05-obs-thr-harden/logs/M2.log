@@ -1,0 +1,24 @@
+Milestone **M2** complete. Working tree clean, single `[obs-thr-hd/M2]` commit at HEAD `4056370`.
+
+## Summary
+
+**The bug, fixed:** `--max-context-tokens`/`--reserved-output-tokens` argparse defaults (`200_000`/`8_192`) always shadowed the aggressive preset's `context_tokens=4_000`/`reserved_output_tokens=512`, so 2 of 8 preset fields never took effect. Now all three int flags (`--max-steps` too) default to `None` sentinels, and a single `cli._resolve_threshold(explicit, preset_key, default, *, aggressive)` helper encodes the three-state precedence (**explicit flag > aggressive preset > built-in default**), called inside the shared `cli._build_repl_loop`.
+
+**Anti-drift:** `openai_cli` already delegates to `_build_repl_loop`, so the precedence rule is structurally identical between the two REPLs — a symmetry test asserts it.
+
+**Exit gate — all objectively met:**
+- `pytest --tb=no -q` → **605 passed** (≥577 floor; 584→605, +21)
+- `test_aggressive_thresholds_precedence_matrix` → **18 cases** (8 keys × {default, preset} + 2 flag-fields × explicit)
+- `MicroCompactor(threshold_minutes=0)` raises `ValueError` → `test_microcompactor_rejects_zero_minutes` passes
+- `openai_cli` sentinel symmetry → 2 cases pass
+- `mypy src` clean · `ruff check .` clean
+- `--help` renders the M3-pinned phrase `"preset value applies"` contiguously (verified for both CLIs)
+
+**Three in-scope deviations** (documented in HANDOFF §2):
+1. Resolution placed in `_build_repl_loop` (not `_run_repl`) — required by the exit-gate matrix strategy and gives structural symmetry.
+2. **`compact.py` not modified** — the `MicroCompactor` guard already existed at `compact.py:303-304`, already mirroring `SnipTool`. Only the missing negative test was added.
+3. Reused existing `_DEFAULT_CONTEXT_TOKENS`/`_DEFAULT_RESERVED_OUTPUT_TOKENS`/`_DEFAULT_MAX_STEPS` constants instead of adding a duplicate `_DEFAULT_MAX_CONTEXT_TOKENS`; `--max-steps` stays at default 10 (no preset entry).
+
+**Deferred (noted for review, out of M2 scope):** `openai_cli._DEFAULT_MAX_STEPS` is now dead code (left in place to avoid churn).
+
+HANDOFF §4 carries forward all invariants plus the new M2 constraints (don't touch cli.py/openai_cli.py in M3; the pinned `--help` phrase; the MicroCompactor `>= 1` contract); §5 guides M3 (`demo-fences-zero-overhead-and-doc-sync`). The loop can proceed to M3.

@@ -1,0 +1,27 @@
+M3 is complete. All exit-ritual steps done and the shell script's six independent checks are satisfied.
+
+## Summary — `[obs-thr-hd/M3]` demo-fences-zero-overhead-and-doc-sync (last milestone)
+
+**Exit gate (§2) — PASS, objectively:**
+- `pytest --tb=no -q` → **615 passed** (gate floor ≥587; baseline was 605, +10)
+- mypy `src/`: clean · ruff `.`: clean
+- `_new_run_dir` collision fence: PASS (`-2`/`-3` suffix + `SystemExit` when all 9 taken)
+- `_parse_trace_events` repr-quoted tolerance: PASS (whitespace strings, dict & list reprs; unquoted backward-compat)
+- `test_null_tracer_zero_overhead`: PASS (ran, not skipped — 100k `emit` < 20ms)
+- `--help` snapshot pinning `preset value applies`: PASS (2 cases)
+- `grep -c aggressive_thresholds_demo.py README.md` → 2
+
+**Implementation (zero source change, as scoped):**
+- `examples/visibility_full_demo.py` — extended `_new_run_dir` (collision suffix) and `_parse_trace_events` (new `_scan_value`/`_parse_fields` helpers that read quote- and bracket-delimited values whole). Only those two functions touched.
+- 3 test files (+10 cases): demo collision/parser (`test_visibility_full_demo.py`), NullTracer perf (`test_trace.py`), `--help` snapshot (`test_cli.py`).
+- README "## Examples" section + the 3 missing demo entries; CLAUDE.md roadmap bullet (557→615, +58).
+
+**Notable PLAN deviation** (recorded in HANDOFF §2 M3): the parser handles bracket-delimited reprs (`{...}`/`[...]`), not just quote-delimited values — `repr({...})` starts with `{`, and the gate requires tolerating dict/list reprs. The `--help` snapshot normalizes whitespace because the verbose line contains a backtick (``Stream `[trace]``), so PLAN's literal `"Stream [trace]"` isn't contiguous.
+
+**Exit ritual:** PROGRESS.md (`## M3` block appended), HANDOFF.md (rewritten, `### M1`/`### M2` preserved verbatim, `### M3` appended, initiative marked complete), PLAN.md (`STATUS: complete` line added).
+
+**Commits** (the `--amend` was hard-blocked by GateGuard, so the self-referential SHA was folded via a second `[obs-thr-hd/M3]` commit — cleaner anyway, since `9b00767` stays a reachable commit rather than a dangling pre-amend SHA):
+- `9b00767` — substantive M3 work (9 files)
+- `4582997` — fills `9b00767` into roadmap/handoff/progress
+
+The initiative is complete; the loop will now spawn the final `--remote-control` review session.

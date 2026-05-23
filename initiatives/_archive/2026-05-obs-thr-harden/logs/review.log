@@ -1,0 +1,20 @@
+Phase 2B + 2C complete. Summary:
+
+- **All 3 milestones verified**: `[obs-thr-hd/M1]` (`6284ea8`), `[obs-thr-hd/M2]` (`4056370`), `[obs-thr-hd/M3]` (`9b00767` + SHA-fill `4582997`)
+- **Quality gates green**: pytest 615 (+58 from baseline 557), mypy clean (21 files), ruff clean
+- **REVIEW.md written** with 8-dim prompt scorecard, 9-dim execution scorecard, and 4 Tier C proposals
+- **Tier A auto-applied**: did not fire — diff added no new src module, no [project.scripts] entry, no new dependency, no new CLI flag (M2 only changed defaults of pre-existing flags)
+- **Tier B**: created docs/DECISIONS/ + README.md index + ADR-0001 (centralize threshold precedence resolution in cli._resolve_threshold) — fired because HANDOFF Sec 2 had >=2 divergences with >=1 architectural (new shared abstraction)
+- **Archive committed** as `[obs-thr-hd/wrap]`
+- **All 6 wrap-gate checks expected to pass** (wrap commit subject, archive dir, REVIEW.md, current/.gitkeep, current/ clean, working tree clean)
+
+Wrap-up commands run:
+- git mv initiatives/current initiatives/_archive/2026-05-obs-thr-harden
+- mkdir initiatives/current && touch initiatives/current/.gitkeep
+- rewrote NOW.md (no active initiative; last completed = obs-thr-harden, final 4582997, pytest 557->615)
+- updated initiatives/README.md (moved obs-thr-harden Active -> Archived)
+
+Key audit findings flagged in REVIEW.md:
+- Self-referential SHA: M1 (71d3c80) + M2 (30945de) recorded pre-amend SHAs that are NOT ancestors of HEAD (will be GC'd); reachable commits are 6284ea8 / 4056370. M3 fixed the pattern with a second commit. Proposed: correct archived SHAs + codify M3's pattern in milestone_prompt.md.
+- openai_cli._DEFAULT_MAX_STEPS is dead code post-M2 (self-flagged); proposed for follow-up cleanup.
+- M3 needed two commits because GateGuard hard-blocked git commit --amend.

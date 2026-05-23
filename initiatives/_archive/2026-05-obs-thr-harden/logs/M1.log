@@ -1,0 +1,32 @@
+All exit-gate checks pass. M1 is complete.
+
+## §5 Exit ritual — confirmation
+
+**Step 1 — Exit gate met (objectively verified):**
+```
+$ pytest --tb=no -q | tail -1
+584 passed in 2.53s            # ≥ 565 required (baseline 557, +27)
+$ mypy src/                     → Success: no issues found in 21 source files
+$ ruff check .                  → All checks passed!
+```
+§2 required coverage, all PASSED:
+- (a) `test_secret_leak_negative[bearer-token | aws-key | openai-key | unicode-secret]` — 4 secret shapes, none leak to stderr
+- (b) `test_stream_closed_does_not_propagate` (+ `test_stream_closed_only_swallows_io_errors` proving `RuntimeError` still propagates)
+- (c) `test_reactive_channel_end_to_end` — `PromptTooLongError`-then-success provider produces a `[trace] [reactive]` line
+- (d) `test_whitespace_value_roundtrip_through_demo_parser` + `test_nonstring_value_roundtrip_through_demo_parser[dict|list|none]` — adjacent field survives the real `_parse_trace_events`
+
+**Steps 2–4 — Side-effects, machine-verified:**
+1. Commit subject contains `[obs-thr-hd/M1]` ✅
+2. `HANDOFF.md` modified in the commit ✅
+3. `PROGRESS.md` has `## M1 — done 2026-05-23` (anchored) ✅
+4. pytest green (584) ✅
+5. HANDOFF has all 5 verbatim section headers (count=5) + `### M1` subsection (count=1) ✅
+6. Append-only: M1 is first; no prior blocks to preserve ✅
+
+**Source changes (scope-tight — only the two allowed files):**
+- `src/simple_coding_agent/trace.py`: wrapped `write` in `try/except (OSError, ValueError): return` (only those two swallowed); added `_render_value` helper; `emit` now renders values through it. `NullTracer.emit` body untouched (`pass`); `Tracer` Protocol unchanged; 9-channel list untouched; no new deps.
+- `tests/test_trace.py`: +27 cases (557 → 584).
+
+**Final commit:** HEAD is `6284ea8`. The PROGRESS/HANDOFF "commit" field cites `71d3c80` — its content-identical pre-amend object (the SHA text was resolved via amend, since a commit cannot embed its own final hash). Both objects are inspectable; the difference is only the SHA string in those two docs.
+
+The shell loop's exit-gate checks will pass and M2 can proceed.

@@ -10,9 +10,7 @@ For the active-initiative pointer and the bootstrap procedure, see
 
 ## Active
 
-| Slug | Status | Started | Goal |
-|---|---|---|---|
-| [obs-thr-harden](./current/) | bootstrapped (M1 pending) | 2026-05-23 | Hardening pass over `observable-thresholds`: fix `_AGGRESSIVE_THRESHOLDS` preset bug, expand precedence + leak coverage, demo collision fences, pin `NullTracer` zero-overhead. |
+_(none — `current/` is empty)_
 
 ## Archived
 
@@ -20,6 +18,7 @@ For the active-initiative pointer and the bootstrap procedure, see
 |---|---|---|---|---|
 | [2026-05-runtime-activation](./_archive/2026-05-runtime-activation/) | complete | 2026-05-21 | M1 → M5 | `de3ecad` |
 | [2026-05-observable-thresholds](./_archive/2026-05-observable-thresholds/) | complete | 2026-05-22 – 2026-05-23 | M1 → M3 | `026db2e` |
+| [2026-05-obs-thr-harden](./_archive/2026-05-obs-thr-harden/) | complete | 2026-05-23 | M1 → M3 | `4582997` |
 
 ## Folder shape (per initiative)
 

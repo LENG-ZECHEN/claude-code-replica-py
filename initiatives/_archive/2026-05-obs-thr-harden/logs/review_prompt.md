@@ -1,0 +1,346 @@
+<!--
+PROMPT for the script-spawned review + wrap-up session.
+
+automation/scripts/run_all_milestones.sh invokes one final
+`claude --print` after all milestones pass their exit gate. The script
+substitutes obs-thr-harden, obs-thr-hd, 2026-05-obs-thr-harden,
+and e8e2206c2fc6737f509229b2414bb578dc4d99e1 (4 tokens) before piping this file as stdin.
+
+The review session is REQUIRED to honor the steps below in order. Its
+exit ritual (Phase 2C wrap-up) physically moves initiatives/current/
+into initiatives/_archive/ and commits the result.
+
+Comment blocks (HTML comments) are guidance and should NOT appear in
+the final REVIEW.md.
+-->
+
+# Phase 2B + 2C — Review and wrap-up for `obs-thr-harden`
+
+You are the **review + wrap-up agent** for the `obs-thr-harden`
+initiative. Every milestone has already produced its commit; your job is
+to audit prompt quality + execution quality, write a single REVIEW.md,
+propose project-level doc edits, and archive the initiative folder.
+
+There is no user available. Follow every step. Stop only on a clear
+quality failure (pytest red, mypy red, **or ruff red** — consistent with
+Step 2 below).
+
+## Mandatory reading
+
+1. `python-replica/automation/RUNBOOK.md` — your role is documented in
+   Phase 2B + 2C.
+2. `python-replica/initiatives/current/PLAN.md` — the original brief.
+3. `python-replica/initiatives/current/config.yaml` — milestone table.
+4. Every `python-replica/initiatives/current/prompts/M{N}.md` —
+   the per-milestone prompts you are auditing.
+5. Every `python-replica/initiatives/current/logs/M{N}.log` —
+   the raw run logs.
+6. `python-replica/initiatives/current/HANDOFF.md` — terminal state
+   (rewritten by the last milestone).
+7. `python-replica/initiatives/current/PROGRESS.md` — per-milestone log.
+
+## Phase 2B — Review steps
+
+### Step 1: Verify completion
+
+For every M{N} in `config.yaml`:
+- `git -C python-replica log e8e2206c2fc6737f509229b2414bb578dc4d99e1..HEAD --oneline | grep -F "[obs-thr-hd/M{N}]"`
+  must return at least one match. The `e8e2206c2fc6737f509229b2414bb578dc4d99e1..HEAD` range
+  restricts the search to THIS initiative's commits, preventing false
+  positives from a prior archived initiative that happened to reuse the
+  same `commit_prefix`. `e8e2206c2fc6737f509229b2414bb578dc4d99e1` was substituted in by the
+  shell script from `initiatives/current/config.yaml` (Phase 1 Step 5).
+- If any milestone is missing its commit, STOP and write a
+  REVIEW.md with just a "BLOCKED" section explaining which milestone
+  failed and why. Skip Steps 2-6 (rest of Phase 2B) and all of Phase 2C
+  (Steps 7-11) — do NOT run `git mv initiatives/current
+  initiatives/_archive/...` against an incomplete initiative.
+
+### Step 2: Snapshot final numbers
+
+```
+cd python-replica
+pytest --tb=no -q       # record total passing
+mypy src/               # record status
+ruff check .            # record status
+```
+
+If pytest is red OR mypy is red OR ruff is red, STOP. The initiative
+cannot be wrapped up while quality gates are broken. Write a REVIEW.md
+with just a "BLOCKED" section quoting the failing output.
+
+### Step 3: Prompt quality scorecard (per milestone)
+
+For each `prompts/M{N}.md` score on the following 8 dimensions (1-5 each):
+
+| Dimension | What to look for |
+|---|---|
+| Clarity | Can a fresh session execute this without ambiguity? |
+| Completeness | Are §1-§5 all present and substantively filled? |
+| Scope alignment | Do the §2 scope + exit gate match PLAN's M{N} entry? |
+| Constraint specificity | Are TDD / file-limit / no-`-A` requirements explicit? |
+| Exit-ritual correctness | Does §5 match `automation/templates/milestone_prompt.md` §5? |
+| **Out-of-scope enumeration** | Does §2.5 list concrete "do not" items (other milestones, harness files, unrelated refactors, public-API changes, new deps), or is it just a generic disclaimer? |
+| **Mandatory reading completeness** | Does §3 list all 8 mandatory reads (CLAUDE.md, PLAN.md, config.yaml, HANDOFF.md, PROGRESS.md, expected files, git log when N>1, prior log when N>2)? |
+| **Exit gate objectivity** | Is the exit_gate quoted in §2 objectively verifiable by a command output, NOT subjective phrasing like "implementation is good" / "looks correct"? |
+
+Produce a markdown table inside REVIEW.md.
+
+### Step 4: Execution quality scorecard (per milestone)
+
+For each milestone, inspect: the commit subject, the commit body, the
+test count delta (from PROGRESS.md), the mypy/ruff status delta, the
+design decisions listed in each milestone's HANDOFF Section 2
+"Completed milestones" subsection (look for the "design decisions
+(deviations from PLAN)" field), and any anomalies in the milestone log.
+
+Score on the following 9 dimensions (1-5 each):
+
+| Dimension | What to look for |
+|---|---|
+| Commit hygiene | Subject matches `[obs-thr-hd/M{N}]` format; body explains why |
+| Test growth | Did pytest grow as expected? Were new tests meaningful? |
+| Gate honor | mypy + ruff still clean? |
+| Divergence discipline | Are divergences clearly explained in the milestone's HANDOFF Section 2 "design decisions" subsection? |
+| Log cleanliness | Any unexplained errors / warnings / retries in the log? |
+| **Implementation matches PLAN** | Does the diff actually deliver what PLAN.md M{N} promised, or only the surface (tests pass but the architecture / public-API shape differs from what was planned)? Quote the PLAN passage and the matching diff hunks. |
+| **Scope discipline** | Did the milestone touch only (a) files listed in its prompt §2 "Expected files to touch", (b) tests for those files, and (c) required bookkeeping files — namely `initiatives/current/HANDOFF.md`, `initiatives/current/PROGRESS.md`, and (for the final milestone only) `initiatives/current/PLAN.md` to mark STATUS complete? Or did it scope-creep into unrelated modules? Run `git show --stat <commit>` and compare with §2 PLUS this bookkeeping allowlist — do NOT flag (c) as scope-creep, every milestone is REQUIRED to touch those by §5 exit ritual. |
+| **HANDOFF accuracy** | Cross-reference the milestone's HANDOFF Section 2 ("behavior implemented", "files changed", "tests added") with the actual diff and PROGRESS.md entry. Does what's CLAIMED match what SHIPPED? Catch HANDOFF inflation early. |
+| **Failure-path coverage** | Did new tests cover error / edge paths (look for `pytest.raises`, invalid-input cases, boundary conditions), or only happy path? A milestone whose 100% of new tests are happy-path is fragile and should be flagged. |
+
+### Step 5: Write `initiatives/current/REVIEW.md`
+
+Use this structure:
+
+```
+# REVIEW — obs-thr-harden
+
+## Summary
+- Initiative period: <start> → <end>
+- Milestones: <count>, all complete
+- pytest: <before> → <after> (Δ +N)
+- mypy: <status>; ruff: <status>
+- Total commits in this initiative: <N>
+- Lessons learned: <bullets — what worked, what to do differently next time>
+
+## Phase 2B-3: Prompt quality scorecards
+<markdown table from Step 3>
+
+## Phase 2B-4: Execution quality scorecards
+<markdown table from Step 4>
+
+## Auto-applied edits
+<Tier A + Tier B entries from Step 6. One bullet per edit:
+ - Tier A | <file> | <one-line summary> | trigger: <which row>
+ - Tier B | <new file path> | <one-line summary> | trigger: <which row>
+ If none were applied, write "(none — diff did not match any A/B trigger)">
+
+## Proposed edits (need human review)
+<Tier C entries from Step 6. Numbered list with file:line + suggested diff.
+ If none, write "(none)">
+
+## Phase 2C: Wrap-up actions taken
+<list what you did in Phase 2C, with commands>
+```
+
+### Step 6: Three-tier doc update
+
+Read `automation/RUNBOOK.md` section "Doc-update tiers (used by Step 6)"
+in full before starting this step. The tier definitions live there; this
+section just tells you how to execute them.
+
+Run the diff once at the top of this step. The `e8e2206c2fc6737f509229b2414bb578dc4d99e1`
+token was substituted in by the shell script from
+`initiatives/current/config.yaml` (Phase 1 Step 5). It points at the
+Phase 1 entry HEAD — i.e. the commit BEFORE the human-made bootstrap
+commit and before any milestone shipped — so `e8e2206c2fc6737f509229b2414bb578dc4d99e1..HEAD`
+spans every change this initiative introduced. Limiting `--` to
+`src/ pyproject.toml` ignores the bootstrap commit's
+`initiatives/ + INBOX.md` move, leaving exactly the production-code
+delta to classify into Tier A/B/C.
+
+```
+git -C python-replica diff e8e2206c2fc6737f509229b2414bb578dc4d99e1..HEAD --stat -- src/ pyproject.toml
+git -C python-replica diff e8e2206c2fc6737f509229b2414bb578dc4d99e1..HEAD --name-only -- src/ pyproject.toml
+```
+
+Then walk each tier in order:
+
+#### Tier A — apply automatically (append only)
+
+For each change-candidate that matches a Tier A trigger (see RUNBOOK):
+
+1. Locate the target file + insertion point.
+2. Use Edit to APPEND a row / bullet / section. Do not modify existing
+   content. Do not touch the first 10 lines of README.md or the
+   Implementation Roadmap section of CLAUDE.md.
+3. Record what you did in REVIEW.md `## Auto-applied edits` with:
+   ```
+   - Tier A | <file> | <one-line summary> | trigger: <which Tier A row>
+   ```
+
+If you are unsure whether a candidate is mechanical-enough for Tier A,
+downgrade it to Tier C (propose only).
+
+#### Tier B — judged auto-apply (create new files)
+
+Be **moderately aggressive**: when a trigger is close to firing, prefer
+to act over propose. New files are reversible with a single `git rm`.
+
+For each candidate matching a Tier B trigger:
+
+1. **Subsystem doc** (`docs/<slug>.md`): copy
+   `automation/templates/subsystem_doc.md` into place, fill every
+   `{{placeholder}}`. The slug = new subdir name OR new module basename
+   (kebab-case). If the file already exists, do NOT overwrite — append
+   a `- {{TODAY}} — obs-thr-harden — ...` bullet to the file's
+   `## Recent changes` section instead.
+
+2. **ADR** (`docs/DECISIONS/<NNNN>-<slug>.md`):
+   - If `docs/DECISIONS/` does not exist, create it AND write a
+     `README.md` index with a one-line table (Number / Date / Title /
+     Status / Initiative).
+   - NNNN = `ls docs/DECISIONS/ | grep -E '^[0-9]{4}' | sort | tail -1
+     | cut -c1-4` + 1, zero-padded to 4. Starts at `0001` for the first
+     ADR ever.
+   - slug = kebab-case of the divergence title (≤6 words).
+   - Copy `automation/templates/adr.md` into place, fill every
+     `{{placeholder}}`. Source the Context / Decision / Consequences
+     fields from each milestone's HANDOFF Section 2 "design decisions
+     (deviations from PLAN)" subsection verbatim where possible.
+   - After creating, **append** a row to `docs/DECISIONS/README.md`'s
+     index table.
+
+3. Record EVERY B-tier creation in REVIEW.md `## Auto-applied edits`:
+   ```
+   - Tier B | <new file path> | <one-line summary> | trigger: <which Tier B row>
+   ```
+
+#### Tier C — propose only
+
+For every candidate that does NOT fit Tier A or B (anything requiring a
+rewrite, deletion, reorganization, or subjective "staleness" judgment),
+write a numbered entry in REVIEW.md `## Proposed edits (need human review)`:
+
+```
+1. <file>:<line-or-section> — <what to change> — why: <reason>
+   Suggested diff:
+   ```diff
+   - old line
+   + new line
+   ```
+```
+
+DO NOT apply Tier C edits. The human reviewer applies them after reading
+the review.
+
+## Phase 2C — Wrap-up steps
+
+Only proceed if Step 1 passed (no BLOCKED) and Step 2 was green.
+
+### Step 7: Archive
+
+```
+cd python-replica
+git mv initiatives/current initiatives/_archive/2026-05-obs-thr-harden
+mkdir initiatives/current
+touch initiatives/current/.gitkeep
+```
+
+### Step 8: Rewrite NOW.md
+
+Use this template:
+
+```
+# NOW — current initiative status
+
+## Active initiative
+
+**None.**
+
+`initiatives/current/` is empty (`.gitkeep` only).
+
+## Last completed initiative
+
+**obs-thr-harden** — see
+[`initiatives/_archive/2026-05-obs-thr-harden/`](./initiatives/_archive/2026-05-obs-thr-harden/).
+
+| | |
+|---|---|
+| Period | <start>–<end> |
+| Milestones | M1 → M{N} |
+| Final commit | `<sha>` |
+| pytest | <before> → <after> |
+| mypy + ruff | <status> |
+
+## How to start a new initiative
+
+(Keep the same "How to start a new initiative" section that was in the
+prior NOW.md — copy verbatim.)
+```
+
+### Step 9: Update `initiatives/README.md`
+
+Move the row for this initiative from the Active table to the Archived
+table. Fill final commit, period, milestone count.
+
+### Step 10: Write review.log
+
+Write a terse session summary to
+`initiatives/_archive/2026-05-obs-thr-harden/logs/review.log` using `Write`.
+Use this content shape (fill in the actual values):
+
+```
+Phase 2B + 2C complete. Summary:
+
+- **All N milestones verified**: `[obs-thr-hd/M1]` (`<sha>`), …
+- **Quality gates green**: pytest <N> (+<delta> from <baseline>), mypy clean (<N> files), ruff clean
+- **REVIEW.md written** with <N>-dim prompt scorecard, <N>-dim execution scorecard, and <N> Tier C proposals
+- **Tier A auto-applied**: <one line per edit, or "did not fire: <reason>">
+- **Tier B**: <one line per creation, or "did not fire: <reason>">
+- **Archive committed** as `<wrap-sha> [obs-thr-hd/wrap]`
+- **All 6 wrap-gate checks pass**
+
+Key audit findings flagged in REVIEW.md:
+- <up to 3 bullets from Proposed edits or low scorecard scores>
+```
+
+Then stage it:
+
+```
+git add initiatives/_archive/2026-05-obs-thr-harden/logs/review.log
+```
+
+### Step 11: Commit
+
+Stage **every path** Phase 2C wrap + Step 6 Tier A/B might have
+touched (explicit paths — project convention: no `git add -A`):
+
+```
+cd python-replica
+
+git add initiatives/                  # archived initiative + new current/.gitkeep + index
+git add NOW.md                        # rewritten by Step 8
+git add CLAUDE.md README.md           # Tier A may have appended (no-op if untouched)
+git add docs/                         # Tier B may have created subsystem docs / ADRs / DECISIONS dir
+
+git commit -m "[obs-thr-hd/wrap] post-execution review + archive
+
+REVIEW: initiatives/_archive/2026-05-obs-thr-harden/REVIEW.md
+Final pytest: <count>. mypy + ruff clean.
+"
+```
+
+**Verify the working tree is clean after the commit.** If anything
+remains unstaged or untracked, a Tier A/B edit slipped through — the
+loop's wrap-gate Check 6 will halt:
+
+```
+if [ -n "$(git status --short)" ]; then
+  echo "ERROR: working tree dirty after wrap commit:"
+  git status --short
+  echo "Some Tier A/B edits were not staged. Add them and amend, or"
+  echo "investigate which Step 6 action produced unstaged changes."
+  exit 1
+fi
+```
