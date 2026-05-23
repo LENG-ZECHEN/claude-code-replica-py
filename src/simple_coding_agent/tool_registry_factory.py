@@ -24,7 +24,9 @@ from .coding_tools import (
     search_text,
     write_file,
 )
+from .snip_tool_model import register_snip_history_tool
 from .tools import Tool, ToolRegistry
+from .transcript import Transcript
 
 
 def _format_search_results(matches: list[SearchMatch]) -> str:
@@ -38,6 +40,7 @@ def build_default_registry(
     workspace: str | Path,
     *,
     shell_mode: ShellMode = ShellMode.MOCK,
+    transcript: Transcript | None = None,
 ) -> ToolRegistry:
     """Register the safe coding tools against *workspace* and return the registry.
 
@@ -170,6 +173,13 @@ def build_default_registry(
             command, mode=_mode, cwd=_cwd,
         ),
     ))
+
+    # M4: the model-driven snip_history tool. It captures a live Transcript by
+    # closure so the model can delete past tool_result messages by uuid. When
+    # no transcript is supplied a fresh one is used (the tool is still
+    # registered but acts on empty history); REPL call sites pass the SAME
+    # Transcript the AgentLoop holds so model snips reach the live session.
+    register_snip_history_tool(registry, transcript if transcript is not None else Transcript())
 
     return registry
 

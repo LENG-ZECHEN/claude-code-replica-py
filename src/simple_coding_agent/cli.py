@@ -243,10 +243,12 @@ def _format_call(call: ToolCall) -> str:
 def _run_demo(workspace: Path, *, shell_mode: ShellMode = ShellMode.MOCK) -> int:
     """Wire components, run the loop, print a structured trace, return exit code."""
     _seed_workspace(workspace)
-    registry = build_default_registry(workspace, shell_mode=shell_mode)
+    transcript = Transcript()
+    registry = build_default_registry(
+        workspace, shell_mode=shell_mode, transcript=transcript
+    )
     executor = ToolExecutor(registry)
     budget = ContextBudget(max_tokens=200_000, reserved_output_tokens=8_192)
-    transcript = Transcript()
     builder = ContextBuilder(
         budget=budget,
         workspace_path=workspace,
@@ -384,7 +386,13 @@ def _build_repl_loop(
     ``--verbose`` flag activates trace output across the whole pipeline.
     """
     active_tracer: Tracer = tracer if tracer is not None else NullTracer()
-    registry = build_default_registry(workspace, shell_mode=shell_mode)
+    # M4: the transcript is created BEFORE the registry so the snip_history
+    # tool registered inside build_default_registry closes over the SAME
+    # Transcript instance the AgentLoop holds — model snips reach live history.
+    transcript = Transcript()
+    registry = build_default_registry(
+        workspace, shell_mode=shell_mode, transcript=transcript
+    )
     executor = ToolExecutor(registry)
     # Three-state precedence (explicit flag > aggressive preset > default)
     # is resolved here, the one place both REPLs share. ``None`` means "no
@@ -467,7 +475,6 @@ def _build_repl_loop(
         max_tokens=resolved_context_tokens,
         reserved_output_tokens=resolved_reserved_output_tokens,
     )
-    transcript = Transcript()
     builder = ContextBuilder(
         budget=budget,
         tool_result_store=tool_result_store,

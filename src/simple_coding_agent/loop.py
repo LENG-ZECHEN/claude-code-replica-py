@@ -26,6 +26,7 @@ fields on the returned LoopResult so callers can react without try/except.
 
 from __future__ import annotations
 
+import json
 import uuid as _uuid
 from collections import deque
 from collections.abc import Iterator
@@ -49,6 +50,7 @@ from .models import (
 )
 from .provider import STOP_MAX_TOKENS, PromptTooLongError, Provider
 from .snip import SnipTool
+from .snip_tool_model import SnipNudge, snippable_candidate_uuids
 from .tool_result_store import ToolResultStore
 from .tools import ToolExecutor, ToolRegistry, UnknownToolError
 from .trace import NullTracer, Tracer
@@ -61,6 +63,7 @@ from .transcript import Transcript
 _DEFAULT_MAX_STEPS: int = 10
 _DEFAULT_SYSTEM_PROMPT: str = "You are a coding assistant."
 _DEFAULT_RECENT_FILES_CAPACITY: int = 5
+_DEFAULT_SNIP_NUDGE_GROWTH_TOKENS: int = 10_000
 
 
 def _now_iso() -> str:
@@ -170,12 +173,18 @@ class AgentLoop:
         system_prompt: str = _DEFAULT_SYSTEM_PROMPT,
         max_steps: int = _DEFAULT_MAX_STEPS,
         recent_files_capacity: int = _DEFAULT_RECENT_FILES_CAPACITY,
+        snip_nudge_growth_tokens: int = _DEFAULT_SNIP_NUDGE_GROWTH_TOKENS,
     ) -> None:
         if max_steps < 1:
             raise ValueError(f"max_steps must be >= 1, got {max_steps}")
         if recent_files_capacity < 1:
             raise ValueError(
                 f"recent_files_capacity must be >= 1, got {recent_files_capacity}"
+            )
+        if snip_nudge_growth_tokens < 1:
+            raise ValueError(
+                "snip_nudge_growth_tokens must be >= 1, got "
+                f"{snip_nudge_growth_tokens}"
             )
         self._provider = provider
         self._tool_executor = tool_executor
@@ -210,6 +219,15 @@ class AgentLoop:
         self._recent_file_snapshots: deque[FileSnapshot] = deque(
             maxlen=recent_files_capacity
         )
+        # M4: model-driven snip nudge state. ``_tokens_since_last_snip``
+        # accumulates the estimated tokens of each tool turn and resets on
+        # any snip (engine or model) or full compact. When it crosses
+        # ``_snip_nudge_growth_tokens`` the next build() is armed with a
+        # SnipNudge. ``_snip_nudge_suppressed`` latches True once reactive
+        # compact fires — snip is irrelevant after that for the loop's life.
+        self._snip_nudge_growth_tokens = snip_nudge_growth_tokens
+        self._tokens_since_last_snip = 0
+        self._snip_nudge_suppressed = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -239,6 +257,7 @@ class AgentLoop:
                     system=self._system_prompt,
                     compact_summary=self._last_summary,
                     memory_snippets=memory_snippets,
+                    snip_nudge=self._compute_snip_nudge(),
                 )
 
                 tools_spec = (
@@ -262,6 +281,9 @@ class AgentLoop:
                             metrics=self._metrics,
                         )
                     reactive_compact_attempted = True
+                    # M4: snip is irrelevant once we've had to reactively
+                    # compact — suppress the nudge for this loop's lifetime.
+                    self._snip_nudge_suppressed = True
                     compacted_this_turn = self._force_compact()
                     self._tracer.emit("reactive", turn=turn)
                     self._metrics.record_reactive_compact()
@@ -310,6 +332,7 @@ class AgentLoop:
                 if response.text:
                     self._transcript.append(Message.assistant(response.text))
                 asst_msg, tool_results = self._handle_tool_calls(response.tool_calls)
+                self._track_snip_nudge_growth(asst_msg, tool_results)
                 steps.append(AgentStep(
                     turn=turn,
                     user_message=initial_user_msg,
@@ -381,6 +404,7 @@ class AgentLoop:
                     system=self._system_prompt,
                     compact_summary=self._last_summary,
                     memory_snippets=memory_snippets,
+                    snip_nudge=self._compute_snip_nudge(),
                 )
                 tools_spec = (
                     self._registry.to_api_format() if self._registry is not None else []
@@ -411,6 +435,9 @@ class AgentLoop:
                         yield LoopStreamEvent.done(result)
                         return
                     reactive_compact_attempted = True
+                    # M4: snip is irrelevant once we've had to reactively
+                    # compact — suppress the nudge for this loop's lifetime.
+                    self._snip_nudge_suppressed = True
                     compacted_this_turn = self._force_compact()
                     self._tracer.emit("reactive", turn=turn)
                     self._metrics.record_reactive_compact()
@@ -472,6 +499,7 @@ class AgentLoop:
                 if response.text:
                     self._transcript.append(Message.assistant(response.text))
                 asst_msg, tool_results = self._handle_tool_calls(response.tool_calls)
+                self._track_snip_nudge_growth(asst_msg, tool_results)
                 step = AgentStep(
                     turn=turn,
                     user_message=initial_user_msg,
@@ -550,6 +578,8 @@ class AgentLoop:
             self._transcript, self._budget, snapshots=snapshots
         )
         self._metrics.record_full_compact()
+        # M4: a full compact resets the snip-nudge growth window.
+        self._tokens_since_last_snip = 0
         return True
 
     def _maybe_microcompact(self) -> bool:
@@ -595,6 +625,8 @@ class AgentLoop:
         self._transcript.replace_all(snipped)
         self._snip_attempted_this_turn = True
         self._metrics.record_snip()
+        # M4: an engine snip resets the snip-nudge growth window.
+        self._tokens_since_last_snip = 0
         return True
 
     def _refresh_externalized_bytes(self) -> None:
@@ -645,6 +677,71 @@ class AgentLoop:
         )
         self._transcript.append(results_msg)
         return asst_msg, tool_results
+
+    # ------------------------------------------------------------------
+    # M4: snip-nudge growth tracking
+    # ------------------------------------------------------------------
+
+    def _track_snip_nudge_growth(
+        self, asst_msg: Message, tool_results: list[ToolResult]
+    ) -> None:
+        """Update the snip-nudge growth window after one tool turn.
+
+        A successful model snip (a ``snip_history`` call that did not error)
+        resets the window; otherwise the estimated tokens of the tool turn
+        accumulate so the nudge arms once growth crosses the threshold.
+        """
+        if self._snipped_via_tool(asst_msg, tool_results):
+            self._tokens_since_last_snip = 0
+            return
+        self._tokens_since_last_snip += self._tool_turn_token_estimate(
+            asst_msg, tool_results
+        )
+
+    @staticmethod
+    def _snipped_via_tool(
+        asst_msg: Message, tool_results: list[ToolResult]
+    ) -> bool:
+        """True iff this turn ran a ``snip_history`` call that did not error."""
+        if not isinstance(asst_msg.content, list):
+            return False
+        for call, result in zip(asst_msg.content, tool_results, strict=False):
+            if (
+                isinstance(call, ToolCall)
+                and call.name == "snip_history"
+                and not result.is_error
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _tool_turn_token_estimate(
+        asst_msg: Message, tool_results: list[ToolResult]
+    ) -> int:
+        """Estimate the tokens a tool turn added (call inputs + result bodies)."""
+        total = 0
+        if isinstance(asst_msg.content, list):
+            for call in asst_msg.content:
+                if isinstance(call, ToolCall):
+                    total += ContextBudget.estimate_tokens(json.dumps(call.input))
+        for result in tool_results:
+            total += ContextBudget.estimate_tokens(result.content)
+        return total
+
+    def _compute_snip_nudge(self) -> SnipNudge | None:
+        """Arm a SnipNudge when growth crossed the threshold and candidates exist.
+
+        Returns ``None`` (silent skip) when suppressed after reactive compact,
+        below the growth threshold, or when no snippable candidates remain.
+        """
+        if self._snip_nudge_suppressed:
+            return None
+        if self._tokens_since_last_snip < self._snip_nudge_growth_tokens:
+            return None
+        candidates = snippable_candidate_uuids(self._transcript.all_messages())
+        if not candidates:
+            return None
+        return SnipNudge(candidate_uuids=tuple(candidates))
 
     def _capture_file_snapshot(self, call: ToolCall, content: str) -> None:
         """Record a read_file result as a recent FileSnapshot (M3).

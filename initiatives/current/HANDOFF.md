@@ -1,6 +1,6 @@
-# HANDOFF — Next: M4 (model-driven-snip-tool)
+# HANDOFF — Initiative complete: review + wrap-up next
 
-> Updated by: M3 (autocompact-recent-files-attachment)
+> Updated by: M4 (model-driven-snip-tool) — last milestone
 > Date: 2026-05-23
 > Re-verify Section 3 numbers before starting work — do not trust this
 > file blindly.
@@ -10,9 +10,13 @@
 ## 1. Current initiative
 
 - **slug**: `ctx-mgmt-pdf-align`
-- **current milestone**: `M3` — DONE
-- **next milestone**: `M4` — model-driven-snip-tool
-- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [done], M4 [next]
+- **current milestone**: `M4` — DONE (last milestone of the initiative)
+- **next milestone**: none — the autonomous loop will spawn the review +
+  wrap-up session that audits the four shipped milestones, writes
+  `REVIEW.md`, applies Tier A / B doc edits, and archives
+  `initiatives/current/` into
+  `initiatives/_archive/2026-05-ctx-mgmt-pdf-align/`.
+- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [done], M4 [done]
 
 ## 2. Completed milestones
 
@@ -226,16 +230,146 @@
     turns until the next compaction replaces the summary. This matches the
     "re-inject after restoration" intent.
 
+### M4
+
+- **commit**: `[ctx-pdf/M4] model-driven-snip-tool` (SHA in `git log`)
+- **files changed**: `src/simple_coding_agent/snip_tool_model.py` [new],
+  `src/simple_coding_agent/tool_registry_factory.py`,
+  `src/simple_coding_agent/context.py`,
+  `src/simple_coding_agent/loop.py`,
+  `src/simple_coding_agent/cli.py`,
+  `src/simple_coding_agent/openai_cli.py`,
+  `tests/test_snip_tool_model.py` [new],
+  `tests/test_loop.py`, `tests/test_context.py`,
+  `tests/test_agent_integration.py`
+- **tests added**: +16 `tests/test_snip_tool_model.py` (new), +12
+  `tests/test_loop.py`, +6 `tests/test_context.py`, +1
+  `tests/test_agent_integration.py` (six-tool registry). Total: 685 →
+  704 (+19, above the >=15 floor).
+- **behavior implemented**: Model-driven `snip_history` tool +
+  `<msg uuid="...">` wrap + 10k-token nudge. Five pieces.
+  (1) New `src/simple_coding_agent/snip_tool_model.py` exports a pure
+  `evaluate_snip_request(messages, message_uuids, *, keep_recent=5)`
+  that returns a `SnipOutcome` (refused/removed_uuids) without mutation;
+  a helper `snippable_candidate_uuids()` lists currently-snippable
+  tool_result uuids (excludes the latest 5, excludes anything past the
+  latest user-text); and `register_snip_history_tool(registry,
+  transcript)` registers a tool whose `fn` captures the live `Transcript`
+  by closure and on a valid request does `transcript.replace_all(filtered)`
+  + returns `"Snipped <N> messages"`. Refusals raise
+  `SnipRefusedError(f"snip refused: {reason}")` so `ToolExecutor` flags
+  `is_error=True`. The frozen dataclass `SnipNudge(candidate_uuids:
+  tuple[str, ...])` carries the candidate set; `SnipNudge.render()` emits
+  the system-reminder body listing those uuids. (2) `tool_registry_factory.
+  build_default_registry()` gained an optional `transcript: Transcript |
+  None = None` kwarg and calls `register_snip_history_tool(registry,
+  transcript or Transcript())` after the five coding tools. (3)
+  `context._normalize_messages()` wraps every TOOL_RESULT block's content
+  in `<msg uuid="<uuid>">...</msg>` (gated on `msg.type ==
+  MessageType.TOOL_RESULT`, so ATTACHMENT user-role messages stay
+  unwrapped — M3 invariant preserved). `ContextBuilder.build()` gained a
+  keyword-only `snip_nudge: SnipNudge | None = None` kwarg; when present
+  a single user-role nudge dict is prepended AFTER trim +
+  `_remove_orphan_tool_results` and AFTER attachments, so the final
+  front-to-back order is `[*attachments, nudge, *kept]`. (4)
+  `AgentLoop.__init__` gained `snip_nudge_growth_tokens: int = 10_000`
+  (validated `>= 1`); `_tokens_since_last_snip = 0` and
+  `_snip_nudge_suppressed = False` track the window state. After every
+  `_handle_tool_calls()` return in both `run()` and `run_stream()`,
+  `_track_snip_nudge_growth(asst_msg, tool_results)` runs: a successful
+  `snip_history` call (`_snipped_via_tool` returns True) resets the
+  window to 0; any other turn accumulates the estimated tokens of the
+  call inputs + result bodies. `_force_compact()` and `_maybe_snip()`
+  both reset the window to 0. `_compute_snip_nudge()` arms a `SnipNudge`
+  iff `not _snip_nudge_suppressed AND tokens >= threshold AND
+  snippable_candidate_uuids(...)` is non-empty — silent skip otherwise.
+  Both run loops pass `snip_nudge=self._compute_snip_nudge()` to
+  `ContextBuilder.build()`. When `reactive_compact_attempted = True`
+  flips, `_snip_nudge_suppressed = True` is set in the same code path,
+  latching for the loop's lifetime. (5) `cli._run_demo`,
+  `cli._build_repl_loop`, and `openai_cli._run_task` were reworded so
+  the Transcript is constructed BEFORE `build_default_registry()` and
+  passed in — the registry's `snip_history` closure now points at the
+  exact same Transcript the AgentLoop holds. `_run_openai_repl` was not
+  touched: it delegates to `cli._build_repl_loop`.
+- **design decisions / deviations from PLAN**:
+  - `nudge sits AFTER attachments, BEFORE kept`: the HANDOFF M3 →
+    Section 5 "M3 surprises M4 must know about" called this out as the
+    decision to pin. We chose `[*attachments, nudge, *kept]` because
+    attachments are visible recent-file content (analogous to a
+    compact-boundary marker) while the nudge is a transient instruction;
+    putting the nudge between the two keeps the "snip the older,
+    re-attached recent files are fresh" framing the PDF describes. Pinned
+    by `test_build_nudge_follows_attachments_precedes_kept`.
+  - `nudge gated on candidate non-emptiness, not just token growth`: a
+    nudge with no candidate uuids would tell the model "you can snip
+    these: " (empty) which is worse than silent. `_compute_snip_nudge`
+    returns `None` whenever `snippable_candidate_uuids` is empty even if
+    the growth threshold has been crossed. Pinned by
+    `test_compute_nudge_none_when_no_candidates`.
+  - `cli.py / openai_cli.py wiring change is the §7 closure-ownership
+    fix, not scope creep`: without it `register_snip_history_tool` would
+    close over a dead Transcript and `snip_history` calls would mutate
+    nothing the loop reads. The §7 "extra files" clause in the M4
+    prompt explicitly contemplates this when "the registry and AgentLoop
+    are not sharing the same Transcript instance" — they weren't before
+    M4, because each call site constructed its own Transcript AFTER the
+    factory. The fix is mechanical (move one line) in three places.
+    Covered by the end-to-end test
+    `test_model_snip_via_tool_mutates_live_transcript`.
+  - `SnipRefusedError is raised, not returned`: `ToolExecutor.execute`
+    catches all exceptions and returns `(str(exc), is_error=True)`. So
+    raising the error gives the model a tool_result block flagged as
+    error, matching M4 §4 ("bump is_error=True so the model sees the
+    failure") without changing the executor signature.
+  - `evaluate_snip_request short-circuits on first invalid uuid`: an
+    "all-or-nothing" refusal is cleaner than partial application and
+    matches Claude Code's tool semantics (tool calls either succeed
+    or fail). Tests assert the first invalid uuid's reason wins.
+  - `nudge body is user-role + is_meta-style content`: the nudge is
+    rendered as a user-role message via `_snip_nudge_dict`. We do NOT
+    add a new MessageType for it — it lives only inside the API payload
+    built by `ContextBuilder.build()` and never enters the Transcript.
+    The Transcript stays the canonical history; the nudge is per-build.
+- **known limitations**:
+  - The nudge is rebuilt on every `build()` while the growth threshold
+    stays crossed — once the model snips, the window resets and the
+    nudge disappears. If the model ignores the nudge for several turns
+    the same body (same candidate uuids) is re-emitted. This is
+    intentional: we want the model to act, not to suppress reminders.
+  - `<msg uuid="...">` wraps the content STRING of the tool_result API
+    block. If a provider later inspects raw tool_result block content
+    expecting unwrapped text, it will see the wrap. The risk for the
+    `OpenAIProvider` was discussed and is the reason for the wrap —
+    OpenAI Chat Completions does not strip in-content tags. Any future
+    provider adapter must NOT unwrap defensively.
+  - The "future-after-latest-user-text" refusal rule uses the position
+    of the LATEST plain-string user message as the cutoff. A transcript
+    with no plain user message (only tool_result-bearing user messages)
+    treats every result as "future" and refuses all snip requests. The
+    M3-introduced ATTACHMENT messages have list content (not string),
+    so they do not count as user-text and do not raise the cutoff —
+    correct, since attachments are not turn boundaries.
+
 ## 3. Current repo state
 
 > Re-verify these numbers before starting work.
 
-- **last commit**: `[ctx-pdf/M3] ...` (run `git -C python-replica log --oneline -3`)
-- **tests**: 670 passing
-- **mypy**: clean (21 source files)
+- **last commit**: `[ctx-pdf/M4] model-driven-snip-tool` (run
+  `git -C python-replica log --oneline -5`)
+- **tests**: 704 passing
+- **mypy**: clean (22 source files)
 - **ruff**: clean
 - **branch**: main
-- **known failing checks**: none
+- **known failing checks**: none in steady-state. `tests/test_trace.py
+  ::test_null_tracer_zero_overhead` is a 20ms-budget `timeit` benchmark
+  introduced by the prior `observable-thresholds-harden` initiative;
+  under heavy CI load it can transiently exceed the budget. It passes
+  in isolation and on a quiet machine. The test self-skips when
+  coverage / `sys.gettrace()` instrumentation is active. This is NOT
+  M4-introduced behaviour; it predates this initiative and is unrelated
+  to context-management. Re-run the suite if a single failure of this
+  test appears.
 
 ## 4. Important constraints (carried forward)
 
@@ -301,93 +435,111 @@
     job) but each snapshot inside it is immutable. Capture happens ONLY for
     successful `read_file` calls (not write_file/edit/etc.), in
     `_execute_one`, on the raw pre-externalization content.
+  - **(added by M4)** `snip_history` is a registered ToolRegistry tool
+    with the exact schema `{"type":"object","properties":{
+    "message_uuids":{"type":"array","items":{"type":"string"}}},
+    "required":["message_uuids"]}`. Do NOT widen the schema (e.g. add
+    `tool_use_ids`) or rename `message_uuids`; the model's own tool-call
+    semantics depend on this contract. Refusals MUST continue to raise
+    `SnipRefusedError("snip refused: <reason>")` so the executor surfaces
+    `is_error=True`. Return string for a successful call is exactly
+    `f"Snipped {N} messages"` (singular/plural unchanged — both tests
+    and the PDF intent rely on the stable shape).
+  - **(added by M4)** the `snip_history` tool fn captures the live
+    `Transcript` by closure. The registry and the AgentLoop MUST share
+    the same `Transcript` instance — `cli._run_demo`, `cli._build_repl_loop`,
+    `openai_cli._run_task` all construct the Transcript BEFORE
+    `build_default_registry(workspace, transcript=...)` and pass it in.
+    Any new call site that builds a registry + an AgentLoop must follow
+    the same wiring or the model's snips will not reach the live history.
+  - **(added by M4)** `context._normalize_messages()` wraps every
+    `MessageType.TOOL_RESULT` block's content in
+    `<msg uuid="<uuid>">...</msg>`. The wrap is gated on `msg.type ==
+    TOOL_RESULT`, NOT on `role == USER`, so ATTACHMENT user-role
+    messages (M3) stay unwrapped. A future refactor of
+    `_normalize_messages` MUST preserve this gating — wrapping an
+    ATTACHMENT would corrupt recent-file content the model expects to
+    read verbatim.
+  - **(added by M4)** `SnipNudge` is `@dataclass(frozen=True)` and lives
+    in `snip_tool_model.py`. It carries `candidate_uuids: tuple[str, ...]`
+    and renders as a single is_meta-style user message. The nudge lives
+    ONLY inside the API payload built by `ContextBuilder.build()` — it
+    is never appended to the Transcript. Do not introduce a
+    `MessageType.SNIP_NUDGE`; the per-build placement is the contract.
+  - **(added by M4)** `ContextBuilder.build()`'s final front-to-back
+    order when both an attachment set and a nudge are present is
+    `[*attachments, nudge, *kept]`. Pinned by
+    `tests/test_context.py::test_build_nudge_follows_attachments_precedes_kept`.
+    Any future change to attachment/nudge placement must update both
+    that test AND `_attachment_dicts` / nudge-prepend in `build()`
+    together — they are the joint contract.
+  - **(added by M4)** `AgentLoop._tokens_since_last_snip` resets to 0 on
+    EACH of: a full compact (`_force_compact`), an engine snip
+    (`_maybe_snip` after `replace_all`), and a successful model snip
+    (the `snip_history` call returned without `is_error`). All three
+    reset sites must stay live; a regression that drops one of them
+    would arm the nudge spuriously.
+  - **(added by M4)** Once `reactive_compact_attempted` flips True in
+    `AgentLoop.run()` / `run_stream()`, `_snip_nudge_suppressed = True`
+    is set in the same code path and latches for the loop's lifetime.
+    `_compute_snip_nudge()` returns `None` while suppressed. Both run
+    methods must set the flag the moment they detect reactive compact;
+    if a new control-flow branch reaches `_force_compact()` via
+    `PromptTooLongError`, it must also set the suppression flag.
 
 ## 5. Next milestone guidance
 
-For `M4` — model-driven-snip-tool:
+Initiative complete. Next agent is the review session spawned by
+`automation/scripts/run_all_milestones.sh` after this commit lands. The
+review session audits all four shipped milestones (M1–M4), writes
+`initiatives/current/REVIEW.md`, applies Tier A / B doc edits (the new
+public symbols `snip_history` tool, `SnipNudge`, `register_snip_history_tool`,
+`evaluate_snip_request`, `snippable_candidate_uuids`,
+`AgentLoop.snip_nudge_growth_tokens`), and archives
+`initiatives/current/` into
+`initiatives/_archive/2026-05-ctx-mgmt-pdf-align/`.
 
-- **next scope** (paraphrased from PLAN; config.yaml is authoritative):
-  add the model-driven `snip_history` tool + `<msg uuid="...">`
-  serialization + a 10k-token nudge. Pieces: (1) new
-  `snip_history` tool registered by
-  `tool_registry_factory.build_default_registry()` with
-  `input_schema = {"type":"object","properties":{"message_uuids":
-  {"type":"array","items":{"type":"string"}}},"required":["message_uuids"]}`;
-  invoking it removes those messages from the AgentLoop's live Transcript
-  via `Transcript.replace_all(filtered)` and returns `"Snipped <N>
-  messages"`. (2) `context._normalize_messages()` wraps each user-role
-  tool_result message body with `<msg uuid="<uuid>">...</msg>` so the
-  model can target uuids (OpenAI Chat Completions strips arbitrary
-  per-message metadata). (3) `AgentLoop` tracks
-  `_tokens_since_last_snip` updated after every `_handle_tool_calls()`
-  return; when growth >= `snip_nudge_growth_tokens` (default 10_000), the
-  next `build()` prepends an `is_meta=True` system-reminder user message
-  describing `snip_history` and listing currently-snippable uuids
-  (compactable tool_results older than the latest 5). Resets on any snip
-  (engine or model) and any full compact. Suppressed for the loop's
-  lifetime once `reactive_compact_attempted` flips True. Exit gate:
-  pytest +>=15 from baseline (655+ → expect ~685+ given M3 landed at 670).
-- **likely-touched files**: new `src/simple_coding_agent/snip_tool_model.py`
-  (exports `register_snip_history_tool(registry, transcript)`),
-  `tool_registry_factory.py` (calls the register helper),
-  `loop.py` (`_tokens_since_last_snip` state + reset points + nudge
-  arming after `_handle_tool_calls`), `context.py`
-  (`<msg uuid="...">` wrapping in `_normalize_messages` + a new
-  `build(snip_nudge=...)` kwarg that prepends one is_meta message before
-  the first kept message), plus `SnipNudge` dataclass.
-- **M3 surprises M4 must know about `build()` + attachment placement**:
-  - M3 prepends recent-file ATTACHMENT dicts at the FRONT of
-    `api_messages`, AFTER the trim loop + `_remove_orphan_tool_results`.
-    M4's snip-nudge message is ALSO supposed to be prepended "before the
-    first kept message". DECIDE the relative order of nudge vs
-    attachments deliberately — the PDF intent is: compact boundary →
-    (recent-files attachments) → (snip nudge / kept turns). Cleanest is to
-    prepend the nudge AFTER the attachments are prepended so the final
-    front-to-back order is `[*attachments, nudge, *kept]`, OR
-    `[nudge, *attachments, *kept]` if you treat the nudge as the very
-    first system-reminder. Either is defensible; pick one and pin it with
-    a test. The existing `_attachment_dicts(compact_summary)` helper is
-    the integration point — do not re-merge attachments with kept messages.
-  - `_normalize_messages` is the shared serialization choke point. M3 made
-    it pass ATTACHMENT through. M4's `<msg uuid="...">` wrapping must wrap
-    ONLY the tool_result-bearing USER messages and must NOT wrap ATTACHMENT
-    messages (those are recent-file content, not snippable history) — gate
-    on `msg.type == TOOL_RESULT` (or the `is_meta + only-ToolResult-blocks`
-    shape the PLAN names), NOT on `role == USER` alone, or you will wrap
-    the M3 attachments too.
-  - `CompactSummary` is frozen now (see Section 4). If M4 needs to attach
-    nudge state to the summary (it should NOT — nudge is AgentLoop state),
-    use AgentLoop fields, not summary mutation.
-- **risks / surprises carried forward**:
-  - **GateGuard fact-forcing hook**: the first Edit/Write to each file
-    is blocked once by a `pre:edit-write` "Fact-Forcing Gate" requiring
-    you to print importers / affected symbols / data shape / the user
-    instruction, then retry the SAME edit verbatim. The first Bash call
-    is likewise blocked by `pre:bash:gateguard-fact-force`. Budget one
-    rejected attempt per file + one for the first bash. (Confirmed again
-    in M3 — fired on every src + test file edited, PROGRESS.md,
-    HANDOFF.md, and the first bash.) Also note: `cd python-replica`
-    persists working dir across Bash calls, so a second `cd python-replica`
-    fails with "no such file or directory" — use absolute paths or rely on
-    the persisted cwd.
-  - **`should_compact` legacy path**: keep the M1 legacy
-    `compact_threshold` second-trigger alive — the aggressive preset and
-    tiny-budget demos fire compaction purely through it (the 30k
-    min_session_tokens floor blocks the PDF formula in small budgets).
-    Do not disturb `should_compact`.
-  - **`Transcript.replace_all()` is the only mutation API** — M4's
-    `snip_history` tool fn uses it (same as engine snip/microcompact). The
-    tool captures the live Transcript by closure; pairing works because
-    the registry and AgentLoop share one Transcript instance in
-    `_build_repl_loop`.
-  - **M4 is the sizing-borderline milestone** (PLAN flagged 5–6 src files,
-    ~15 new tests). The PLAN documents an M4a/M4b split seam (tool+uuid
-    first, nudge second) if Phase 2 thrash occurs. M4a is shippable
-    independently; M4b depends on it.
+**Audit focus areas for the review session:**
 
-The full ready-to-run prompt is at:
-`initiatives/current/prompts/M4.md`
+- **(a)** does the `snip_history` tool actually work end-to-end with
+  `OpenAIProvider` via `openai_cli`? The model needs to (1) see uuids
+  in `<msg uuid="...">` wraps inside tool_result content, (2) emit a
+  valid `snip_history` tool call whose arguments parse as
+  `{"message_uuids": [...]}`, (3) have its call routed to the
+  `ToolExecutor` whose registry was built from the SAME Transcript the
+  AgentLoop holds. Wiring is in `openai_cli._run_task` (one-shot) and
+  `openai_cli._run_openai_repl` → `cli._build_repl_loop` (REPL). A live
+  smoke run is the only way to confirm OpenAI Chat Completions does not
+  silently strip or rewrite the in-content `<msg uuid="...">` tags.
 
-The autonomous loop (`automation/scripts/run_all_milestones.sh`) reads
-that prompt file directly. This Section 5 exists for manual
-single-milestone restarts via `automation/scripts/run_next.sh`.
+- **(b)** does the `<msg uuid="...">` wrap survive OpenAI's
+  serialization without truncation? The wrap is applied by
+  `context._normalize_messages()` and lives inside the `content` field
+  of tool_result API blocks. Verify: (1) the tag is present in the
+  serialized HTTP request body, (2) no truncation when content is large
+  enough to be externalized (`ToolResultStore`-replaced content already
+  carries a `<persisted-output>` tag; the M4 wrap goes OUTSIDE it
+  giving `<msg uuid="..."><persisted-output ...>...</persisted-output></msg>`
+  — check this nests rather than overwrites), (3) the model's reply
+  references uuids correctly (no hallucinated uuids, no truncated
+  uuids).
+
+- **(c)** do all 4 milestones' invariants in Section 4 still hold?
+  Walk the M1, M2, M3, and M4 entries in Section 4 and grep / read the
+  current source to confirm each is intact. Pay particular attention
+  to (M1) `MicroCompactor.keep_recent=5` default and the legacy
+  `compact_threshold` second-trigger; (M2) `MessageType.SNIP_BOUNDARY`
+  still filtered in `_normalize_messages` and
+  `_remove_orphan_tool_results` still live; (M3)
+  `CompactSummary` still frozen with `recent_file_snapshots: tuple` and
+  ATTACHMENT still passes through `_normalize_messages`; (M4) the
+  `<msg uuid="...">` wrap gates on `msg.type == TOOL_RESULT` not
+  `role == USER`.
+
+- **(d)** is the registry/AgentLoop transcript-sharing wiring complete
+  at every call site? Grep for `Transcript()` constructor calls inside
+  `src/simple_coding_agent/` and confirm each one either (i) is fed
+  into `build_default_registry(..., transcript=...)` immediately, or
+  (ii) is documented as a non-AgentLoop use (e.g. a test fixture). A
+  dangling `Transcript()` constructed AFTER `build_default_registry`
+  would silently break model snips.

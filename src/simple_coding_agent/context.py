@@ -20,6 +20,7 @@ from typing import Any
 
 from .claude_md import ClaudeMdLoader
 from .models import CompactSummary, Message, MessageType, Role, ToolCall, ToolResult
+from .snip_tool_model import SnipNudge
 from .tool_result_store import ToolResultStore
 from .trace import NullTracer, Tracer
 from .transcript import Transcript
@@ -82,6 +83,11 @@ def _normalize_messages(messages: list[Message]) -> list[dict[str, Any]]:
     Filters: is_virtual, COMPACT_BOUNDARY, SNIP_BOUNDARY, SYSTEM role.
     ATTACHMENT messages (M3 recent-file re-injection) are NOT filtered — they
     are user-role content the model must see and pass through unchanged.
+    M4: each TOOL_RESULT message's block content is wrapped in
+    ``<msg uuid="...">...</msg>`` so the model can target it via the
+    ``snip_history`` tool (OpenAI Chat Completions strips per-message
+    metadata). ATTACHMENT messages are NOT wrapped (they are not snippable
+    history) — the wrap gates on ``msg.type == TOOL_RESULT``.
     """
     result: list[dict[str, Any]] = []
 
@@ -110,7 +116,13 @@ def _normalize_messages(messages: list[Message]) -> list[dict[str, Any]]:
                         "input": item.input,
                     })
                 elif isinstance(item, ToolResult):
-                    blocks.append(item.to_api_block())
+                    block = item.to_api_block()
+                    if msg.type == MessageType.TOOL_RESULT:
+                        block = {
+                            **block,
+                            "content": f'<msg uuid="{msg.uuid}">{block["content"]}</msg>',
+                        }
+                    blocks.append(block)
             api_content = blocks
 
         api_msg: dict[str, Any] = {"role": msg.role.value, "content": api_content}
@@ -152,6 +164,16 @@ def _attachment_dicts(
     for snap in compact_summary.recent_file_snapshots:
         dicts.extend(_normalize_messages([Message.attachment(snap.path, snap.content)]))
     return dicts
+
+
+def _snip_nudge_dict(nudge: SnipNudge) -> dict[str, Any]:
+    """Render a SnipNudge as one user-role API message (M4).
+
+    The nudge is an is_meta system-reminder telling the model it may call
+    ``snip_history``; it is prepended ahead of the kept turns by
+    ``ContextBuilder.build``.
+    """
+    return {"role": Role.USER.value, "content": nudge.render()}
 
 
 def _remove_orphan_tool_results(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -229,6 +251,8 @@ class ContextBuilder:
         system: str,
         compact_summary: CompactSummary | None = None,
         memory_snippets: list[str] | None = None,
+        *,
+        snip_nudge: SnipNudge | None = None,
     ) -> BuiltContext:
         """Assemble a BuiltContext from the current transcript state."""
         raw_messages = transcript.messages_after_compact_boundary()
@@ -245,10 +269,14 @@ class ContextBuilder:
             dropped += 1
         api_messages = _remove_orphan_tool_results(api_messages)
 
-        # M3: re-attach recent-file snapshots immediately after the compact
-        # boundary (i.e. at the front, before the kept messages). They are
-        # added AFTER trimming so they are never popped to satisfy the budget
-        # and never counted toward keep_recent trimming decisions.
+        # M4: prepend the snip nudge (when armed) ahead of the kept turns.
+        # M3: re-attach recent-file snapshots in front of everything. The
+        # final front-to-back order is [*attachments, nudge, *kept] so the
+        # compact boundary → recent files → snip reminder → conversation
+        # ordering the PDF describes is preserved. Both are added AFTER
+        # trimming so neither is ever popped to satisfy the budget.
+        if snip_nudge is not None:
+            api_messages = [_snip_nudge_dict(snip_nudge)] + api_messages
         attachment_messages = _attachment_dicts(compact_summary)
         api_messages = attachment_messages + api_messages
 

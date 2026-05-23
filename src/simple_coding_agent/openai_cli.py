@@ -248,7 +248,10 @@ def _run_task(
     stream: bool,
     shell_mode: ShellMode = ShellMode.MOCK,
 ) -> int:
-    registry = build_default_registry(workspace, shell_mode=shell_mode)
+    transcript = Transcript()
+    registry = build_default_registry(
+        workspace, shell_mode=shell_mode, transcript=transcript
+    )
     budget = ContextBudget(
         max_tokens=_DEFAULT_CONTEXT_TOKENS,
         reserved_output_tokens=_DEFAULT_RESERVED_OUTPUT_TOKENS,
@@ -261,7 +264,7 @@ def _run_task(
             base_url=os.environ.get("OPENAI_BASE_URL"),
         ),
         tool_executor=ToolExecutor(registry),
-        transcript=Transcript(),
+        transcript=transcript,
         context_builder=ContextBuilder(budget=budget),
         budget=budget,
         registry=registry,

@@ -201,6 +201,7 @@ milestones:
 ---
 
 > Bootstrapped on 2026-05-23. Baseline commit: `8f1d98f`. Baseline pytest: 615 passing. Baseline mypy/ruff: clean. Sizing assessment: M1–M3 well within thresholds; M4 borderline on three signals (src files=4, cross-cutting components=4, new tests=~15) but does NOT strictly trip any threshold and lacks the CLI-flag surface that would fire the "combines intro+wire+CLI" criterion — no SIZING WAIVED needed. Suggested M4a/M4b split seam is documented in PLAN.md "Anything else" for reference if Phase 2 thrash occurs.
+> STATUS: complete (M1–M4 shipped on 2026-05-23)
 
 # Goal
 

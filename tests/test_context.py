@@ -16,6 +16,7 @@ from simple_coding_agent.models import (
     ToolCall,
     ToolResult,
 )
+from simple_coding_agent.snip_tool_model import SnipNudge
 from simple_coding_agent.tool_result_store import (
     PERSISTED_OUTPUT_TAG,
     ToolResultStore,
@@ -323,7 +324,9 @@ def test_build_small_tool_result_inlined() -> None:
     assert result.externalized_tool_results == 0
     tool_result_block = result.messages[1]["content"][0]
     assert tool_result_block["type"] == "tool_result"
-    assert tool_result_block["content"] == "small output"
+    # M4: tool_result bodies are wrapped with <msg uuid="..."> so the model can
+    # target them via snip_history. The user message uuid here is "u-user".
+    assert tool_result_block["content"] == '<msg uuid="u-user">small output</msg>'
 
 
 def test_build_large_tool_result_replaced_with_pointer(tmp_path: object) -> None:
@@ -508,3 +511,76 @@ def test_build_calls_loader_with_workspace_path() -> None:
     )
     builder.build(Transcript(), system="sys")
     assert fake.calls == [workspace]
+
+
+# ---------------------------------------------------------------------------
+# M4: <msg uuid="..."> wrap + snip nudge injection
+# ---------------------------------------------------------------------------
+
+
+def _tool_result_message(uuid: str, content: str = "body") -> Message:
+    return Message(
+        uuid=uuid,
+        role=Role.USER,
+        content=[ToolResult(tool_use_id="tc", content=content)],
+        timestamp="2024-01-01T00:00:00Z",
+        type=MessageType.TOOL_RESULT,
+        is_meta=True,
+    )
+
+
+def test_normalize_wraps_tool_result_with_msg_uuid() -> None:
+    out = _normalize_messages([_tool_result_message("m-1", "the body")])
+    assert out[0]["content"][0]["content"] == '<msg uuid="m-1">the body</msg>'
+
+
+def test_normalize_does_not_wrap_attachment_messages() -> None:
+    # ATTACHMENT messages are user-role + is_meta but must NOT be wrapped —
+    # they are recent-file content, not snippable history.
+    out = _normalize_messages([Message.attachment("a.py", "AAA")])
+    assert out[0]["content"] == _ATTACH_A
+    assert "<msg uuid=" not in out[0]["content"]
+
+
+def test_build_prepends_snip_nudge_before_kept_messages() -> None:
+    builder = ContextBuilder(budget=_large_budget())
+    t = Transcript()
+    t.append(Message.user("current turn"))
+    nudge = SnipNudge(candidate_uuids=("r-0", "r-1"))
+    result = builder.build(t, system="sys", snip_nudge=nudge)
+    assert result.messages[0]["role"] == "user"
+    assert "snip_history" in result.messages[0]["content"]
+    assert "r-0" in result.messages[0]["content"]
+    assert result.messages[1]["content"] == "current turn"
+
+
+def test_build_no_nudge_when_none() -> None:
+    builder = ContextBuilder(budget=_large_budget())
+    t = Transcript()
+    t.append(Message.user("current turn"))
+    result = builder.build(t, system="sys")
+    assert all("snip_history" not in str(m["content"]) for m in result.messages)
+
+
+def test_build_nudge_follows_attachments_precedes_kept() -> None:
+    # Final front-to-back order must be [*attachments, nudge, *kept].
+    builder = ContextBuilder(budget=_large_budget())
+    t = Transcript()
+    t.append(Message.compact_boundary())
+    t.append(Message.user("kept user turn"))
+    summary = _summary_with_snapshots(
+        FileSnapshot(path="a.py", content="AAA", captured_at="t1"),
+    )
+    nudge = SnipNudge(candidate_uuids=("r-0",))
+    result = builder.build(t, system="sys", compact_summary=summary, snip_nudge=nudge)
+    assert result.messages[0]["content"] == _ATTACH_A
+    assert "snip_history" in result.messages[1]["content"]
+    assert result.messages[2]["content"] == "kept user turn"
+
+
+def test_snip_nudge_body_lists_only_candidate_uuids() -> None:
+    nudge = SnipNudge(candidate_uuids=("r-0", "r-2"))
+    body = nudge.render()
+    assert "r-0" in body
+    assert "r-2" in body
+    assert "r-1" not in body

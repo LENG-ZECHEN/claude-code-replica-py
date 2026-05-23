@@ -38,6 +38,10 @@ from simple_coding_agent.provider import (
     TokenUsage,
 )
 from simple_coding_agent.snip import SNIPPED_CONTENT, SnipTool
+from simple_coding_agent.snip_tool_model import (
+    register_snip_history_tool,
+    snippable_candidate_uuids,
+)
 from simple_coding_agent.tools import Tool, ToolExecutor, ToolRegistry
 from simple_coding_agent.transcript import Transcript
 
@@ -1173,3 +1177,191 @@ def _registry_with(*tools: Tool) -> ToolRegistry:
     for t in tools:
         registry.register(t)
     return registry
+
+
+# ---------------------------------------------------------------------------
+# M4: model-driven snip nudge — token growth, arming, suppression, resets
+# ---------------------------------------------------------------------------
+
+
+class _NeverSnip(SnipTool):
+    def should_snip(self, messages: list[Message]) -> bool:
+        return False
+
+
+class _AlwaysSnip(SnipTool):
+    def should_snip(self, messages: list[Message]) -> bool:
+        return True
+
+    def snip(self, messages: list[Message]) -> list[Message]:
+        return list(messages)
+
+
+def _snippable_pairs(n: int, *, trailing_user_text: bool = True) -> list[Message]:
+    ts = datetime.now(UTC).isoformat()
+    msgs: list[Message] = [Message.user("start")]
+    for i in range(n):
+        msgs.append(Message(
+            uuid=f"a-{i}", role=Role.ASSISTANT,
+            content=[ToolCall(id=f"tc-{i}", name="read_file", input={"path": "f.py"})],
+            timestamp=ts, type=MessageType.TOOL_USE,
+        ))
+        msgs.append(Message(
+            uuid=f"r-{i}", role=Role.USER,
+            content=[ToolResult(tool_use_id=f"tc-{i}", content=f"data-{i}")],
+            timestamp=ts, type=MessageType.TOOL_RESULT, is_meta=True,
+        ))
+    if trailing_user_text:
+        msgs.append(Message.user("current turn"))
+    return msgs
+
+
+def test_track_growth_accumulates_on_tool_turn() -> None:
+    p = MockProvider([MockProvider.direct_answer("ok")])
+    loop, _, _ = _make_loop(p)
+    asst = Message(
+        uuid="a", role=Role.ASSISTANT,
+        content=[ToolCall(id="t1", name="read_file", input={"path": "f.py"})],
+        timestamp="t", type=MessageType.TOOL_USE,
+    )
+    results = [ToolResult(tool_use_id="t1", content="x" * 400)]
+    loop._track_snip_nudge_growth(asst, results)
+    assert loop._tokens_since_last_snip > 0
+
+
+def test_track_growth_resets_on_model_snip_call() -> None:
+    p = MockProvider([MockProvider.direct_answer("ok")])
+    loop, _, _ = _make_loop(p)
+    loop._tokens_since_last_snip = 5_000
+    asst = Message(
+        uuid="a", role=Role.ASSISTANT,
+        content=[ToolCall(id="t1", name="snip_history", input={"message_uuids": ["r-0"]})],
+        timestamp="t", type=MessageType.TOOL_USE,
+    )
+    results = [ToolResult(tool_use_id="t1", content="Snipped 1 messages", is_error=False)]
+    loop._track_snip_nudge_growth(asst, results)
+    assert loop._tokens_since_last_snip == 0
+
+
+def test_track_growth_not_reset_on_failed_model_snip() -> None:
+    p = MockProvider([MockProvider.direct_answer("ok")])
+    loop, _, _ = _make_loop(p)
+    loop._tokens_since_last_snip = 100
+    asst = Message(
+        uuid="a", role=Role.ASSISTANT,
+        content=[ToolCall(id="t1", name="snip_history", input={"message_uuids": ["x"]})],
+        timestamp="t", type=MessageType.TOOL_USE,
+    )
+    results = [ToolResult(tool_use_id="t1", content="snip refused: x", is_error=True)]
+    loop._track_snip_nudge_growth(asst, results)
+    assert loop._tokens_since_last_snip > 100
+
+
+def test_force_compact_resets_tokens_since_last_snip() -> None:
+    p = MockProvider([MockProvider.direct_answer("ok")])
+    loop, _, _ = _make_loop(p, compactor=_CountingCompactor())
+    loop._tokens_since_last_snip = 9_999
+    loop._force_compact()
+    assert loop._tokens_since_last_snip == 0
+
+
+def test_engine_snip_resets_tokens_since_last_snip() -> None:
+    p = MockProvider([MockProvider.direct_answer("ok")])
+    loop, _, _ = _make_loop(p, snip_tool=_AlwaysSnip())
+    loop._tokens_since_last_snip = 8_000
+    loop._snip_attempted_this_turn = False
+    assert loop._maybe_snip() is True
+    assert loop._tokens_since_last_snip == 0
+
+
+def test_compute_nudge_arms_when_growth_exceeds_threshold() -> None:
+    t = Transcript()
+    t.replace_all(_snippable_pairs(8))
+    p = MockProvider([MockProvider.direct_answer("ok")])
+    loop, _, _ = _make_loop(p, transcript=t)
+    loop._tokens_since_last_snip = loop._snip_nudge_growth_tokens
+    nudge = loop._compute_snip_nudge()
+    assert nudge is not None
+    assert nudge.candidate_uuids == tuple(snippable_candidate_uuids(t.all_messages()))
+    assert nudge.candidate_uuids == ("r-0", "r-1", "r-2")
+
+
+def test_compute_nudge_none_below_threshold() -> None:
+    t = Transcript()
+    t.replace_all(_snippable_pairs(8))
+    p = MockProvider([MockProvider.direct_answer("ok")])
+    loop, _, _ = _make_loop(p, transcript=t)
+    loop._tokens_since_last_snip = loop._snip_nudge_growth_tokens - 1
+    assert loop._compute_snip_nudge() is None
+
+
+def test_compute_nudge_none_when_no_candidates() -> None:
+    p = MockProvider([MockProvider.direct_answer("ok")])
+    loop, _, _ = _make_loop(p)  # empty transcript
+    loop._tokens_since_last_snip = loop._snip_nudge_growth_tokens * 2
+    assert loop._compute_snip_nudge() is None
+
+
+def test_compute_nudge_suppressed_when_flag_set() -> None:
+    t = Transcript()
+    t.replace_all(_snippable_pairs(8))
+    p = MockProvider([MockProvider.direct_answer("ok")])
+    loop, _, _ = _make_loop(p, transcript=t)
+    loop._tokens_since_last_snip = loop._snip_nudge_growth_tokens * 2
+    loop._snip_nudge_suppressed = True
+    assert loop._compute_snip_nudge() is None
+
+
+def test_reactive_compact_suppresses_subsequent_nudge() -> None:
+    # Reactive compact fires once; afterwards even high growth + candidates
+    # must not arm a nudge for the rest of the loop's life.
+    provider = _PromptTooLongThenProvider([
+        PromptTooLongError("prompt too long"),
+        MockProvider.direct_answer("recovered"),
+    ])
+    loop, _, _ = _make_loop(provider, compactor=_CountingCompactor())
+    result = loop.run("large request")
+    assert result.status == LoopStatus.COMPLETED
+    assert loop._snip_nudge_suppressed is True
+
+    # Re-seed candidates + growth and confirm the nudge stays suppressed.
+    loop._transcript.replace_all(_snippable_pairs(8))
+    loop._tokens_since_last_snip = loop._snip_nudge_growth_tokens * 2
+    assert loop._compute_snip_nudge() is None
+
+
+def test_model_snip_via_tool_mutates_live_transcript() -> None:
+    # §4 integration: the snip_history tool registered against the loop's
+    # transcript removes a targeted uuid during a real run().
+    t = Transcript()
+    t.replace_all(_snippable_pairs(6, trailing_user_text=False))
+    provider = MockProvider([
+        MockProvider.tool_call("snip_history", {"message_uuids": ["r-0"]}, id="tu_snip"),
+        MockProvider.direct_answer("cleaned"),
+    ])
+    loop, transcript, registry = _make_loop(provider, transcript=t, snip_tool=_NeverSnip())
+    register_snip_history_tool(registry, transcript)
+
+    result = loop.run("please clean up old reads")
+
+    assert result.status == LoopStatus.COMPLETED
+    uuids = {m.uuid for m in transcript.all_messages()}
+    assert "r-0" not in uuids
+    assert {"r-1", "r-2", "r-3", "r-4", "r-5"} <= uuids
+    # A successful model snip resets the growth window.
+    assert loop._tokens_since_last_snip == 0
+
+
+def test_snip_nudge_growth_tokens_must_be_positive() -> None:
+    import pytest
+
+    budget = ContextBudget(max_tokens=1000, reserved_output_tokens=100)
+    with pytest.raises(ValueError, match="snip_nudge_growth_tokens"):
+        AgentLoop(
+            provider=MockProvider([MockProvider.direct_answer("x")]),
+            tool_executor=ToolExecutor(ToolRegistry()),
+            transcript=Transcript(),
+            context_builder=ContextBuilder(budget=budget),
+            budget=budget,
+            snip_nudge_growth_tokens=0,
+        )
