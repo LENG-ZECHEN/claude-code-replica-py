@@ -1,0 +1,26 @@
+Phase 2B + 2C complete (staged multi-agent review-and-repair flow). Summary:
+
+- **All 3 milestones verified**: `[ctx-demo/M1]` (`cda6f2b`), `[ctx-demo/M2]` (`5d82e4d`, `7ef509b`), `[ctx-demo/M3]` (`7c7496c`)
+- **Initial quality gates**: pytest 819, mypy clean, ruff `src tests` clean, ruff `.` = 10 errors (E402/I001/E501 in demo/_scripts/capture_scenario.py)
+- **Stage A subagents spawned in parallel**: code-reviewer + doc-curator-candidate-finder
+- **Main-agent reconciliation completed**: 5 code findings retained (1 MEDIUM, 4 LOW); doc candidates → 1 Tier A applied, 1 Tier C applied, 0 Tier B, 2 Tier C proposed
+- **Review-time repair loop**: 4 findings fixed, 2 deferred
+- **Review-time commits**: `8ef0a4f`, `a6049ce` (review-fix); `f937d8f` (review-doc)
+- **Final quality gates green**: pytest 820 (+4 from baseline 816), mypy clean, ruff (`src tests` AND repo-wide `.`) clean
+- **Stage B narrator spawned after repair/re-review**: demo-narrator
+- **REVIEW.md**: scorecards, reconciled findings, fixed-during-review ledger, deferred follow-ups, validation results, wrap-up actions
+- **OWNER_BRIEF.zh-CN.md**: delivered features, demo commands, Before/After, owner-facing findings, resume/interview talking points
+- **Tier A auto-applied**: README.md REPL flag list (`--microcompact-minutes` both CLIs, `--max-turns` openai REPL)
+- **Tier B auto-applied**: none (ADR threshold not met)
+- **Tier C auto-applied/proposed**: applied — CLAUDE.md compact.py "60 minutes" → configurable `threshold_minutes`; proposed — "at most once per loop instance" reconciliation (loop.py summary + protected Roadmap) + a ctx-mgmt-demo Roadmap bullet
+- **Archive committed** as this `[ctx-demo/wrap]` commit (see `git log -1`)
+- **Final pre-wrap content commit**: `f937d8f`
+- **All wrap-gate checks pass**
+- **Main session stayed alive on --remote-control** for user attach.
+
+Key audit findings and review-time outcomes:
+- Wiring bug (MEDIUM): `_build_repl_loop` passed `tool_result_store` to `ContextBuilder` but not `AgentLoop`, so `/stats externalized_bytes` was always 0 in every REPL session. Fixed in `8ef0a4f` (1-line wiring + regression test); externalization itself always worked — only the counter was inert.
+- ruff false-clean (LOW): `capture_scenario.py` shipped with 10 ruff errors while M2 reported "clean" (it only ran `ruff check src tests`). Fixed in `a6049ce`; also removed the now-obsolete private-attribute (`loop._context_builder._store`) workaround.
+- Notebook 01 synced (`a6049ce`) to record that the wiring bug is fixed and the canonical artifacts predate the fix.
+- Deferred: CLAUDE.md "at most once per loop instance" staleness — pre-existing (P9 REPL), one occurrence in the protected Roadmap section → proposed for human reconciliation.
+- Deferred: PROGRESS M2 scenario-01 counters omit `full_compacts=2`/`microcompact=1` — append-only committed file, not rewritten (notebook 01 already documents it).

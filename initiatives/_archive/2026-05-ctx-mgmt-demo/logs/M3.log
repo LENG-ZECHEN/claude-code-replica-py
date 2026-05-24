@@ -1,0 +1,29 @@
+All automated checks pass. Here is the exit gate confirmation:
+
+```
+$ ls demo/
+README.md  01_tool_result_management.md  02_full_compact.md  03_microcompact.md  _artifacts  _scripts
+
+$ wc -l demo/*.md
+      92 README.md
+     181 01_tool_result_management.md
+     181 02_full_compact.md
+     191 03_microcompact.md
+
+$ grep "# model: qwen3.6-plus" demo/_artifacts/*/stats_output.txt → all 3 confirmed
+
+$ pytest --tb=no -q → 819 passed (unchanged)
+$ mypy src/ → clean
+```
+
+**Exit gate: PASS.**
+
+---
+
+**M3 summary:**
+
+- Wrote `demo/README.md` + three notebooks (`01_tool_result_management.md`, `02_full_compact.md`, `03_microcompact.md`) — all pure docs, no `src/` or `tests/` changes.
+- Each notebook embeds ≥5 lines from its `_artifacts/` run (trace events, metrics JSON, transcript excerpts), shows `python demo/_scripts/capture_scenario.py 0N` as the exact capture command, names `qwen3.6-plus` from the `stats_output.txt` header, and maps every mechanism to its `file:line` source.
+- README documents env vars, the swappable-model fallback list, points reactive-compact readers to `examples/stress_demo.py`, and notes that `_artifacts/` is a canonical single run.
+- HANDOFF updated (5-section structure, all three `### M1/M2/M3` subsections, findings for the review session including the wiring bug and pre-existing ruff errors). PROGRESS.md M3 block appended. PLAN.md marked `STATUS: complete`.
+- Committed as `[ctx-demo/M3]` at `7c7496c`. Initiative complete — review session is next.

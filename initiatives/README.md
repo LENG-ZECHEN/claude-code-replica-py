@@ -10,9 +10,7 @@ For the active-initiative pointer and the bootstrap procedure, see
 
 ## Active
 
-| Slug | Status | Period | Milestones | Final commit |
-|---|---|---|---|---|
-| [ctx-mgmt-demo](./current/) | in progress | 2026-05-25 – ? | M1 → M3 | _(pending)_ |
+_None — `initiatives/current/` holds only `.gitkeep`._
 
 ## Archived
 
@@ -23,6 +21,7 @@ For the active-initiative pointer and the bootstrap procedure, see
 | [2026-05-obs-thr-harden](./_archive/2026-05-obs-thr-harden/) | complete | 2026-05-23 | M1 → M3 | `4582997` |
 | [2026-05-ctx-mgmt-pdf-align](./_archive/2026-05-ctx-mgmt-pdf-align/) | complete | 2026-05-23 | M1 → M4 | `02f17f6` |
 | [2026-05-auto-memory-overhaul](./_archive/2026-05-auto-memory-overhaul/) | complete | 2026-05-24 | M1 → M7 | `e9aef6a` |
+| [2026-05-ctx-mgmt-demo](./_archive/2026-05-ctx-mgmt-demo/) | complete | 2026-05-25 | M1 → M3 | `f937d8f` |
 
 ## Folder shape (per initiative)
 

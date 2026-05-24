@@ -1,0 +1,20 @@
+All 6 exit-gate checks pass. M1 is complete.
+
+**Exit gate verification:**
+```
+$ python -m simple_coding_agent.cli --help | grep microcompact-minutes
+  --microcompact-minutes N   [listed]
+
+$ python -m simple_coding_agent.openai_cli --help | grep -E 'microcompact-minutes|max-turns'
+  --microcompact-minutes N   [listed]
+  --max-turns N              [listed]
+
+$ pytest --tb=no -q
+819 passed in 8.03s  (+3 new tests)
+```
+
+**What M1 shipped:**
+- `--microcompact-minutes N` on both CLIs, wired via `_resolve_threshold` (explicit > aggressive preset > default 60); accepts 0 (guard relaxed from `<1` to `<0`)
+- `--max-turns N` on `simple-agent-openai --repl` only; turn counter in shared `_drive_repl_session` exits cleanly after N user turns
+- 3 new tests + updated guard test
+- PROGRESS.md appended, HANDOFF.md rewritten with full 5-section structure for M2

@@ -1,0 +1,9 @@
+M2 is complete. Commit `5d82e4d` lands all three scenarios with passing exit gates, no `src/` changes, and 819 tests still green.
+
+**Summary of what was done:**
+
+- Created `demo/_scripts/capture_scenario.py` — a ≤200-LOC SDK-based capture driver
+- **Scenario 01** required two fixes: (1) 3 reads of `small.txt` instead of 2 because `should_snip()` uses `_PATH_THRESHOLD=3`; (2) `microcompact_minutes=60` to prevent the 1-minute aggressive preset from clearing results during slow thinking-mode API calls; (3) `externalized_bytes` read from `loop._context_builder._store` directly (wiring bug workaround)
+- **Scenario 02** ran cleanly first try: `full_compacts=1`
+- **Scenario 03** ran cleanly: `microcompact_invocations=3`
+- HANDOFF Section 5 documents the `_build_repl_loop` wiring bug for M3 to fix in one line
