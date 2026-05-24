@@ -1,4 +1,4 @@
-# HANDOFF — Next: M3 (optional — see PLAN for scope)
+# HANDOFF — Next: M3 (write-3-notebooks-and-readme)
 
 > Updated by: `M2` session
 > Date: 2026-05-25
@@ -67,12 +67,63 @@
   - `--microcompact-minutes N` accepts N=0 (immediate) through any positive integer. Argparse type is `int`, no explicit lower bound in argparse (the guard in `compact.py` handles N<0 at construction time).
   - `--max-turns N` is openai_cli only; `simple-agent --repl` does not expose it (by design; MockProvider REPL has no artifacts to capture).
 
-## 5. Known bugs / technical debt for M3+
+## 5. Next milestone guidance
 
-### Bug: `_build_repl_loop` does not wire `tool_result_store` to `AgentLoop`
+For `M3` — write-3-notebooks-and-readme:
 
-- **location**: `src/simple_coding_agent/cli.py` — the `_build_repl_loop` function's `loop_kwargs` dict (around line 505–523)
-- **symptom**: `loop._metrics.externalized_bytes` is always 0 even when externalization DID occur (visible in `[trace] [externalize] bytes=N` events).
-- **root cause**: `_build_repl_loop` creates `ToolResultStore(max_inline_chars=2000)` and passes it to `ContextBuilder(tool_result_store=...)`, but `loop_kwargs` does NOT include `tool_result_store`. Therefore `AgentLoop._tool_result_store = None`, and `AgentLoop._refresh_externalized_bytes()` (which reads `self._tool_result_store.total_externalized_bytes`) returns early with 0.
-- **workaround (M2)**: Read the real value from `loop._context_builder._store.total_externalized_bytes`. This is the same store that `ContextBuilder` uses for externalization.
-- **fix (M3+)**: Add `"tool_result_store": tool_result_store` to `loop_kwargs` in `_build_repl_loop`. This is a 1-line `src/` change; M2 was not allowed to make it.
+- **next scope**: pure docs milestone. Write `demo/README.md` plus
+  three notebooks (`01_tool_result_management.md`,
+  `02_full_compact.md`, `03_microcompact.md`), each embedding ≥ 5
+  lines from the corresponding `demo/_artifacts/<scenario>/` files
+  (M2 already wrote them). Each notebook surfaces the actual model
+  name from `stats_output.txt`'s `# model: ...` header, the exact
+  command line that produced the artifacts, and `file:line` source
+  mappings into `src/simple_coding_agent/...` (verify line numbers
+  with `grep -n` against HEAD, not from memory).
+- **relevant files**:
+  - `demo/_artifacts/01_tool_result_management/{stats_output.txt,metrics.json,trace.stderr,transcript.txt}` — input
+  - `demo/_artifacts/02_full_compact/{...same 4 files...}` — input
+  - `demo/_artifacts/03_microcompact/{...same 4 files...}` — input
+  - `demo/README.md`, `demo/01_tool_result_management.md`,
+    `demo/02_full_compact.md`, `demo/03_microcompact.md` — output (new)
+  - `examples/visibility_full_demo.py` — README's "complement to" reference
+  - `examples/stress_demo.py` — README's reactive-compact pointer
+- **expected tests**: none. M3 is pure docs, no new tests, no `src/`
+  changes.
+- **risks**:
+  - **Known wiring bug (do NOT fix here — M3 is docs-only)** —
+    `_build_repl_loop` does not wire `tool_result_store` to
+    `AgentLoop`:
+    - location: `src/simple_coding_agent/cli.py`, `_build_repl_loop`
+      function's `loop_kwargs` dict (around lines 505–523).
+    - symptom: `loop._metrics.externalized_bytes` is always 0 even
+      when externalization did occur (visible in
+      `[trace] [externalize] bytes=N` events).
+    - root cause: `_build_repl_loop` creates
+      `ToolResultStore(max_inline_chars=2000)` and passes it to
+      `ContextBuilder(tool_result_store=...)`, but `loop_kwargs`
+      does NOT include `tool_result_store`. So
+      `AgentLoop._tool_result_store = None` and
+      `_refresh_externalized_bytes()` returns early with 0.
+    - M2 workaround: the capture driver reads
+      `loop._context_builder._store.total_externalized_bytes`
+      directly and patches `metrics.json`. This means scenario 01's
+      `externalized_bytes=3800` in `metrics.json` is real; the
+      counter underneath was 0.
+    - proper fix: add `"tool_result_store": tool_result_store` to
+      `loop_kwargs` in `_build_repl_loop`. 1-line `src/` change.
+      M3 is docs-only; record this as a finding for the review
+      session or a follow-up initiative.
+  - **Model names from artifacts, not memory.** All three M2
+    scenarios used `qwen3.6-plus` (per
+    `stats_output.txt` headers), but M3 must read this from the
+    files rather than hardcode — if a future re-run uses a
+    different model, the notebook must reflect that.
+  - **Don't dump entire artifacts.** Each notebook should pick the
+    most demonstrative lines (the `[trace] [<channel>]` event, the
+    `/stats` counter, the relevant transcript turn). ≥ 5 lines is
+    the floor, not a target. A 200-line trace dump dilutes the
+    explanation.
+
+The full ready-to-run prompt is at:
+`initiatives/current/prompts/M3.md`
