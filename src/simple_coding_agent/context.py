@@ -19,11 +19,45 @@ from pathlib import Path
 from typing import Any
 
 from .claude_md import ClaudeMdLoader
+from .memory import ProjectMemory
 from .models import CompactSummary, Message, MessageType, Role, ToolCall, ToolResult
 from .snip_tool_model import SnipNudge
 from .tool_result_store import ToolResultStore
 from .trace import NullTracer, Tracer
 from .transcript import Transcript
+
+# ---------------------------------------------------------------------------
+# Memory Management teaching section (M3, auto-memory-overhaul)
+# Fully static — no f-string — so the prefix is cache-stable across turns.
+# Inserted only when project_memory is wired into ContextBuilder.
+# ---------------------------------------------------------------------------
+
+_MEMORY_MANAGEMENT_SECTION: str = """\
+## Memory Management
+
+You have access to a persistent memory system. Use the `write_memory_entry`
+tool to save important information across conversations.
+
+**Four memory types:**
+- `user` — information about the user (role, preferences, expertise)
+- `feedback` — guidance the user has given you (what to do / avoid)
+- `project` — ongoing work context, goals, decisions, deadlines
+- `reference` — pointers to external resources, docs, tickets
+
+**What to save:** non-obvious facts, user preferences explicitly stated,
+recurring patterns you notice, decisions with lasting impact.
+
+**What NOT to save:** code snippets (use the codebase), git history (use
+`git log`), ephemeral task details, anything already in CLAUDE.md,
+speculative ideas the user hasn't confirmed.
+
+**How to save:** use `write_memory_entry(type, id, name, description, body)`.
+The `id` is a kebab-case slug (optionally `type/slug` for organization).
+The `description` is a ≤150-char summary used in the memory index.
+
+The existing memory index is shown in the `## Memory` section below.\
+"""
+
 
 # ---------------------------------------------------------------------------
 # ContextBudget
@@ -266,6 +300,7 @@ class ContextBuilder:
         tool_result_store: ToolResultStore | None = None,
         workspace_path: Path | None = None,
         claude_md_loader: ClaudeMdLoader | None = None,
+        project_memory: ProjectMemory | None = None,
         *,
         tracer: Tracer | None = None,
     ) -> None:
@@ -273,6 +308,7 @@ class ContextBuilder:
         self._store = tool_result_store or ToolResultStore()
         self._workspace_path = workspace_path
         self._claude_md_loader = claude_md_loader
+        self._project_memory = project_memory
         self._tracer: Tracer = tracer or NullTracer()
 
     # ------------------------------------------------------------------
@@ -433,6 +469,9 @@ class ContextBuilder:
                 base = f"{claude_md}\n\n---\n\n{base}"
 
         parts: list[str] = [base]
+
+        if self._project_memory is not None:
+            parts.append(_MEMORY_MANAGEMENT_SECTION)
 
         if memory_snippets:
             parts.append("## Memory\n" + "\n".join(memory_snippets))

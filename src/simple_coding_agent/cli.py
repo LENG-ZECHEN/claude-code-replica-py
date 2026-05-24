@@ -491,6 +491,7 @@ def _build_repl_loop(
         tool_result_store=tool_result_store,
         workspace_path=workspace,
         claude_md_loader=ClaudeMdLoader(tracer=active_tracer),
+        project_memory=project_memory,
         tracer=active_tracer,
     )
     loop_kwargs: dict[str, object] = {

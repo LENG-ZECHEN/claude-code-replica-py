@@ -35,3 +35,18 @@ exists in this file. Deleting or rewriting a prior block halts the loop.
   Registration function is inline closure inside `_register_tools` (captures `self`) rather than
   a standalone exported function — this gives the closure direct access to `self._memory_writes_this_turn`
   for resetting without a separate mutable container.
+
+## M3 — done 2026-05-24
+
+- commit: [auto-mem/M3] (see git log)
+- tests: 734 → 739 (+5 new tests in `test_loop_memory_prompt.py`, `test_loop_write_memory_e2e.py`)
+- mypy: clean | ruff: clean
+- files changed: `context.py`, `cli.py`,
+  `tests/test_loop_memory_prompt.py`, `tests/test_loop_write_memory_e2e.py`
+- exit gate: system prompt has ## Memory Management when project_memory provided AND
+  e2e write_memory_entry tool_use lands .md file on disk → PASS
+- notes: `openai_cli.py` required no change — it already routes through
+  `_cli._build_repl_loop` which now passes `project_memory` to `ContextBuilder`.
+  Single shared instance was already in place from M2 (both CLIs call
+  `_open_project_memory` once and pass to `AgentLoop`). CLI sharing already
+  wired; M3 only added the static teaching section and ContextBuilder threading.
