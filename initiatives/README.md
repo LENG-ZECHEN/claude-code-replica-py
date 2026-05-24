@@ -12,7 +12,7 @@ For the active-initiative pointer and the bootstrap procedure, see
 
 | Slug | Status | Period | Milestones | Final commit |
 |---|---|---|---|---|
-| _(none)_ | — | — | — | — |
+| [2026-05-auto-memory-overhaul](./current/) | active | 2026-05-24 – … | M1 → M7 | — |
 
 ## Archived
 

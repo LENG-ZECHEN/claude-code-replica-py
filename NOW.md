@@ -6,9 +6,19 @@
 
 ## Active initiative
 
-**None.**
+**auto-memory-overhaul** — bootstrapped 2026-05-24
 
-`initiatives/current/` is empty (`.gitkeep` only).
+| | |
+|---|---|
+| Milestones | M1 → M7 (7 total) |
+| Baseline commit | `6aed9ec` |
+| Baseline pytest | 710 passing |
+| Predicted final | ≥768 passing (+58) |
+| Status | M1 next (write path: data layer) |
+| Full brief | [`initiatives/current/PLAN.md`](./initiatives/current/PLAN.md) |
+| Handoff | [`initiatives/current/HANDOFF.md`](./initiatives/current/HANDOFF.md) |
+
+**Run**: `./automation/scripts/run_all_milestones.sh`
 
 ## Last completed initiative
 
