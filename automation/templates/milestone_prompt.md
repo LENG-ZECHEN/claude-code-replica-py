@@ -183,53 +183,18 @@ $ python -m simple_coding_agent.cli --repl < /tmp/probe-input
 "Implementation feels complete" is NOT acceptable. The gate must be
 objectively verified by a command's output.
 
-### 2. Commit with explicit paths
+### 2. Append a block to `initiatives/current/PROGRESS.md`
 
-Never `git add -A`. The commit subject MUST start with
-`[{{COMMIT_PREFIX}}/{{MILESTONE_ID}}]`:
+**Write this BEFORE committing** so it can be staged in the same commit
+as your code. PROGRESS.md is the **fact log for the final review** —
+narrative belongs in HANDOFF, not here.
 
-```
-git -C python-replica add <list each modified/new file>
-git -C python-replica commit -m "[{{COMMIT_PREFIX}}/{{MILESTONE_ID}}] <one-line summary>"
-```
-
-The shell loop's first exit-gate check is `git log -1 | grep -qF
-"[{{COMMIT_PREFIX}}/{{MILESTONE_ID}}]"`. Without this commit the
-loop halts and subsequent milestones will NOT run.
-
-**Do NOT `git commit --amend` to embed this commit's own SHA into
-PROGRESS.md / HANDOFF.md.** Reading `git rev-parse HEAD` before
-amending captures the pre-amend SHA, which becomes unreachable after
-the amend rewrites the commit (`git merge-base --is-ancestor` will
-return false for the recorded SHA). The garbage collector will
-eventually delete that object, breaking `git show <sha>`
-traceability. If you need the SHA in PROGRESS.md / HANDOFF.md,
-choose one of:
-
-- **Omit the SHA** entirely from the body — cite "HEAD at commit
-  time" and rely on `[{{COMMIT_PREFIX}}/{{MILESTONE_ID}}]` to locate
-  the commit; or
-- **Add a second** `[{{COMMIT_PREFIX}}/{{MILESTONE_ID}}]` commit
-  that fills in the first commit's SHA. See `obs-thr-harden` M3 →
-  `4582997` ("fill M3 commit SHA (9b00767) into roadmap + handoff +
-  progress") for the canonical two-commit pattern.
-
-The shell loop's exit-gate check counts ALL `[{{COMMIT_PREFIX}}/{{MILESTONE_ID}}]`
-commits in `baseline_commit..HEAD`, so a follow-up SHA-fill commit
-does not interfere.
-
-### 3. Append a block to `initiatives/current/PROGRESS.md`
-
-Use the terse format in `automation/templates/progress_entry.md`. One
-block per milestone. PROGRESS.md is the **fact log for the final
-review** — narrative belongs in HANDOFF, not here.
-
-Block shape:
+Block shape (use terse format from `automation/templates/progress_entry.md`):
 
 ```
 ## {{MILESTONE_ID}} — done YYYY-MM-DD
 
-- commit: <sha> [{{COMMIT_PREFIX}}/{{MILESTONE_ID}}] <subject>
+- commit: [{{COMMIT_PREFIX}}/{{MILESTONE_ID}}] (see git log)
 - tests: <before> -> <after> (+N)
 - mypy: clean | ruff: clean
 - files changed: `<file1>`, `<file2>`, ...
@@ -237,7 +202,10 @@ Block shape:
 - notes: <optional, ≤1 line>
 ```
 
-### 4. Rewrite `initiatives/current/HANDOFF.md`
+Leave the SHA as `(see git log)` — you do not know it yet and must NOT
+amend to fill it in (see note in step 4 below).
+
+### 3. Rewrite `initiatives/current/HANDOFF.md`
 
 Use the 5-section structure in `automation/templates/handoff_milestone.md`.
 The structure is non-negotiable.
@@ -261,6 +229,34 @@ next agent in person. Include:
   for)
 
 {{IF_LAST_MILESTONE_BLOCK}}
+
+### 4. Commit everything in ONE commit with the required prefix
+
+Never `git add -A`. Stage your implementation files **plus**
+`initiatives/current/PROGRESS.md` and `initiatives/current/HANDOFF.md`
+together. The commit subject MUST start with
+`[{{COMMIT_PREFIX}}/{{MILESTONE_ID}}]`:
+
+```
+git -C python-replica add <implementation files> \
+    initiatives/current/PROGRESS.md \
+    initiatives/current/HANDOFF.md
+git -C python-replica commit -m "[{{COMMIT_PREFIX}}/{{MILESTONE_ID}}] <one-line summary>"
+```
+
+The shell loop's check 1 is `git log -1 | grep -qF "[{{COMMIT_PREFIX}}/{{MILESTONE_ID}}]"`,
+and check 2 requires HANDOFF.md to appear in **that same commit**. Both
+checks fail if PROGRESS/HANDOFF land in a separate commit that lacks the
+prefix. **Every commit you make during the exit ritual must carry the
+`[{{COMMIT_PREFIX}}/{{MILESTONE_ID}}]` prefix.**
+
+**Do NOT `git commit --amend`** to embed this commit's own SHA into
+PROGRESS.md. Instead, leave the SHA as `(see git log)` in the PROGRESS
+block (step 2 above). If traceability demands the exact SHA, add a
+*second* `[{{COMMIT_PREFIX}}/{{MILESTONE_ID}}]` commit that fills it in —
+the script counts ALL matching commits, so a follow-up does not break
+the exit gate. See `obs-thr-harden` M3 → `4582997` for the canonical
+two-commit SHA-fill pattern.
 
 ---
 
