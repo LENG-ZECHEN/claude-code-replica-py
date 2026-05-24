@@ -1,0 +1,19 @@
+Phase 2B + 2C complete (staged multi-agent flow). Summary:
+
+- **All 7 milestones verified**: `[auto-mem/M1]` (`612487d`), `[auto-mem/M2]` (`8c230ca`), `[auto-mem/M3]` (`89ee8b4`), `[auto-mem/M4]` (`7830075`), `[auto-mem/M5]` (`99afe34`), `[auto-mem/M6]` (`272e831`), `[auto-mem/M7]` (`e9aef6a`)
+- **Quality gates green**: pytest 807 passed / 0 failed / 0 skipped (+96 from 711 baseline), mypy clean (26 source files), ruff clean
+- **Stage A subagents spawned in parallel**: code-reviewer + doc-curator-candidate-finder
+- **Main-agent reconciliation completed**: 9 code findings retained (all independently re-verified at cited lines + by the demo-narrator live run), 0 rejected; doc candidates reconciled — 2 Tier A applied, 2 Tier B applied (3 subsystem-doc candidates consolidated into 1 `docs/memdir.md`), 3 Tier C proposed only
+- **Stage B narrator spawned after reconciliation**: demo-narrator (ran `migrate-format` live, re-ran full suite = 807 passed)
+- **REVIEW.md**: prompt (8-dim) + execution (9-dim) scorecards, reconciled detail findings, Tier A/B/C decisions, wrap-up actions
+- **OWNER_BRIEF.zh-CN.md**: delivered features, real demo commands, Before/After, owner-facing findings, resume/interview talking points
+- **Tier A auto-applied**: (1) README paragraph for `--extract-memories` / `--extract-throttle`; (2) 4 per-file summaries appended to CLAUDE.md (`extract_memories.py`, `extraction_hooks.py`, `memdir.py`, `recall_hooks.py`)
+- **Tier B**: (1) `docs/memdir.md` consolidated subsystem doc; (2) `docs/DECISIONS/0003-provider-selector-and-hook-module-extraction.md` + index row
+- **Archive committed** as `[auto-mem/wrap]` (see git log for SHA)
+- **All wrap-gate checks pass**
+- **Main session stayed alive on --remote-control** for user attach.
+
+Key audit findings flagged in REVIEW.md / OWNER_BRIEF.zh-CN.md:
+- "Wired but inert" cluster (MEDIUM ×4): `recent_tools` always `[]` in the live loop (`loop.py:209/216` + `recall_hooks.py:48`); `read_file_state` dedup set never populated (`loop.py:198`); `extraction_in_progress` re-entrancy gate dead (`loop.py:548`); `memory_select` trace `fallback_used` hardcoded `False` (`recall_hooks.py:59-65`).
+- `provider.py` 867 lines > 800-line hard limit (LOW); `ExtractMemoriesRunner` still uses the M4 `MEMORY.md[:2000]` manifest stub (LOW); `write_memory_entry` `tags` param never serialized to frontmatter (LOW).
+- Stale doc claim: HANDOFF/PLAN call `test_null_tracer_zero_overhead` failing, but the suite is 807 passed / 0 skipped (LOW doc-risk).

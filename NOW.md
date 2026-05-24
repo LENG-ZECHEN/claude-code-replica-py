@@ -6,34 +6,24 @@
 
 ## Active initiative
 
-**auto-memory-overhaul** — bootstrapped 2026-05-24
+**None.**
 
-| | |
-|---|---|
-| Milestones | M1 → M7 (7 total) |
-| Baseline commit | `6aed9ec` |
-| Baseline pytest | 710 passing |
-| Predicted final | ≥768 passing (+58) |
-| Status | M1 next (write path: data layer) |
-| Full brief | [`initiatives/current/PLAN.md`](./initiatives/current/PLAN.md) |
-| Handoff | [`initiatives/current/HANDOFF.md`](./initiatives/current/HANDOFF.md) |
-
-**Run**: `./automation/scripts/run_all_milestones.sh`
+`initiatives/current/` is empty (`.gitkeep` only).
 
 ## Last completed initiative
 
-**ctx-mgmt-pdf-align** — see
-[`initiatives/_archive/2026-05-ctx-mgmt-pdf-align/`](./initiatives/_archive/2026-05-ctx-mgmt-pdf-align/).
+**auto-memory-overhaul** — see
+[`initiatives/_archive/2026-05-auto-memory-overhaul/`](./initiatives/_archive/2026-05-auto-memory-overhaul/).
 
 | | |
 |---|---|
-| Period | 2026-05-23 – 2026-05-23 |
-| Milestones | M1 → M4 |
-| Final commit | `02f17f6` |
-| pytest | 615 → 704 (+89) |
+| Period | 2026-05-24 – 2026-05-24 |
+| Milestones | M1 → M7 |
+| Final commit | `e9aef6a` |
+| pytest | 711 → 807 (+96) |
 | mypy + ruff | clean |
-| English review | [`REVIEW.md`](./initiatives/_archive/2026-05-ctx-mgmt-pdf-align/REVIEW.md) |
-| Owner brief 中文 | [`OWNER_BRIEF.zh-CN.md`](./initiatives/_archive/2026-05-ctx-mgmt-pdf-align/OWNER_BRIEF.zh-CN.md) |
+| English review | [`REVIEW.md`](./initiatives/_archive/2026-05-auto-memory-overhaul/REVIEW.md) |
+| Owner brief 中文 | [`OWNER_BRIEF.zh-CN.md`](./initiatives/_archive/2026-05-auto-memory-overhaul/OWNER_BRIEF.zh-CN.md) |
 
 ## How to start a new initiative
 

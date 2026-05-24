@@ -1,0 +1,10 @@
+M6 is complete. Exit gate fully satisfied:
+
+- `call_selector` importable from `Provider` Protocol, `MockProvider`, and `OpenAIProvider` ✓
+- `SelectorError` raised on API error / malformed JSON / schema mismatch ✓  
+- `memdir.py` exports `scan_memory_files`, `format_memory_manifest`, `collect_recent_successful_tools`, `SELECT_MEMORIES_SYSTEM_PROMPT` ✓
+- 16 new tests (≥10 required), all passing ✓
+- 784 total tests, mypy clean, ruff clean ✓
+- `PROGRESS.md` appended with `## M6` block ✓
+- `HANDOFF.md` rewritten for M7 with all prior M1–M5 sections preserved ✓
+- Commit tagged `[auto-mem/M6]` ✓

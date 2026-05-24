@@ -1,0 +1,9 @@
+M5 is complete. Commit `99afe34` — `[auto-mem/M5] stop hook + 7-layer gating + at-least-once cursor`.
+
+**Summary of what shipped:**
+- `extraction_hooks.py` — new module with `hasMemoryWritesSince` + `maybe_extract_memories` (7-layer gating), extracted to keep `loop.py` at 788 lines
+- `loop.py` — `_run_stop_hooks` wired into every return path in `run()` and `run_stream()`; at-least-once cursor semantics
+- `metrics.py` — `extract_invocations` + `extract_writes` counters
+- `cli.py` / `openai_cli.py` — `--extract-memories` / `--extract-throttle` flags with `SIMPLE_AGENT_EXTRACT_MEMORIES` env var fallback
+- 18 new tests (7 + 8 + 3); 750 → 768 passing, mypy/ruff clean
+- `PROGRESS.md` and `HANDOFF.md` updated for M6 next

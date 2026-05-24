@@ -1,0 +1,15 @@
+All exit gate checks satisfied:
+
+**Exit gate confirmation:**
+- `write_memory_entry` in `coding_tools.__all__` ✓
+- Validates type, id, description, body — 4 validation tests pass ✓  
+- Upsert semantics — test passes ✓
+- `AgentLoop._memory_writes_this_turn` blocks 4th write with `"memory write quota exhausted this turn (max 3)"` ✓
+- Quota resets on next `run()` ✓
+- Tool absent from registry when `project_memory=None` ✓
+- 10 new tests in `test_write_memory_tool.py` ✓
+- pytest 724 → 734, mypy clean, ruff clean ✓
+- `[auto-mem/M2]` commit at HEAD (`8c230ca`) with `HANDOFF.md` and `PROGRESS.md` included ✓
+- M1 block preserved verbatim in both PROGRESS.md and HANDOFF.md Section 2 ✓
+
+M2 is complete. The shell script will pick up the next milestone (M3) automatically.

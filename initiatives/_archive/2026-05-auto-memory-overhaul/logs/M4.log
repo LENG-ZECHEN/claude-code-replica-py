@@ -1,0 +1,19 @@
+M4 is complete. Here is the exit gate summary:
+
+---
+
+**Exit gate — PASS**
+
+| Check | Result |
+|---|---|
+| `ExtractMemoriesRunner` importable from `extract_memories` | ✓ |
+| `.run()` returns `ExtractionResult{written_paths, errors, turn_count}` | ✓ |
+| `MAX_TURNS=5` enforced (for/else) | ✓ |
+| Tool whitelist enforced: non-whitelisted → `is_error=True` | ✓ |
+| `build_extract_prompt` builds 5-section prompt | ✓ |
+| `write_memory_entry` uses local `ProjectMemory(memory_dir)` | ✓ |
+| `pytest --tb=no -q` green: 739 → 750 (+11 new tests) | ✓ |
+| mypy clean (23 source files) | ✓ |
+| ruff clean | ✓ |
+
+**Files changed:** `extract_memories.py` (new, 166 lines), `test_extract_memories_runner.py` (new, 11 tests). No existing modules modified.

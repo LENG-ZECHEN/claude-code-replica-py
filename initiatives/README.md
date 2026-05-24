@@ -12,7 +12,7 @@ For the active-initiative pointer and the bootstrap procedure, see
 
 | Slug | Status | Period | Milestones | Final commit |
 |---|---|---|---|---|
-| [2026-05-auto-memory-overhaul](./current/) | active | 2026-05-24 – … | M1 → M7 | — |
+| _(none — `initiatives/current/` is empty)_ | — | — | — | — |
 
 ## Archived
 
@@ -22,6 +22,7 @@ For the active-initiative pointer and the bootstrap procedure, see
 | [2026-05-observable-thresholds](./_archive/2026-05-observable-thresholds/) | complete | 2026-05-22 – 2026-05-23 | M1 → M3 | `026db2e` |
 | [2026-05-obs-thr-harden](./_archive/2026-05-obs-thr-harden/) | complete | 2026-05-23 | M1 → M3 | `4582997` |
 | [2026-05-ctx-mgmt-pdf-align](./_archive/2026-05-ctx-mgmt-pdf-align/) | complete | 2026-05-23 | M1 → M4 | `02f17f6` |
+| [2026-05-auto-memory-overhaul](./_archive/2026-05-auto-memory-overhaul/) | complete | 2026-05-24 | M1 → M7 | `e9aef6a` |
 
 ## Folder shape (per initiative)
 

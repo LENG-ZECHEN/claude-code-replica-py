@@ -1,0 +1,9 @@
+**M3 complete.**
+
+Exit gate satisfied:
+- `## Memory Management` appears in the system prompt when `project_memory` is provided ✓
+- E2E test: MockProvider-scripted `write_memory_entry` tool_use lands a `.md` file with correct frontmatter on disk ✓
+- `pytest --tb=no -q` green: 739 passing (+5 over M2's 734) ✓
+- mypy: clean, ruff: clean ✓
+- `[auto-mem/M3]` commit at HEAD (`89ee8b4`) with all required files ✓
+- M1 and M2 blocks preserved verbatim in PROGRESS.md and HANDOFF.md Section 2 ✓

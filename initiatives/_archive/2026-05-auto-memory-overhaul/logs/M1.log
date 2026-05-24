@@ -1,0 +1,5 @@
+M1 exit ritual complete. Summary:
+
+- **Commit `612487d`**: `[auto-mem/M1]` — `.md` frontmatter format, `scan_memory_files`, `migrate-format` CLI. 13 new tests; pytest 711→724; mypy + ruff clean.
+- **`PROGRESS.md`**: M1 block appended.
+- **`HANDOFF.md`**: rewritten with 5-section structure pointing to M2 (write-memory-entry-tool).
