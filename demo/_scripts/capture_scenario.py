@@ -13,15 +13,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from simple_coding_agent.cli import _AGGRESSIVE_THRESHOLDS, _build_repl_loop
+from simple_coding_agent.coding_tools import ShellMode
+from simple_coding_agent.openai_cli import _api_key_from_env, _load_dotenv
+from simple_coding_agent.provider import OpenAIProvider
+from simple_coding_agent.trace import StderrTracer
+
 _DEMO_DIR = Path(__file__).resolve().parents[1]      # python-replica/demo/
 _ARTIFACTS_DIR = _DEMO_DIR / "_artifacts"
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
-
-from simple_coding_agent.cli import _AGGRESSIVE_THRESHOLDS, _build_repl_loop
-from simple_coding_agent.coding_tools import ShellMode
-from simple_coding_agent.provider import OpenAIProvider
-from simple_coding_agent.trace import StderrTracer
-from simple_coding_agent.openai_cli import _api_key_from_env, _load_dotenv
 
 _SMALL = (
     "Context management design notes: context grows monotonically, "
@@ -61,9 +61,18 @@ _SCENARIOS: dict[str, ScenarioConfig] = {
     "02": ScenarioConfig(
         dir_name="02_full_compact",
         workspace_files={
-            "notes1.txt": "Alpha: context budget formula, keep_recent boundary, LLM summarizer fallback.",
-            "notes2.txt": "Beta: microcompact cleanup, threshold_minutes, compactable tool list, idempotent.",
-            "notes3.txt": "Gamma: snip tool folding, path-keyed dedup, snip_keep_recent, tool_use_id pairing.",
+            "notes1.txt": (
+                "Alpha: context budget formula, keep_recent boundary, "
+                "LLM summarizer fallback."
+            ),
+            "notes2.txt": (
+                "Beta: microcompact cleanup, threshold_minutes, "
+                "compactable tool list, idempotent."
+            ),
+            "notes3.txt": (
+                "Gamma: snip tool folding, path-keyed dedup, "
+                "snip_keep_recent, tool_use_id pairing."
+            ),
         },
         turn_inputs=(
             "Please use the read_file tool to read notes1.txt and tell me what it says.",
@@ -75,7 +84,10 @@ _SCENARIOS: dict[str, ScenarioConfig] = {
     "03": ScenarioConfig(
         dir_name="03_microcompact",
         workspace_files={
-            "notes.txt": "Microcompact demo: data cleared when threshold_minutes=0 fires next turn.",
+            "notes.txt": (
+                "Microcompact demo: data cleared when "
+                "threshold_minutes=0 fires next turn."
+            ),
         },
         turn_inputs=(
             "Please use the read_file tool to read notes.txt and tell me its contents.",
@@ -158,13 +170,9 @@ def _run_scenario(
         _render_transcript(loop._transcript.to_jsonable(include_virtual=True)),
         encoding="utf-8",
     )
+    # externalized_bytes is now wired through AgentLoop._refresh_externalized_bytes
+    # (see [ctx-demo/review-fix] in cli.py); _metrics already carries the real value.
     metrics_dict = _metrics_to_dict(loop._metrics)
-    # Workaround: _build_repl_loop doesn't wire tool_result_store to AgentLoop,
-    # so metrics.externalized_bytes is always 0. Read the real value from the
-    # context builder's store directly.
-    metrics_dict["externalized_bytes"] = (
-        loop._context_builder._store.total_externalized_bytes
-    )
     (artifact_dir / "metrics.json").write_text(
         json.dumps(metrics_dict, indent=2) + "\n",
         encoding="utf-8",

@@ -127,12 +127,16 @@ From `_artifacts/01_tool_result_management/metrics.json`:
 }
 ```
 
-> **Note on `externalized_bytes`**: The `/stats` command shows `externalized bytes: 0` because of
-> a known wiring bug in `_build_repl_loop` (see HANDOFF Section 5): `ToolResultStore` is wired to
-> `ContextBuilder` but not to `AgentLoop`, so `MetricsCollector.externalized_bytes` is never
-> updated. The capture script reads the real count from
-> `loop._context_builder._store.total_externalized_bytes` and patches `metrics.json` directly.
-> The `[trace] [externalize] bytes=3800` event confirms externalization did occur.
+> **Note on `externalized_bytes` (the `/stats` 0 vs `metrics.json` 3800 split)**: These canonical
+> artifacts were captured while `_build_repl_loop` had a wiring bug — `ToolResultStore` reached
+> `ContextBuilder` but not `AgentLoop`, so `MetricsCollector.externalized_bytes` was never updated
+> and `/stats` showed `0`. The capture script worked around it by reading
+> `loop._context_builder._store.total_externalized_bytes` directly, which is why `metrics.json`
+> shows the real `3800`. **This bug was fixed during the post-execution review**
+> (`[ctx-demo/review-fix]` in `cli.py`: the store is now passed to `AgentLoop`, and the capture
+> driver's workaround was removed). The artifacts above predate the fix, so they still show the
+> 0-vs-3800 split; a fresh re-run now reports `3800` in both `/stats` and `metrics.json`. The
+> `[trace] [externalize] bytes=3800` event confirms externalization occurred either way.
 
 From `_artifacts/01_tool_result_management/stats_output.txt`:
 
@@ -159,7 +163,7 @@ Context-management metrics:
 | `[trace] [externalize] bytes=3800` | `trace.stderr` line 20 | large.txt exceeded `max_inline_chars=2000`; result externalized |
 | `externalized=1` in budget trace | `trace.stderr` line 22 | Context builder confirms 1 result is held off-context |
 | `"snip_invocations": 2` | `metrics.json` | Both snip passes recorded (snip fires once per user turn) |
-| `"externalized_bytes": 3800` | `metrics.json` | Real value from context builder (not from MetricsCollector counter) |
+| `"externalized_bytes": 3800` | `metrics.json` | One result externalized; now flows through `MetricsCollector` after the review-time wiring fix (see note above) |
 | `tokens_per_turn` growth then reset | `metrics.json` | Compaction brings token count down between turns 7 and 8 |
 
 **Key insight**: snip and externalize are complementary. Snip removes redundancy within the active
