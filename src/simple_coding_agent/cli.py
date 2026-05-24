@@ -507,6 +507,7 @@ def _build_repl_loop(
         "tool_executor": executor,
         "transcript": transcript,
         "context_builder": builder,
+        "tool_result_store": tool_result_store,
         "budget": budget,
         "registry": registry,
         "compactor": compactor,

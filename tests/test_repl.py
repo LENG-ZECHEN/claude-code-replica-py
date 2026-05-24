@@ -708,6 +708,24 @@ def test_snip_nudge_growth_tokens_not_lowered_by_aggressive(tmp_path: Path) -> N
     assert loop._snip_nudge_growth_tokens == cli_mod._DEFAULT_SNIP_NUDGE_GROWTH_TOKENS
 
 
+# ---------------------------------------------------------------------------
+# ctx-demo review-fix: _build_repl_loop must wire the SAME ToolResultStore into
+# both ContextBuilder and AgentLoop. It previously reached only the builder, so
+# AgentLoop._tool_result_store stayed None and MetricsCollector.externalized_bytes
+# was stuck at 0 for every REPL session (/stats under-reported externalization).
+# ---------------------------------------------------------------------------
+
+def test_build_repl_loop_wires_tool_result_store_into_agent_loop(tmp_path: Path) -> None:
+    """The loop and its context builder share one store, so /stats sees real bytes."""
+    loop = cli_mod._build_repl_loop(tmp_path, aggressive_thresholds=True)
+    assert loop._tool_result_store is not None
+    assert loop._tool_result_store is loop._context_builder._store
+    # refreshing now propagates real externalized bytes into the metrics counter
+    loop._tool_result_store.process_result("regress-call", "Z" * 80_000)
+    loop._refresh_externalized_bytes()
+    assert loop._metrics.externalized_bytes > 0
+
+
 def test_snip_nudge_growth_tokens_parsed_by_main(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
