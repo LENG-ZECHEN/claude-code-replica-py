@@ -25,6 +25,8 @@
 | English review | [`REVIEW.md`](./initiatives/_archive/2026-05-auto-memory-overhaul/REVIEW.md) |
 | Owner brief 中文 | [`OWNER_BRIEF.zh-CN.md`](./initiatives/_archive/2026-05-auto-memory-overhaul/OWNER_BRIEF.zh-CN.md) |
 
+**Post-initiative follow-up on `main`** (`212b6af` fix + `8d20b1b` docs, 2026-05-24): a direct-to-`main` change resolved the four "wired but inert" recall/extraction defects from the review — `recent_tools` now reaches the selector, `find_relevant_memories` returns a `RecallResult` (accurate `memory_select` trace), the `extraction_in_progress` gate now guards re-entrancy, and the unused `read_file_state` param was removed — plus three LOW findings (extractor manifest stub, `tags` persistence, byte-accurate `MEMORY.md` truncation). **`main` is now at `8d20b1b`; pytest 807 → 816, mypy + ruff clean.**
+
 ## How to start a new initiative
 
 1. Discuss direction with the agent (free-form chat).
