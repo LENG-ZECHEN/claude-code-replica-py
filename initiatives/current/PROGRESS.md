@@ -27,3 +27,12 @@ exists in this file. Deleting or rewriting a prior block halts the loop.
   - 02 full_compacts=1 >= 1 -> PASS
   - 03 microcompact_invocations=3 >= 1 -> PASS
 - notes: scenario 01 needed 3 reads of small.txt (not 2) because should_snip() uses _PATH_THRESHOLD=3. microcompact_minutes=60 prevents interference from slow qwen3.6-plus thinking-mode calls. externalized_bytes read from loop._context_builder._store.total_externalized_bytes (workaround for wiring bug in _build_repl_loop — see Section 5 of HANDOFF).
+
+## M3 — done 2026-05-25
+
+- commit: [ctx-demo/M3] (see git log)
+- tests: 819 -> 819 (+0 — M3 is pure docs milestone)
+- mypy: clean | ruff: clean (ruff errors in demo/_scripts/capture_scenario.py are pre-existing from M2, not introduced by M3)
+- files changed: `demo/README.md`, `demo/01_tool_result_management.md`, `demo/02_full_compact.md`, `demo/03_microcompact.md`
+- exit gate: 4 demo .md files exist; each embeds ≥5 lines of captured output, file:line source references, exact capture command, model name from stats_output.txt header -> PASS
+- notes: all 3 scenarios used qwen3.6-plus; no quota swap needed. microcompact scenario (03) shows invocations=3 / cleared=0 — keep_recent=5 protects the single tool result throughout the 2-turn session.

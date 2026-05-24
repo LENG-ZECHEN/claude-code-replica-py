@@ -210,6 +210,7 @@ milestones:
 ---
 
 > Bootstrapped on 2026-05-25. Baseline commit: `9ba662bf65e45d08949d4524203773a63bf36902`. Baseline pytest: 816 passing.
+> STATUS: complete (M1–M3 shipped on 2026-05-25)
 
 # Goal
 
