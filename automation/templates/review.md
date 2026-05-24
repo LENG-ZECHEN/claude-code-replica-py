@@ -7,20 +7,22 @@ The script substitutes {{INITIATIVE_SLUG}}, {{COMMIT_PREFIX}},
 {{ARCHIVE_SLUG}}, and {{BASELINE_COMMIT}} (4 tokens) before piping
 this file as stdin.
 
-This is the MULTI-AGENT version: the main review session acts as
-orchestrator. It runs code-reviewer + doc-curator-candidate-finder
-in parallel as READ-ONLY subagents, reconciles their outputs, applies
-Tier A/B doc edits itself, then runs demo-narrator after reconciliation
-so the Chinese owner brief can include the findings that matter.
+This is the MULTI-AGENT review-and-repair version: the main review
+session acts as orchestrator. It runs code-reviewer +
+doc-curator-candidate-finder in parallel as READ-ONLY subagents,
+reconciles their outputs, repairs selected Tier A/B/C findings itself,
+then runs demo-narrator after repair/re-review so the Chinese owner
+brief can include the findings and fixes that matter.
 
 Outputs:
 - REVIEW.md — English archive review for cross-initiative comparison.
 - OWNER_BRIEF.zh-CN.md — Chinese owner-facing brief for understanding,
   demo, before/after, and interview/resume storytelling.
 
-Phase 2C archives the initiative, rewrites NOW.md, updates index files,
-commits the wrap result, then stays alive on --remote-control so the
-human can attach and ask follow-up questions.
+Phase 2B may create focused review-fix/review-doc commits before wrap.
+Phase 2C then archives the initiative, rewrites NOW.md, updates index
+files, commits the final wrap result, then stays alive on --remote-control
+so the human can attach and ask follow-up questions.
 
 Comment blocks (HTML comments) are guidance and should NOT appear in
 REVIEW.md or OWNER_BRIEF.zh-CN.md.
@@ -33,30 +35,45 @@ initiative. Every milestone has already produced its commit. Your job
 is to perform a staged multi-agent review, archive the initiative, and
 remain available for human follow-up via `--remote-control`.
 
-Your work has 4 acts:
+Your work has 5 acts:
 
 1. **Phase 2B preflight**: verify every milestone commit exists and the
-   final quality gates are green.
+   initial final quality gates are green enough to begin review. If a
+   gate is red but the failure is clearly repairable inside the review
+   session, you may enter review-and-repair mode instead of stopping.
+   Missing milestone commits are hard blockers.
 2. **Phase 2B multi-agent review**:
 
    * Stage A: spawn 2 READ-ONLY subagents in parallel:
      `code-reviewer` and `doc-curator-candidate-finder`.
    * Stage B: reconcile their outputs yourself. Do not blindly paste
      contradictory or duplicated findings.
-   * Stage C: apply Tier A/B doc edits yourself, then spawn
-     `demo-narrator` with the reconciled findings so the Chinese owner
-     brief reflects the important code/doc findings.
+   * Stage C: perform review-time repair. The MAIN REVIEW AGENT may
+     autonomously repair selected Tier A/B/C findings when the repair is
+     safe, scoped, testable, and valuable. Stage A subagents remain
+     read-only; only the MAIN REVIEW AGENT may edit, test, stage, or
+     commit.
+   * Stage D: apply approved documentation edits, then re-review the
+     repaired state.
+   * Stage E: spawn `demo-narrator` with the final reconciled findings
+     and review-time repair outcomes so the Chinese owner brief reflects
+     what actually shipped after review.
 3. **Phase 2C wrap-up**: create `REVIEW.md` and
    `OWNER_BRIEF.zh-CN.md`, archive `initiatives/current/`, rewrite
    `NOW.md`, update `initiatives/README.md`, write `review.log`, and
-   commit everything as `[{{COMMIT_PREFIX}}/wrap]`.
-4. **Stay alive on `--remote-control`**. After the wrap-gate verifies,
+   commit the final archive result as `[{{COMMIT_PREFIX}}/wrap]`.
+4. **Final exit-gate verification**: ensure tests, archive/current state,
+   and git state are coherent after any review-time repair commits. The
+   final HEAD should be the `[{{COMMIT_PREFIX}}/wrap]` commit.
+5. **Stay alive on `--remote-control`**. After the wrap-gate verifies,
    print the exact attach message in Step 11. Do NOT `/exit`. The
    session terminates only when the user `/exit`s manually.
 
 There is no user available during Phase 2B / 2C. Stop only on a clear
-quality failure: missing milestone commit, pytest red, mypy red, or ruff
-red. After Phase 2C, the user attaches via browser extension or Claude
+quality failure that cannot be repaired within this review session:
+missing milestone commit, persistent pytest red, persistent mypy red,
+persistent ruff red, unsafe repair scope, or repeated validation failure.
+After Phase 2C, the user attaches via browser extension or Claude
 desktop app to ask follow-up questions in any language.
 
 ## Mandatory reading — main agent reads this FIRST
@@ -119,12 +136,16 @@ ruff check .            # record status
 
 If pytest is red OR mypy is red OR ruff is red:
 
-1. STOP.
-2. Write `initiatives/current/REVIEW.md` with only a `# BLOCKED` section
-   quoting the failing output.
-3. Do NOT spawn subagents.
-4. Do NOT create `OWNER_BRIEF.zh-CN.md`.
-5. Do NOT run Phase 2C archive / wrap-up steps.
+1. First decide whether the failure is clearly repairable inside this
+   review session.
+2. If the failure is not safely repairable, STOP and write
+   `initiatives/current/REVIEW.md` with only a `# BLOCKED` section
+   quoting the failing output. Do NOT spawn subagents, do NOT create
+   `OWNER_BRIEF.zh-CN.md`, and do NOT run Phase 2C archive / wrap-up
+   steps.
+3. If the failure is safely repairable, record the failing output as an
+   initial gate failure, continue into Stage A review, and repair it in
+   Step 3C before any final REVIEW.md / OWNER_BRIEF / archive work.
 
 Record:
 
@@ -462,9 +483,145 @@ reconciled decisions must be reflected in `REVIEW.md` and passed to
 
 ---
 
-## Step 3C: Apply approved Tier A/B doc edits yourself
+
+---
+
+## Step 3C: Review-time repair loop
+
+After reconciling Stage A outputs, the MAIN REVIEW AGENT enters
+review-and-repair mode.
+
+You are not merely a reviewer. You are a review-and-repair agent. Your
+job is to make the initiative genuinely shippable, not merely to report
+defects.
+
+### Finding tiers
+
+Classify reconciled findings into:
+
+- **Tier A**: correctness bugs, data loss risks, security risks, broken
+  CLI/API behavior, broken tests, corrupted archive state, or anything
+  that makes the initiative unsafe to ship.
+- **Tier B**: wired-but-inert behavior, misleading trace/metrics,
+  incomplete integration, missing end-to-end coverage, stale claims that
+  materially misrepresent behavior, or important maintainability issues.
+- **Tier C**: documentation polish, small cleanup, optional refactors,
+  minor consistency issues, or future improvement opportunities.
+
+### Repair policy
+
+- Tier A findings must be fixed if technically feasible within this
+  review session. If not fixable safely, stop and write a BLOCKED review
+  explaining the blocker.
+- Tier B findings should be fixed when the change is local, testable,
+  and unlikely to expand scope.
+- Tier C findings may be fixed autonomously if the change is small,
+  low-risk, and improves the final deliverable.
+- Do not expand Tier C into broad refactors, new features, or subjective
+  redesigns.
+- Do not hide unresolved findings. Either fix them, downgrade them with
+  justification, or record them as follow-ups in REVIEW.md.
+- If a finding was discovered and then repaired during this review
+  session, record it under "Fixed during review", not as an unresolved
+  defect.
+
+### Repair budget
+
+You may perform up to 5 repair rounds.
+
+Each repair round must have a clear target:
+
+- finding being addressed,
+- intended files,
+- proof/test required,
+- expected commit type.
+
+For each repair round:
+
+1. Select the highest-value unresolved finding that is safe to fix.
+2. Make the smallest sufficient change.
+3. Add or update tests first when practical.
+4. Run targeted validation for the changed area.
+5. If targeted validation passes, continue to the next finding or the
+   final validation gate.
+6. If targeted validation fails, repair once more.
+7. If the same validation failure repeats twice, stop that repair path
+   and document the blocker.
+
+Do not run an unbounded loop. Do not start unrelated features. Do not
+rewrite unrelated subsystems.
+
+### Review-time commit rules
+
+Review-time code/test fixes must be committed before Phase 2C wrap-up as:
+
+`[{{COMMIT_PREFIX}}/review-fix] <short description>`
+
+Review-time documentation-only fixes made before Phase 2C wrap-up must be
+committed as:
+
+`[{{COMMIT_PREFIX}}/review-doc] <short description>`
+
+If a commit contains both code and docs required for the same finding,
+use `review-fix`.
+
+Every review-time commit must be focused and must mention the finding or
+issue it addresses.
+
+Do not squash review-time repair commits into the final wrap commit. The
+final `[{{COMMIT_PREFIX}}/wrap]` commit should archive and summarize the
+repaired final state.
+
+Do not leave unstaged or uncommitted repair changes before entering Phase
+2C. Before Step 4, `git status --short` should be clean except for files
+that Step 4 / Step 5 are about to create.
+
+### Validation inside the repair loop
+
+For every repaired finding:
+
+1. Run targeted tests that prove the fix.
+2. If tests had to be added, confirm the new test would have failed
+   before the repair when practical.
+3. Record the targeted command and result for REVIEW.md.
+4. After all selected repairs, run the final validation gate:
+
+```bash
+python -m pytest tests/ -q
+python -m mypy src/simple_coding_agent
+python -m ruff check src tests
+git status --short
+```
+
+If the project has a stricter canonical gate, run that as well.
+
+### Re-review after repair
+
+After repair rounds are complete, re-review the repaired state before
+writing REVIEW.md or spawning `demo-narrator`.
+
+Confirm:
+
+- selected Tier A/B/C repairs are complete,
+- targeted tests passed,
+- full final validation passed or blockers are explicitly documented,
+- all review-time repair changes are committed,
+- working tree is clean except for pending REVIEW.md / OWNER_BRIEF files,
+- any remaining findings are accurately described as follow-ups.
+
+Do not write the final REVIEW.md before this re-review is complete.
+
+## Step 3D: Apply approved documentation edits yourself
 
 Only the MAIN REVIEW AGENT may modify files.
+
+This step happens after the review-time repair loop. It covers
+documentation updates that remain after code/test repairs are complete.
+
+The MAIN REVIEW AGENT may apply Tier A/B documentation edits and may also
+apply small, low-risk Tier C documentation edits if they are clearly safe
+and improve the final deliverable. Broad rewrites, subjective
+reorganizations, or schema changes must remain proposals.
 
 Read `automation/RUNBOOK.md` section "Doc-update tiers (used by Step 6)"
 again before applying edits.
@@ -476,7 +633,7 @@ git -C python-replica diff {{BASELINE_COMMIT}}..HEAD --stat -- src/ pyproject.to
 git -C python-replica diff {{BASELINE_COMMIT}}..HEAD --name-only -- src/ pyproject.toml
 ````
 
-Then apply reconciled Tier A/B decisions.
+Then apply reconciled documentation decisions.
 
 ### Tier A — apply automatically only if safe
 
@@ -535,15 +692,29 @@ Record every Tier B creation in `REVIEW.md` later:
 - Tier B | `<new file path>` | <one-line summary> | trigger: <RUNBOOK rule> | source: doc-curator candidate / main-agent inspection
 ```
 
-### Tier C — propose only
+### Tier C — optionally apply if small and safe
 
-Do NOT apply Tier C edits. Put them in `REVIEW.md` under:
+Tier C edits are normally proposals, but the MAIN REVIEW AGENT may apply
+a Tier C documentation edit when all of the following are true:
+
+1. The edit is small and local.
+2. The edit does not rewrite the document structure.
+3. The edit does not change table schemas unless the schema change is
+   clearly mechanical and low-risk.
+4. The edit removes stale or misleading information caused by this
+   initiative or review-time repairs.
+5. The edit can be reviewed from the final diff.
+
+If applied, record it in REVIEW.md under "Fixed during review" or
+"Auto-applied edits" with Tier C classification.
+
+If not applied, put it in REVIEW.md under:
 
 ```markdown
 ## Proposed edits (need human review)
 ```
 
-Each entry:
+Each proposed entry:
 
 ````markdown
 1. `<file>:<line-or-section>` — <what to change> — why: <reason>
@@ -552,17 +723,17 @@ Each entry:
    ```diff
    - old line
    + new line
-````
-
+   ```
 ````
 
 ---
 
-## Step 3D: Spawn demo-narrator AFTER reconciliation
+## Step 3E: Spawn demo-narrator AFTER repair and re-review
 
 Now spawn `demo-narrator`. This is intentionally NOT parallel with
-Stage A. The narrator must see the reconciled review findings so the
-Chinese owner brief can explain what matters to the user.
+Stage A. The narrator must see the repaired final state, the reconciled
+review findings, and the review-time repair outcomes so the Chinese
+owner brief explains what actually shipped after review.
 
 Use one `Agent` tool call:
 
@@ -570,11 +741,15 @@ Use one `Agent` tool call:
 - `description` = `"owner-brief-narrator-for-{{INITIATIVE_SLUG}}"`
 - `prompt` = the literal prompt below PLUS an appended section titled
   `## Additional input from main-agent reconciliation` containing:
-  - final code findings to surface to the owner
-  - final Tier C proposals to surface to the owner
-  - important Tier A/B edits that affect docs the user should know about
-  - final pytest/mypy/ruff numbers
-  - final commit count and initiative commit range
+  - final code findings retained after re-review
+  - findings fixed during review, with commit hashes and test evidence
+  - findings deferred, with rationale
+  - final Tier A/B/C documentation decisions
+  - important doc edits that affect the owner brief
+  - final pytest/mypy/ruff numbers after repair
+  - final initiative commit range
+  - review-time repair commits, if any
+  - final pre-wrap commit
 
 ---
 
@@ -717,6 +892,8 @@ $ <命令>
 
 Use `Write` to create `initiatives/current/REVIEW.md`.
 
+Write REVIEW.md only after the repair loop and re-review are complete.
+
 Structure:
 
 ```markdown
@@ -729,9 +906,14 @@ Structure:
 - pytest: <before> -> <after> (delta +N)
 - mypy: <status>
 - ruff: <status>
-- Total commits in this initiative: <N>
-- Final pre-wrap commit: `<sha>`
-- Review mode: multi-agent staged review (`code-reviewer` + `doc-curator-candidate-finder` in parallel, then reconciled, then `demo-narrator`)
+- Total milestone commits before review: <N>
+- Review-time commits: <N>
+- Final pre-review commit: `<sha>`
+- Final pre-wrap commit after review repairs: `<sha>`
+- Wrap commit: `<sha or pending until Phase 2C>`
+- Review mode: multi-agent staged review + main-agent repair loop
+  (`code-reviewer` + `doc-curator-candidate-finder` in parallel,
+  reconciled by main agent, repaired by main agent, then `demo-narrator`)
 
 ## Lessons learned
 
@@ -743,20 +925,59 @@ Explain briefly:
 
 - whether code-reviewer and doc-curator outputs conflicted
 - which findings were deduplicated or severity-adjusted
-- which Tier A/B candidates were applied, downgraded, or skipped
+- which findings were selected for review-time repair
+- which findings were deferred and why
+- which Tier A/B/C doc candidates were applied, downgraded, or skipped
 - which findings were selected for the owner brief
 
 (paste reconciled code-reviewer's scorecard sections here)
 
-(paste reconciled Detail-level findings here)
+## Findings and repair ledger
+
+### Fixed during review
+
+For each finding fixed during review:
+
+- `<finding title>` — Tier <A/B/C> — severity <HIGH/MEDIUM/LOW>
+  - Source: <code-reviewer / doc-curator / main-agent inspection>
+  - Fix commit: `<sha> [{{COMMIT_PREFIX}}/review-fix or review-doc] ...`
+  - Files changed: `<paths>`
+  - Tests added/updated: `<paths or none>`
+  - Validation: `<commands and results>`
+
+If none, write "(none)".
+
+### Deferred findings / follow-ups
+
+For each unresolved finding:
+
+- `<finding title>` — Tier <A/B/C> — severity <HIGH/MEDIUM/LOW>
+  - Why deferred: <reason>
+  - Suggested next step: <concrete next action>
+
+If none, write "(none)".
 
 ## Auto-applied edits
 
-<Tier A/B edits actually applied by the MAIN REVIEW AGENT. If none: write explicit none rows.>
+<Tier A/B/C doc edits actually applied by the MAIN REVIEW AGENT.
+If none: write explicit none rows.>
 
 ## Proposed edits (need human review)
 
-<Tier C proposals selected by the MAIN REVIEW AGENT. If none: write "(none)">
+<Tier C proposals not applied by the MAIN REVIEW AGENT.
+If none: write "(none)".>
+
+## Validation results
+
+Include:
+
+- initial quality gate results,
+- targeted tests run for review-time repairs,
+- full pytest result after repair,
+- mypy result after repair,
+- ruff result after repair,
+- git status result,
+- any failed command and how it was resolved.
 
 ## Phase 2C: Wrap-up actions taken
 
@@ -775,6 +996,9 @@ Rules:
   Tier A/B/C decisions only.
 * Do not hide unsupported findings. If a subagent finding was rejected,
   mention it briefly in the reconciliation note.
+* Do not describe already-fixed findings as still broken.
+* If a finding was discovered and fixed during review, record it under
+  "Fixed during review".
 * Keep `REVIEW.md` English.
 * Keep `OWNER_BRIEF.zh-CN.md` as the Chinese source for human
   understanding.
@@ -814,12 +1038,17 @@ understanding and demo readiness.
 Only proceed if:
 
 1. Step 1 passed.
-2. Step 2 was green.
+2. Step 2 was initially green, or any initial repairable failure was
+   fixed and the final validation gate is now green.
 3. Stage A subagents returned successfully.
 4. Main-agent reconciliation completed.
-5. Approved Tier A/B edits, if any, were applied by the main agent.
-6. `demo-narrator` returned successfully.
-7. `REVIEW.md` and `OWNER_BRIEF.zh-CN.md` were written successfully.
+5. Review-time repair loop completed or explicitly found no safe repairs.
+6. Re-review of the repaired state completed.
+7. Approved documentation edits, if any, were applied by the main agent.
+8. `demo-narrator` returned successfully.
+9. `REVIEW.md` and `OWNER_BRIEF.zh-CN.md` were written successfully.
+10. `git status --short` is clean or only contains files that Phase 2C
+    is about to archive/stage explicitly.
 
 ## Step 6: Archive
 
@@ -893,23 +1122,28 @@ initiatives/_archive/{{ARCHIVE_SLUG}}/logs/review.log
 Use this content shape and fill actual values:
 
 ```markdown
-Phase 2B + 2C complete (staged multi-agent flow). Summary:
+Phase 2B + 2C complete (staged multi-agent review-and-repair flow). Summary:
 
 - **All N milestones verified**: `[{{COMMIT_PREFIX}}/M1]` (`<sha>`), ...
-- **Quality gates green**: pytest <N> (+<delta> from <baseline>), mypy clean (<N files or status>), ruff clean
+- **Initial quality gates**: pytest <N>, mypy <status>, ruff <status>
 - **Stage A subagents spawned in parallel**: code-reviewer + doc-curator-candidate-finder
 - **Main-agent reconciliation completed**: <N> code findings retained, <N> doc candidates applied/downgraded/skipped
-- **Stage B narrator spawned after reconciliation**: demo-narrator
-- **REVIEW.md**: scorecards, reconciled detail findings, Tier A/B/C decisions, wrap-up actions
+- **Review-time repair loop**: <N> findings fixed, <N> deferred
+- **Review-time commits**: <list commits or "none">
+- **Final quality gates green**: pytest <N> (+<delta> from <baseline>), mypy clean, ruff clean
+- **Stage B narrator spawned after repair/re-review**: demo-narrator
+- **REVIEW.md**: scorecards, reconciled findings, fixed-during-review ledger, deferred follow-ups, validation results, wrap-up actions
 - **OWNER_BRIEF.zh-CN.md**: delivered features, demo commands, Before/After, owner-facing findings, resume/interview talking points
-- **Tier A auto-applied**: <one line per edit, or "did not fire: <reason>">
-- **Tier B**: <one line per creation, or "did not fire: <reason>">
+- **Tier A auto-applied/fixed**: <one line per edit/fix, or "none">
+- **Tier B auto-applied/fixed**: <one line per edit/fix, or "none">
+- **Tier C auto-applied/fixed/proposed**: <one line per edit/fix/proposal, or "none">
 - **Archive committed** as `<wrap-sha> [{{COMMIT_PREFIX}}/wrap]`
+- **Final HEAD**: `<wrap-sha>`
 - **All wrap-gate checks pass**
 - **Main session stayed alive on --remote-control** for user attach.
 
-Key audit findings flagged in REVIEW.md / OWNER_BRIEF.zh-CN.md:
-- <up to 3 bullets from retained code findings or Tier C proposals>
+Key audit findings and review-time outcomes:
+- <up to 5 bullets from fixed or deferred findings>
 ```
 
 Then stage it explicitly:
@@ -920,23 +1154,29 @@ git add initiatives/_archive/{{ARCHIVE_SLUG}}/logs/review.log
 
 ## Step 10: Commit
 
-Stage every path Phase 2C wrap + Step 3C Tier A/B edits may have touched.
-Use explicit paths. Project convention: no `git add -A`.
+Stage every path Phase 2C wrap + review-time documentation edits may have
+touched. Use explicit paths. Project convention: no `git add -A`.
+
+Review-time code/test/doc repair commits, if any, should already have
+been committed before Phase 2C as `[{{COMMIT_PREFIX}}/review-fix]` or
+`[{{COMMIT_PREFIX}}/review-doc]`. Do not squash those repair commits into
+the wrap commit. The wrap commit archives and summarizes the repaired
+final state.
 
 ```bash
 cd python-replica
 
-git add initiatives/                  # archived initiative + new current/.gitkeep + index + REVIEW.md + OWNER_BRIEF.zh-CN.md
+git add initiatives/                  # archived initiative + new current/.gitkeep + index + REVIEW.md + OWNER_BRIEF.zh-CN.md + review.log
 git add NOW.md                        # rewritten by Step 7
-git add CLAUDE.md README.md           # Tier A may have appended; no-op if untouched
-git add docs/                         # Tier B may have created subsystem docs / ADRs / DECISIONS dir
+git add CLAUDE.md README.md           # doc edits may have appended; no-op if untouched
+git add docs/                         # subsystem docs / ADRs / DECISIONS dir may have changed
 
-git commit -m "[{{COMMIT_PREFIX}}/wrap] post-execution review + archive (multi-agent)
+git commit -m "[{{COMMIT_PREFIX}}/wrap] post-execution review + archive (review-and-repair)
 
 REVIEW.md          : initiatives/_archive/{{ARCHIVE_SLUG}}/REVIEW.md
 OWNER_BRIEF.zh-CN  : initiatives/_archive/{{ARCHIVE_SLUG}}/OWNER_BRIEF.zh-CN.md
 Final pytest       : <count>. mypy + ruff clean.
-Review flow        : code-reviewer + doc-curator-candidate-finder, reconciled by main agent, then demo-narrator.
+Review flow        : code-reviewer + doc-curator-candidate-finder, reconciled and repaired by main agent, then demo-narrator.
 "
 ```
 
@@ -946,9 +1186,46 @@ After commit, verify the working tree is clean:
 if [ -n "$(git status --short)" ]; then
   echo "ERROR: working tree dirty after wrap commit:"
   git status --short
-  echo "Some Tier A/B edits were not staged. Add them and amend, or"
-  echo "investigate which Step 3C action produced unstaged changes."
+  echo "Some review-time or Phase 2C edits were not staged. Add them and amend, or"
+  echo "investigate which review/repair/wrap action produced unstaged changes."
   exit 1
+fi
+```
+
+Verify final HEAD is the wrap commit:
+
+```bash
+if ! git log --oneline -1 | grep -qF "[{{COMMIT_PREFIX}}/wrap]"; then
+  git log --oneline -8
+  echo "ERROR: final HEAD is not [{{COMMIT_PREFIX}}/wrap]"
+  exit 1
+fi
+```
+
+Verify any review-time commits before wrap use allowed prefixes:
+
+```bash
+WRAP_COMMIT="$(git log --format='%H %s' | grep -F "[{{COMMIT_PREFIX}}/wrap]" | head -n 1 | awk '{print $1}')"
+PRE_WRAP_SUBJECTS="$(git log --format='%s' {{BASELINE_COMMIT}}.."${WRAP_COMMIT}^" 2>/dev/null || true)"
+
+if [ -n "$PRE_WRAP_SUBJECTS" ]; then
+  INVALID_REVIEW_SUBJECTS="$(
+    printf '%s\n' "$PRE_WRAP_SUBJECTS" \
+      | while IFS= read -r subject; do
+          case "$subject" in
+            "[{{COMMIT_PREFIX}}/M"*) ;;
+            "[{{COMMIT_PREFIX}}/review-fix]"*) ;;
+            "[{{COMMIT_PREFIX}}/review-doc]"*) ;;
+            *) printf '%s\n' "$subject" ;;
+          esac
+        done
+  )"
+
+  if [ -n "$INVALID_REVIEW_SUBJECTS" ]; then
+    printf '%s\n' "$INVALID_REVIEW_SUBJECTS" >&2
+    echo "ERROR: initiative commits before wrap must be milestones or review-time commits"
+    exit 1
+  fi
 fi
 ```
 
@@ -978,5 +1255,5 @@ When the user attaches and asks a question:
 
 When the user types `/exit`, the session terminates and the shell
 script's outer `if ! claude --remote-control ... ; then die ...; fi`
-continues. The wrap-gate has already been verified by Step 6-10, so the
-script should record a successful exit.
+continues. The review-and-repair wrap-gate has already been verified by Step 6-10,
+so the script should record a successful exit.
