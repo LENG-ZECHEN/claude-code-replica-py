@@ -91,3 +91,24 @@ exists in this file. Deleting or rewriting a prior block halts the loop.
   (788). Defensive `hasattr(project_memory, "_dir")` check ensures pre-existing
   tests with mock ProjectMemory objects don't break. Both CLIs resolve
   `SIMPLE_AGENT_EXTRACT_MEMORIES` env var when flag is absent.
+
+## M6 — done 2026-05-24
+
+- commit: [auto-mem/M6] (see git log)
+- tests: 768 → 784 (+16 new tests across `test_provider_selector.py` (8),
+  `test_memdir_scan.py` (2), `test_memdir_manifest_format.py` (3), `test_memdir_recent_tools.py` (3))
+- mypy: clean | ruff: clean
+- files changed: `provider.py`, `memdir.py` (new), `test_provider_selector.py`,
+  `test_memdir_scan.py`, `test_memdir_manifest_format.py`, `test_memdir_recent_tools.py`
+- exit gate: call_selector on Provider Protocol AND `MockProvider(selector_responses=[...])`
+  returns scripted responses sequentially AND `OpenAIProvider(selector_model=...)` uses
+  configurable model (default "gpt-4o-mini") with JSON mode + temperature=0 AND raises
+  `SelectorError` on API failure / malformed JSON / schema mismatch AND `memdir.py` exports
+  `scan_memory_files`, `format_memory_manifest`, `collect_recent_successful_tools`,
+  `SELECT_MEMORIES_SYSTEM_PROMPT` → PASS
+- notes: `SELECT_MEMORIES_SYSTEM_PROMPT` copied verbatim from findRelevantMemories.ts
+  lines 18-24. `scan_memory_files` and `MemoryHeader` re-exported from `memory.py` (no
+  duplication). `collect_recent_successful_tools` stops at USER messages with string
+  content (real human turns), correlates ToolCall.id → ToolResult.tool_use_id, returns
+  names where is_error is False (using `is False` to exclude missing results). No
+  AgentLoop changes — pure infrastructure milestone.

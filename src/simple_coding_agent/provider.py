@@ -48,6 +48,10 @@ class PromptTooLongError(RuntimeError):
     """Provider-neutral context-window overflow error."""
 
 
+class SelectorError(Exception):
+    """Raised by call_selector on API failure, malformed JSON, or schema mismatch."""
+
+
 _PROMPT_TOO_LONG_MARKERS: tuple[str, ...] = (
     "context length exceeded",
     "maximum context length",
@@ -183,6 +187,15 @@ class Provider(Protocol):
         tools: list[dict[str, Any]],
     ) -> Iterator[ProviderStreamEvent]: ...
 
+    def call_selector(
+        self,
+        *,
+        system: str,
+        user: str,
+        output_schema: dict[str, Any],
+        max_tokens: int = 256,
+    ) -> dict[str, Any]: ...
+
 
 # ---------------------------------------------------------------------------
 # MockProvider
@@ -197,10 +210,16 @@ class MockProvider:
     loop sent.
     """
 
-    def __init__(self, script: list[ProviderResponse]) -> None:
+    def __init__(
+        self,
+        script: list[ProviderResponse],
+        selector_responses: list[dict[str, Any]] | None = None,
+    ) -> None:
         self._script: list[ProviderResponse] = list(script)
         self._index: int = 0
         self._history: list[ProviderCall] = []
+        self._selector_responses: list[dict[str, Any]] = list(selector_responses or [])
+        self._selector_idx: int = 0
 
     def call(
         self,
@@ -233,6 +252,24 @@ class MockProvider:
         if response.text:
             yield ProviderStreamEvent.text_delta(response.text)
         yield ProviderStreamEvent.done(response)
+
+    def call_selector(
+        self,
+        *,
+        system: str,
+        user: str,
+        output_schema: dict[str, Any],
+        max_tokens: int = 256,
+    ) -> dict[str, Any]:
+        if self._selector_idx >= len(self._selector_responses):
+            raise SelectorError(
+                f"MockProvider selector_responses exhausted "
+                f"({len(self._selector_responses)} scripted, asked for "
+                f"#{self._selector_idx + 1})"
+            )
+        response = self._selector_responses[self._selector_idx]
+        self._selector_idx += 1
+        return response
 
     @property
     def history(self) -> list[ProviderCall]:
@@ -596,11 +633,13 @@ class OpenAIProvider:
         client: Any | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
+        selector_model: str = "gpt-4o-mini",
     ) -> None:
         if max_tokens < 1:
             raise ValueError(f"max_tokens must be >= 1, got {max_tokens}")
         self._model = model
         self._max_tokens = max_tokens
+        self._selector_model = selector_model
         if client is not None:
             self._client = client
             return
@@ -776,6 +815,41 @@ class OpenAIProvider:
             )
         yield ProviderStreamEvent.done(response)
 
+    def call_selector(
+        self,
+        *,
+        system: str,
+        user: str,
+        output_schema: dict[str, Any],
+        max_tokens: int = 256,
+    ) -> dict[str, Any]:
+        try:
+            completion = self._client.chat.completions.create(
+                model=self._selector_model,
+                response_format={"type": "json_object"},
+                temperature=0,
+                max_tokens=max_tokens,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+            )
+        except Exception as exc:
+            raise SelectorError(str(exc)) from exc
+
+        content = completion.choices[0].message.content
+        try:
+            result: dict[str, Any] = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise SelectorError(f"malformed JSON: {exc}") from exc
+
+        required_keys: list[str] = output_schema.get("required", [])
+        for key in required_keys:
+            if key not in result:
+                raise SelectorError(f"schema mismatch: missing key {key!r}")
+
+        return result
+
 
 __all__ = [
     "STOP_END_TURN",
@@ -788,5 +862,6 @@ __all__ = [
     "ProviderCall",
     "ProviderResponse",
     "ProviderStreamEvent",
+    "SelectorError",
     "TokenUsage",
 ]
