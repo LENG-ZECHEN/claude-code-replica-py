@@ -6,6 +6,8 @@
 > 英文归档审查（含评分卡、Tier A/B/C 决策、wrap-up 记录）见
 > [`REVIEW.md`](./REVIEW.md)。
 
+> **后续修复说明（2026-05-25 补注，归档后经 owner 要求添加）**：下方「用户视角下的关键 finding」中的 4 个 MEDIUM「接好线没通电」问题，以及 ⑥/⑦/⑧ 三个 LOW 问题，均已在 `main` 修复（fix `212b6af`；文档同步 `8d20b1b` / `c373ee1`）。另两个 LOW（`provider.py` 超 800 行、`test_null_tracer` 过期陈述）暂未处理。原始 finding 文本作为历史记录保留；pytest 807 → 816，mypy + ruff 全绿。详见 [`REVIEW.md`](./REVIEW.md) 的 “Follow-up resolution” 一节。
+
 ## 这次交付了什么
 
 按功能列出 `auto-memory-overhaul` 这次交付的具体能力（功能级，非文件级）。本 initiative 共 10 个 commit（`6aed9ec..HEAD`，最终 `e9aef6a`），把 replica 的记忆子系统从「JSON 存储 + 用户手动写 + Jaccard 同步读」推进到「`.md` + frontmatter 存储 + 模型自助写 + LLM selector 召回 + 自动抽取兜底」。
@@ -108,6 +110,8 @@ $ python -m pytest tests/test_loop_write_memory_e2e.py tests/test_extract_memori
 
 ## 用户视角下的关键 finding
 
+> **已修复（2026-05-25）**：下列 4 个 MEDIUM 问题与 ⑥/⑦/⑧ 三个 LOW 已在 `212b6af` 修复（详见文首说明 / `REVIEW.md`）；`provider.py` 行数、`test_null_tracer` 陈述两项 LOW 暂留。以下原文保留作历史记录。
+
 核心主题：**「接好了线但实际没通电」（wired but inert）** —— 下面 4 项功能单测能过（单测直接用构造输入调纯函数），但在集成后的真实 turn 循环里**从不触发**。这些不影响主存/主写路径的正确性，但意味着对外讲时不能宣称这些读路径优化「端到端生效」。
 
 * **`recent_tools` 在实循环里恒为 `[]`** — 严重度 MEDIUM — 来源：main-agent reconciliation
@@ -164,6 +168,8 @@ $ python -m pytest tests/test_loop_write_memory_e2e.py tests/test_extract_memori
   * **不要夸大成**：不要把这些当「已修复」来讲——它们是已知待办。
 
 ## 还需要补什么
+
+> **现状（2026-05-25）**：第 1–4 项已在 `212b6af` 全部完成（另含 ⑥/⑦/⑧ LOW 修复）；第 5 项文档大部分已补（roadmap 与模块行于 `8d20b1b`、NOW.md 于 `c373ee1`），仅 README 的 `migrate-format` 子命令说明仍未补。下列原始清单保留作历史。
 
 按优先级排序：
 

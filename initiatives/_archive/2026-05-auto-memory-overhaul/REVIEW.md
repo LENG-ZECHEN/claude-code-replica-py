@@ -11,6 +11,32 @@
 - Final pre-wrap commit: `e9aef6a` (`[auto-mem/M7]`)
 - Review mode: multi-agent staged review (`code-reviewer` + `doc-curator-candidate-finder` in parallel, reconciled by the main agent, then `demo-narrator`)
 
+## Follow-up resolution (added 2026-05-25, post-archive by owner request)
+
+The findings below were acted on after this initiative was archived. The
+original review text (scorecards, findings, decisions) is preserved verbatim
+as the historical record; this section records current status.
+
+| Finding | Sev | Status |
+|---|---|---|
+| `recent_tools` always `[]` in the live loop | MEDIUM | ✅ fixed `212b6af` — inject scans the transcript excluding the trailing current-turn user message |
+| `read_file_state` never populated | MEDIUM | ✅ resolved `212b6af` — unused parameter removed (memory-id vs workspace-path namespaces never matched) |
+| `extraction_in_progress` gate dead code | MEDIUM | ✅ fixed `212b6af` — `_run_stop_hooks` passes the loop's real flag (captured before in-progress is set) |
+| `memory_select` trace `fallback_used` / `manifest_size` wrong | MEDIUM | ✅ fixed `212b6af` — `find_relevant_memories` returns `RecallResult` carrying real values |
+| `ExtractMemoriesRunner` M4 manifest stub | LOW | ✅ fixed `212b6af` — uses `format_memory_manifest(scan_memory_files())` |
+| `write_memory_entry` `tags` dropped on persistence | LOW | ✅ fixed `212b6af` — `tags` round-trips through `.md` frontmatter |
+| manifest 25 KB cut char-indexed | LOW | ✅ fixed `212b6af` — byte-accurate truncation |
+| `provider.py` 867 > 800-line limit | LOW | ⏸ not addressed (no behavioral impact; deferred) |
+| stale `test_null_tracer_zero_overhead` claim | LOW | ⏸ HANDOFF/PLAN are archived snapshots; left as-is |
+
+Each fix shipped with a test exercising the integrated turn path (the gap that
+let these ship green). pytest 807 → 816 (+9); mypy + ruff clean; `loop.py` still
+800 lines. Living docs were synced in `8d20b1b` (CLAUDE.md roadmap + per-file
+summaries, README module lists, `docs/memdir.md`, ADR-0003) and `c373ee1`
+(NOW.md). Of the Tier C "Proposed edits" below, the roadmap entry (#1) and the
+README module rows (#2) were applied in `8d20b1b`; the `migrate-format` README
+note (#3) is still open.
+
 ## Lessons learned
 
 - **The single biggest pattern this initiative should teach future bootstraps: "passing tests ≠ working feature."** Four read-path features (recent-tools-aware selection, read-file dedup, the `extraction_in_progress` re-entrancy gate, and the `fallback_used` trace) pass unit tests because the tests call the pure functions with crafted inputs — but they are inert in the integrated turn loop. Milestone prompts should require at least one *end-to-end* assertion per wired feature (e.g. "assert `recent_tools != []` through the real `run()` path"), not only direct unit tests of the pure function.
@@ -70,6 +96,12 @@ No row fell below 40.5/45. Most material deductions:
 - **Cross-cutting (Log cleanliness)**: every `M{N}.log` is a 1–19-line final-summary capture (harness artifact), so intermediate RED→GREEN/TDD ordering is not observable from the logs. Nothing anomalous appears; scored 5 but flagged that the logs cannot positively confirm TDD-first ordering.
 
 ### Reconciled detail-level findings (all 9 retained; all independently verified)
+
+> **Status (2026-05-25):** the 4 MEDIUM findings plus the manifest-stub, `tags`,
+> and byte-truncation LOW findings were fixed on `main` (`212b6af`) — see
+> **Follow-up resolution** near the top. The `provider.py` size and
+> stale-test-claim LOW items remain unaddressed. Original finding text is
+> retained verbatim below.
 
 - **`extraction_in_progress` re-entrancy gate is dead code** — `loop.py:541-558` / `extraction_hooks.py:121` — **MEDIUM**
   - **What**: `_run_stop_hooks` sets `self._extraction_in_progress = True` then calls `maybe_extract_memories(..., extraction_in_progress=False, ...)` with a hardcoded `False`; gate 4 checks the passed-in literal, never the instance flag.
