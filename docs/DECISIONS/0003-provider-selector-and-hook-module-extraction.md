@@ -47,7 +47,9 @@ and the sideQuery recall orchestration (M7) needed to run inside
   This split also helped several inert-wiring defects pass green unit
   tests (recent_tools always empty, read_file_state never populated,
   `fallback_used` trace hardcoded, `extraction_in_progress` gate inert) —
-  see the related REVIEW.md detail findings.
+  see the related REVIEW.md detail findings. (All four were fixed on the
+  `fix/auto-memory-inert-wiring` follow-up; the unit suite now asserts the
+  integrated turn path, not just the pure functions.)
 - `provider.py` grew to 867 lines adding `call_selector`, itself
   breaching the same 800-line limit the hook extraction was protecting in
   `loop.py`; a follow-up should extract the selector/JSON logic into a

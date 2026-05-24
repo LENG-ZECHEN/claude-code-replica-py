@@ -30,6 +30,7 @@ from .coding_tools import (
     WRITE_MEMORY_ENTRY_TOOL_NAME,
     write_memory_entry,
 )
+from .memdir import format_memory_manifest, scan_memory_files
 from .memory import ProjectMemory
 from .models import ToolCall
 from .provider import STOP_TOOL_USE, Provider
@@ -82,11 +83,17 @@ def build_extract_prompt(
 
 
 def _get_existing_manifest(memory_dir: Path) -> str:
-    """Stub manifest reader — M6 will replace with scan_memory_files."""
-    manifest = memory_dir / "MEMORY.md"
-    if manifest.exists():
-        return manifest.read_text()[:2000]
-    return "(no memories yet)"
+    """Build the existing-memories manifest (the extraction prompt's "do not
+    duplicate" list) via the canonical memdir formatter.
+
+    Scans the ``.md`` files directly rather than reading a possibly-absent or
+    stale ``MEMORY.md`` prefix (the original M4 stub), so the extractor always
+    sees the real, line-complete set of existing memories.
+    """
+    headers = scan_memory_files(memory_dir)
+    if not headers:
+        return "(no memories yet)"
+    return format_memory_manifest(headers)
 
 
 class ExtractMemoriesRunner:

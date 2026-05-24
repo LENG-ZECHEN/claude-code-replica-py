@@ -40,11 +40,11 @@ class TestFindRelevantMemoriesGates:
         )
         result = find_relevant_memories(
             "", tmp_path, provider,
-            already_surfaced=set(), read_file_state=set(),
+            already_surfaced=set(),
             recent_tools=[], session_bytes_used=0,
             auto_memory_enabled=True,
         )
-        assert result == []
+        assert result.headers == []
 
     def test_gate_single_word_query_returns_empty(self, tmp_path: Path) -> None:
         _write_memory(tmp_path, "user/role", name="My role", desc="Developer")
@@ -53,11 +53,11 @@ class TestFindRelevantMemoriesGates:
         )
         result = find_relevant_memories(
             "hello", tmp_path, provider,
-            already_surfaced=set(), read_file_state=set(),
+            already_surfaced=set(),
             recent_tools=[], session_bytes_used=0,
             auto_memory_enabled=True,
         )
-        assert result == []
+        assert result.headers == []
 
     def test_gate_session_bytes_ceiling_returns_empty(self, tmp_path: Path) -> None:
         _write_memory(tmp_path, "user/role", name="My role", desc="Developer")
@@ -66,11 +66,11 @@ class TestFindRelevantMemoriesGates:
         )
         result = find_relevant_memories(
             "what is my role", tmp_path, provider,
-            already_surfaced=set(), read_file_state=set(),
+            already_surfaced=set(),
             recent_tools=[], session_bytes_used=61 * 1024,  # > 60KB ceiling
             auto_memory_enabled=True,
         )
-        assert result == []
+        assert result.headers == []
 
     def test_gate_auto_memory_disabled_returns_empty(self, tmp_path: Path) -> None:
         _write_memory(tmp_path, "user/role", name="My role", desc="Developer")
@@ -79,11 +79,11 @@ class TestFindRelevantMemoriesGates:
         )
         result = find_relevant_memories(
             "what is my role", tmp_path, provider,
-            already_surfaced=set(), read_file_state=set(),
+            already_surfaced=set(),
             recent_tools=[], session_bytes_used=0,
             auto_memory_enabled=False,
         )
-        assert result == []
+        assert result.headers == []
 
 
 # ---------------------------------------------------------------------------
@@ -99,12 +99,12 @@ class TestFindRelevantMemoriesSelector:
         )
         result = find_relevant_memories(
             "what is my role", tmp_path, provider,
-            already_surfaced=set(), read_file_state=set(),
+            already_surfaced=set(),
             recent_tools=[], session_bytes_used=0,
             auto_memory_enabled=True,
         )
-        assert len(result) == 1
-        assert result[0].id == "user/role"
+        assert len(result.headers) == 1
+        assert result.headers[0].id == "user/role"
 
     def test_hallucinated_filename_dropped(self, tmp_path: Path) -> None:
         _write_memory(tmp_path, "user/role", name="User role", desc="coding role")
@@ -117,12 +117,12 @@ class TestFindRelevantMemoriesSelector:
         )
         result = find_relevant_memories(
             "what is my role", tmp_path, provider,
-            already_surfaced=set(), read_file_state=set(),
+            already_surfaced=set(),
             recent_tools=[], session_bytes_used=0,
             auto_memory_enabled=True,
         )
-        assert len(result) == 1
-        assert result[0].id == "user/role"
+        assert len(result.headers) == 1
+        assert result.headers[0].id == "user/role"
 
     def test_already_surfaced_filtered_out(self, tmp_path: Path) -> None:
         _write_memory(tmp_path, "user/role", name="User role", desc="coding role")
@@ -136,13 +136,12 @@ class TestFindRelevantMemoriesSelector:
         result = find_relevant_memories(
             "what are my preferences", tmp_path, provider,
             already_surfaced={"user/role"},  # already surfaced this session
-            read_file_state=set(),
             recent_tools=[], session_bytes_used=0,
             auto_memory_enabled=True,
         )
         # user/role is filtered; only user/prefs remains
-        assert len(result) == 1
-        assert result[0].id == "user/prefs"
+        assert len(result.headers) == 1
+        assert result.headers[0].id == "user/prefs"
 
     def test_selector_error_falls_back_to_jaccard(self, tmp_path: Path) -> None:
         _write_memory(
@@ -153,13 +152,13 @@ class TestFindRelevantMemoriesSelector:
         provider = MockProvider([], selector_responses=[])
         result = find_relevant_memories(
             "coding preferences style guide", tmp_path, provider,
-            already_surfaced=set(), read_file_state=set(),
+            already_surfaced=set(),
             recent_tools=[], session_bytes_used=0,
             auto_memory_enabled=True,
         )
         # Jaccard fallback should surface the matching memory
-        assert len(result) >= 1
-        assert result[0].id == "user/role"
+        assert len(result.headers) >= 1
+        assert result.headers[0].id == "user/role"
 
     def test_selector_error_falls_back_gracefully_no_match(
         self, tmp_path: Path
@@ -168,9 +167,9 @@ class TestFindRelevantMemoriesSelector:
         provider = MockProvider([], selector_responses=[])
         result = find_relevant_memories(
             "completely unrelated query with many words here", tmp_path, provider,
-            already_surfaced=set(), read_file_state=set(),
+            already_surfaced=set(),
             recent_tools=[], session_bytes_used=0,
             auto_memory_enabled=True,
         )
         # Jaccard fallback returns entries when all-zero (fallback to list[:n])
-        assert isinstance(result, list)
+        assert isinstance(result.headers, list)

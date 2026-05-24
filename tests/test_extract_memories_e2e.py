@@ -146,3 +146,37 @@ def test_extract_memories_disabled_by_default(tmp_path):
     assert metrics.extract_invocations == 0
     # Provider should have only consumed one response
     assert loop._provider._index == 1  # only main agent response consumed
+
+
+def test_in_progress_flag_blocks_reentrant_extraction(tmp_path):
+    """Regression (auto-memory-overhaul finding #3): the loop must pass its real
+    _extraction_in_progress flag into gate 4, not a hardcoded False.
+
+    Pre-setting the flag simulates being already inside an extraction; gate 4
+    must then short-circuit. Before the fix the loop hardcoded False, so the
+    flag was dead and extraction ran regardless.
+    """
+    responses = [
+        MockProvider.direct_answer("Task done!"),
+        # Consumed by the extraction runner only if it (incorrectly) runs:
+        MockProvider.tool_call(
+            "write_memory_entry",
+            {
+                "type": "user",
+                "id": "should-not-write",
+                "name": "x",
+                "description": "x",
+                "body": "x",
+            },
+            id="ex_tc_1",
+        ),
+        MockProvider.direct_answer("Memory saved."),
+    ]
+    loop, metrics, _ = _build_loop(tmp_path, main_responses=responses)
+    loop._extraction_in_progress = True  # simulate already inside an extraction
+
+    loop.run("Tell me something.")
+
+    assert metrics.extract_invocations == 0  # gate 4 short-circuits
+    assert loop._provider._index == 1  # only the main answer consumed
+    assert not (tmp_path / "memory" / "should-not-write.md").exists()

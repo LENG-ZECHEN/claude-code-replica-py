@@ -195,7 +195,6 @@ class AgentLoop:
         self._turns_since_last_extraction: int = 0
         self._extract_throttle_n: int = max(1, extract_throttle_n)
         self._already_surfaced_memories: set[str] = set()
-        self._read_file_state: set[str] = set()
         self._session_bytes_used: int = 0
         self._register_tools()
 
@@ -216,7 +215,7 @@ class AgentLoop:
         self._session_bytes_used = inject_memory_attachments(
             self._transcript, user_input, self._provider, self._memory_dir,
             self._auto_memory_enabled, self._already_surfaced_memories,
-            self._read_file_state, self._session_bytes_used, self._tracer)
+            self._session_bytes_used, self._tracer)
 
         for turn in range(1, self._max_steps + 1):
             self._maybe_microcompact()
@@ -369,7 +368,7 @@ class AgentLoop:
         self._session_bytes_used = inject_memory_attachments(
             self._transcript, user_input, self._provider, self._memory_dir,
             self._auto_memory_enabled, self._already_surfaced_memories,
-            self._read_file_state, self._session_bytes_used, self._tracer)
+            self._session_bytes_used, self._tracer)
 
         for turn in range(1, self._max_steps + 1):
             self._maybe_microcompact()
@@ -538,6 +537,7 @@ class AgentLoop:
         """Run post-turn hooks before returning from run() / run_stream()."""
         self._turns_since_last_extraction += 1
         if self._memory_dir is not None and self._registry is not None:
+            was_in_progress = self._extraction_in_progress  # real flag, not literal False
             self._extraction_in_progress = True
             outcome = maybe_extract_memories(
                 messages=self._transcript.all_messages(),
@@ -545,7 +545,7 @@ class AgentLoop:
                 is_subloop=self._is_subloop,
                 extract_memories_enabled=self._extract_memories_enabled,
                 auto_memory_enabled=self._auto_memory_enabled,
-                extraction_in_progress=False,
+                extraction_in_progress=was_in_progress,
                 last_memory_message_uuid=self._last_memory_message_uuid,
                 turns_since_last_extraction=self._turns_since_last_extraction,
                 throttle_n=self._extract_throttle_n,

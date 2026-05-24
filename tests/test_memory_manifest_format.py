@@ -58,6 +58,30 @@ def test_manifest_25kb_truncation(tmp_path: Path) -> None:
     assert "truncated" in manifest.lower() or "omitted" in manifest.lower()
 
 
+def test_manifest_byte_cap_holds_for_multibyte(tmp_path: Path) -> None:
+    """Byte-accurate truncation: many CJK (3-byte) descriptions must not push
+    MEMORY.md past the 25 KB byte cap.
+
+    Regression for the char-index-vs-byte-length truncation bug
+    (auto-memory-overhaul review finding): the cap was checked in bytes but the
+    cut used a character index, so multibyte manifests overshot ~3x.
+    """
+    desc = "中" * 150  # 150 chars ≈ 450 bytes in UTF-8
+    for i in range(210):
+        (tmp_path / f"cjk{i:03d}.md").write_text(
+            f"---\nname: cjk-{i}\ntype: project\n"
+            f"description: {desc}\ncreated_at: 2026-01-01T00:00:00+00:00\n---\n\nbody\n",
+            encoding="utf-8",
+        )
+    # One save triggers a single manifest rebuild over all entries (O(n), fast).
+    pm = ProjectMemory(storage_dir=str(tmp_path))
+    pm.save(MemoryEntry(id="trigger", name="t", body="b", type=MemoryType.PROJECT))
+
+    manifest = (tmp_path / "MEMORY.md").read_text(encoding="utf-8")
+    assert len(manifest.encode("utf-8")) <= 25_000  # strict byte cap
+    assert "truncated" in manifest.lower() or "omitted" in manifest.lower()
+
+
 def test_manifest_excludes_memory_md(tmp_path: Path) -> None:
     pm = ProjectMemory(storage_dir=str(tmp_path))
     pm.save(MemoryEntry(name="real-entry", body="some body", type=MemoryType.USER))

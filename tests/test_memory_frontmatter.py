@@ -12,6 +12,46 @@ def _write_md(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def test_tags_round_trip_through_md(tmp_path: Path) -> None:
+    """tags must survive save (to_md_text) -> load (_parse_entry_md).
+
+    Regression for the auto-memory-overhaul review finding where to_md_text
+    silently dropped the tags field even though MemoryEntry/to_dict carried it.
+    """
+    from simple_coding_agent.memory import MemoryEntry, MemoryType, ProjectMemory
+
+    pm = ProjectMemory(storage_dir=str(tmp_path))
+    pm.save(
+        MemoryEntry(
+            id="tagged",
+            name="Tagged entry",
+            body="some body",
+            type=MemoryType.USER,
+            tags=["alpha", "beta-two"],
+        )
+    )
+    raw = (tmp_path / "tagged.md").read_text(encoding="utf-8")
+    assert "tags:" in raw  # frontmatter on disk carries the tags line
+
+    loaded = pm.load("tagged")
+    assert loaded is not None
+    assert loaded.tags == ["alpha", "beta-two"]
+
+
+def test_no_tags_line_when_empty(tmp_path: Path) -> None:
+    """Entries without tags must not emit an empty `tags:` frontmatter line."""
+    from simple_coding_agent.memory import MemoryEntry, MemoryType, ProjectMemory
+
+    pm = ProjectMemory(storage_dir=str(tmp_path))
+    pm.save(MemoryEntry(id="plain", name="Plain", body="b", type=MemoryType.USER))
+    raw = (tmp_path / "plain.md").read_text(encoding="utf-8")
+    assert "tags:" not in raw
+
+    loaded = pm.load("plain")
+    assert loaded is not None
+    assert loaded.tags == []
+
+
 def test_parse_valid_frontmatter(tmp_path: Path) -> None:
     _write_md(
         tmp_path / "user_role.md",

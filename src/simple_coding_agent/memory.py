@@ -40,6 +40,9 @@ _MANIFEST_FILENAME = "MEMORY.md"
 _MAX_MANIFEST_BODY_PREVIEW = 80
 _MANIFEST_MAX_LINES = 200
 _MANIFEST_MAX_BYTES = 25_000
+# Reserved headroom (UTF-8 bytes) for the truncation footer + trailing newline,
+# so a truncated manifest's TOTAL encoded size still stays within the byte cap.
+_MANIFEST_FOOTER_RESERVE_BYTES = 256
 FRONTMATTER_MAX_LINES = 30
 
 # Allows plain IDs (legacy) and /‑separated subdir IDs (e.g. "user/role").
@@ -204,6 +207,16 @@ class MemoryEntry:
             f"name: {safe_name}",
             f"type: {self.type.value}",
             f"description: {desc}",
+        ]
+        if self.tags:
+            # Comma-joined; strip commas/newlines from each tag so the single
+            # `tags:` line round-trips cleanly through the mini frontmatter parser.
+            safe_tags = ", ".join(
+                t.replace("\n", " ").replace("\r", " ").replace(",", " ").strip()
+                for t in self.tags
+            )
+            parts.append(f"tags: {safe_tags}")
+        parts += [
             f"created_at: {self.created_at}",
             "---",
             "",
@@ -298,11 +311,14 @@ def _parse_entry_md(text: str, entry_id: str) -> MemoryEntry | None:
             mem_type = MemoryType(type_str)
         except ValueError:
             mem_type = MemoryType.PROJECT
+        raw_tags = fm.get("tags", "")
+        tags = [t.strip() for t in raw_tags.split(",") if t.strip()] if raw_tags else []
         return MemoryEntry(
             id=entry_id,
             name=name,
             body=body,
             type=mem_type,
+            tags=tags,
             description=fm.get("description") or None,
             created_at=fm.get("created_at", datetime.now(UTC).isoformat()),
         )
@@ -641,22 +657,32 @@ class ProjectMemory:
         """Build MEMORY.md content with 200-line and 25 KB truncation."""
         dir_path = Path(self._dir)
         total = len(headers)
-        lines: list[str] = []
+        rendered: list[str] = []
         for h in headers[:_MANIFEST_MAX_LINES]:
             rel = h.path.relative_to(dir_path)
             safe_name = _escape_markdown_link_text(h.name or h.id)
             desc = h.description or "(no description)"
-            lines.append(f"- [{safe_name}]({rel}) — {desc}")
-        content = "\n".join(lines)
-        line_truncated = total > len(lines)
+            rendered.append(f"- [{safe_name}]({rel}) — {desc}")
+        line_truncated = total > len(rendered)
+
+        # Truncate on UTF-8 BYTE length (not character count) so multibyte
+        # descriptions cannot blow past the cap; keep whole lines only and
+        # reserve headroom for the footer + trailing newline.
+        budget = _MANIFEST_MAX_BYTES - _MANIFEST_FOOTER_RESERVE_BYTES
+        kept: list[str] = []
+        running = 0
         byte_truncated = False
-        if len(content.encode("utf-8")) > _MANIFEST_MAX_BYTES:
-            byte_truncated = True
-            cut_at = content.rfind("\n", 0, _MANIFEST_MAX_BYTES)
-            content = content[:cut_at] if cut_at > 0 else content[:_MANIFEST_MAX_BYTES]
+        for line in rendered:
+            add = len(line.encode("utf-8")) + (1 if kept else 0)  # +1 for join "\n"
+            if running + add > budget:
+                byte_truncated = True
+                break
+            kept.append(line)
+            running += add
+        content = "\n".join(kept)
+
         if line_truncated or byte_truncated:
-            included = content.count("\n") + 1 if content.strip() else 0
-            omitted = max(0, total - included)
+            omitted = max(0, total - len(kept))
             content += f"\n\n> [truncated — {omitted} entries omitted to stay within limits]"
         return content + "\n"
 

@@ -47,23 +47,27 @@ detail — this section is a TOC, not a duplication.
 - **Depends on**: `memory.py`, `provider.py`, `models.py`, `coding_tools.py`, `tools.py`, `trace.py`, `transcript.py`. No new third-party dependency (frontmatter parsing stays hand-rolled; no PyYAML).
 - **Does NOT do**: async/threaded sideQuery (M-ε, deferred); embedding or BM25 selection (lexical Jaccard fallback only); memory deletion from conversation (`/forget` out of scope — delete stays CLI-only via `simple-agent memory delete`).
 
-## Known caveats (as shipped)
+## Known caveats — resolved on the follow-up
 
-The end-to-end turn path has several wired-but-inert spots flagged in the
-review (green unit tests exercise the pure functions directly, so these
-did not fail CI):
+The original auto-memory-overhaul ship had several wired-but-inert spots
+(green unit tests exercised the pure functions directly, so they did not
+fail CI). They were fixed on the `fix/auto-memory-inert-wiring` follow-up:
 
-- `recent_tools` passed to `find_relevant_memories` is always `[]` in the
-  live loop — `inject_memory_attachments` runs after the new user message
-  is appended, so `collect_recent_successful_tools` stops immediately.
-- `read_file_state` (the already-Read dedup set) is never populated.
-- The `memory_select` trace emits `fallback_used=False` unconditionally
-  and reports `manifest_size == selected_count`.
-- The `extraction_in_progress` re-entrancy gate (gate 4) is inert; only
-  gate 1 (`is_subloop`) protects re-entrancy.
+- `recent_tools` now reaches the selector — `inject_memory_attachments`
+  scans the transcript with the trailing current-turn user message
+  excluded, so the previous assistant turn's tools are collected.
+- The `read_file_state` dedup parameter was **removed** — its memory-id
+  vs workspace-file-path namespaces never matched in this replica, so the
+  filter could not fire; keeping it would only mislead.
+- `find_relevant_memories` returns a `RecallResult`, so the
+  `memory_select` trace reports the real `fallback_used` flag and the
+  scanned `manifest_size` (no longer hardcoded / mislabelled).
+- Gate 4 (`extraction_in_progress`) now receives the loop's real flag
+  (captured before in-progress is marked) and is a working defensive
+  re-entrancy guard.
 
-See [`initiatives/_archive/2026-05-auto-memory-overhaul/REVIEW.md`](../initiatives/_archive/2026-05-auto-memory-overhaul/REVIEW.md)
-for the full detail findings and fix sketches.
+The original detail findings remain recorded in
+[`initiatives/_archive/2026-05-auto-memory-overhaul/REVIEW.md`](../initiatives/_archive/2026-05-auto-memory-overhaul/REVIEW.md).
 
 ## Related
 

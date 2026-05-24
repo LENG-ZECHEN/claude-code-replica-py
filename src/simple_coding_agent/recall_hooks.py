@@ -18,7 +18,7 @@ from .memdir import (
     find_relevant_memories,
     read_memories_for_surfacing,
 )
-from .models import Message
+from .models import Message, Role
 from .provider import Provider
 from .trace import Tracer
 from .transcript import Transcript
@@ -31,7 +31,6 @@ def inject_memory_attachments(
     memory_dir: Path | None,
     auto_memory_enabled: bool,
     already_surfaced: set[str],
-    read_file_state: set[str],
     session_bytes_used: int,
     tracer: Tracer,
 ) -> int:
@@ -45,12 +44,24 @@ def inject_memory_attachments(
         return session_bytes_used
 
     messages = transcript.all_messages()
-    recent_tools = collect_recent_successful_tools(messages)
+    # The loop appends the current turn's user input BEFORE injecting, so the
+    # last message is that input.  "Recently-used tools" must reflect the
+    # PREVIOUS assistant turn, so exclude a trailing user-text message before
+    # scanning (otherwise collect_recent_successful_tools stops immediately and
+    # always returns []).
+    if (
+        messages
+        and messages[-1].role == Role.USER
+        and isinstance(messages[-1].content, str)
+    ):
+        scan_messages = messages[:-1]
+    else:
+        scan_messages = messages
+    recent_tools = collect_recent_successful_tools(scan_messages)
 
-    headers = find_relevant_memories(
+    result = find_relevant_memories(
         query, memory_dir, provider,
         already_surfaced=already_surfaced,
-        read_file_state=read_file_state,
         recent_tools=recent_tools,
         session_bytes_used=session_bytes_used,
         auto_memory_enabled=auto_memory_enabled,
@@ -58,17 +69,17 @@ def inject_memory_attachments(
 
     tracer.emit(
         "memory_select",
-        fallback_used=False,
-        manifest_size=len(headers),
-        selected_count=len(headers),
+        fallback_used=result.fallback_used,
+        manifest_size=result.manifest_size,
+        selected_count=len(result.headers),
         session_bytes_used=session_bytes_used,
     )
 
-    if not headers:
+    if not result.headers:
         return session_bytes_used
 
-    texts = read_memories_for_surfacing(headers)
-    for header, text in zip(headers, texts, strict=True):
+    texts = read_memories_for_surfacing(result.headers)
+    for header, text in zip(result.headers, texts, strict=True):
         content = f"<system-reminder>\n{text}\n</system-reminder>"
         transcript.append(Message.attachment_memory(content))
         already_surfaced.add(header.id)

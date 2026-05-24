@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from .memory import FRONTMATTER_MAX_LINES, MemoryHeader, scan_memory_files
@@ -32,6 +33,7 @@ from .provider import Provider, SelectorError
 __all__ = [
     "FRONTMATTER_MAX_LINES",
     "MemoryHeader",
+    "RecallResult",
     "SELECT_MEMORIES_SYSTEM_PROMPT",
     "collect_recent_successful_tools",
     "find_relevant_memories",
@@ -142,6 +144,20 @@ def collect_recent_successful_tools(messages: list[Message]) -> list[str]:
 # M7: find_relevant_memories
 # ---------------------------------------------------------------------------
 
+
+@dataclass(frozen=True)
+class RecallResult:
+    """Outcome of :func:`find_relevant_memories`.
+
+    Carries the selected headers plus the diagnostics the ``memory_select``
+    trace needs: whether the Jaccard fallback ran, and the scanned manifest
+    size (distinct from ``len(headers)``, the selected count).
+    """
+    headers: list[MemoryHeader]
+    fallback_used: bool
+    manifest_size: int
+
+
 _SESSION_BYTES_CEILING: int = 60 * 1024  # 60 KB
 
 _SELECTOR_OUTPUT_SCHEMA: dict[str, object] = {
@@ -166,14 +182,10 @@ def _jaccard_fallback(
     query: str,
     headers: list[MemoryHeader],
     already_surfaced: set[str],
-    read_file_state: set[str],
     n: int = 5,
 ) -> list[MemoryHeader]:
     """Jaccard fallback used when call_selector raises SelectorError."""
-    candidates = [
-        h for h in headers
-        if h.id not in already_surfaced and h.id not in read_file_state
-    ]
+    candidates = [h for h in headers if h.id not in already_surfaced]
     if not candidates:
         return []
     scored = [
@@ -192,14 +204,13 @@ def find_relevant_memories(
     selector: Provider,
     *,
     already_surfaced: set[str],
-    read_file_state: set[str],
     recent_tools: list[str],
     session_bytes_used: int,
     auto_memory_enabled: bool = True,
-) -> list[MemoryHeader]:
-    """Return up to 5 relevant MemoryHeaders for *query*.
+) -> RecallResult:
+    """Return up to 5 relevant memories for *query* as a :class:`RecallResult`.
 
-    Enforces 4 gates (all must pass; returns [] on first failure):
+    Enforces 4 gates (all must pass; returns an empty result on first failure):
       1. auto_memory_enabled is True
       2. query is not empty
       3. query is multi-word (>1 word)
@@ -208,21 +219,24 @@ def find_relevant_memories(
     On passing all gates: calls selector.call_selector() with the
     SELECT_MEMORIES_SYSTEM_PROMPT and the manifest. Validates returned
     filenames against scan_memory_files(dir) — hallucinated filenames are
-    silently dropped. Filters already_surfaced and read_file_state paths.
-    Falls back to Jaccard MemorySelector on SelectorError.
+    silently dropped — and filters already_surfaced ids. Falls back to the
+    Jaccard MemorySelector on SelectorError. The result records whether that
+    fallback ran and the scanned manifest size, so the caller's memory_select
+    trace reports real values rather than hardcoded ones.
     """
     if not auto_memory_enabled:
-        return []
+        return RecallResult([], False, 0)
     if not query.strip():
-        return []
+        return RecallResult([], False, 0)
     if len(query.split()) <= 1:
-        return []
+        return RecallResult([], False, 0)
     if session_bytes_used >= _SESSION_BYTES_CEILING:
-        return []
+        return RecallResult([], False, 0)
 
     headers = scan_memory_files(dir)
     if not headers:
-        return []  # nothing to select from; skip selector call
+        return RecallResult([], False, 0)  # nothing to select from
+    manifest_size = len(headers)
     valid_ids = {h.id for h in headers}
     manifest = format_memory_manifest(headers)
 
@@ -243,15 +257,14 @@ def find_relevant_memories(
             entry_id = fname.removesuffix(".md")
             if entry_id not in valid_ids:
                 continue  # hallucination guard
-            if entry_id in already_surfaced or entry_id in read_file_state:
+            if entry_id in already_surfaced:
                 continue
             if entry_id in header_by_id:
                 selected.append(header_by_id[entry_id])
-        return selected[:5]
+        return RecallResult(selected[:5], False, manifest_size)
     except SelectorError:
-        return _jaccard_fallback(
-            query, headers, already_surfaced, read_file_state
-        )
+        fallback = _jaccard_fallback(query, headers, already_surfaced)
+        return RecallResult(fallback, True, manifest_size)
 
 
 # ---------------------------------------------------------------------------
