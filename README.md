@@ -26,6 +26,7 @@ for the current active initiative (if any).
 | Microcompact (cold-cache cleanup) | 60-min idle path in source | `compact.py` |
 | Reactive compact on prompt-too-long | error handling in `queryLoop()` | `provider.py` + `loop.py` |
 | Memory store + Jaccard relevance | `src/memdir/`, `findRelevantMemories.ts` | `memory.py` |
+| LLM memory recall (sideQuery) + auto-extraction | `findRelevantMemories.ts`, `extractMemories.ts` | `memdir.py`, `extract_memories.py` |
 | CLAUDE.md injection | `src/utils/claudeMd.ts` | `claude_md.py` |
 | OpenAI Chat Completions adapter | (out of scope in source) | `provider.py` |
 
@@ -40,6 +41,10 @@ src/simple_coding_agent/
   tool_result_store.py    ToolResultStore + ContentReplacementState (idempotent pointers, 200k cap)
   context.py              ContextBuilder, ContextBudget (CLAUDE.md prepend, memory + summary)
   memory.py               SessionMemory, ProjectMemory, MemorySelector (top-5 Jaccard)
+  memdir.py               sideQuery recall: scan/manifest, call_selector + Jaccard fallback
+  extract_memories.py     ExtractMemoriesRunner (<=5-turn post-turn extraction subloop)
+  extraction_hooks.py     7-layer stop-hook gating for auto-extraction (--extract-memories)
+  recall_hooks.py         inject sideQuery ATTACHMENT memories into the transcript
   compact.py              ContextCompactor + Summarizer + RuleBasedSummarizer + LLMSummarizer + MicroCompactor
   provider.py             Provider protocol, MockProvider, OpenAIProvider, PromptTooLongError
   loop.py                 AgentLoop.run() / run_stream() with reactive compact + microcompact
