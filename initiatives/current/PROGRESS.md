@@ -50,3 +50,21 @@ exists in this file. Deleting or rewriting a prior block halts the loop.
   Single shared instance was already in place from M2 (both CLIs call
   `_open_project_memory` once and pass to `AgentLoop`). CLI sharing already
   wired; M3 only added the static teaching section and ContextBuilder threading.
+
+## M4 — done 2026-05-24
+
+- commit: [auto-mem/M4] (see git log)
+- tests: 739 → 750 (+11 new tests in `test_extract_memories_runner.py`)
+- mypy: clean | ruff: clean
+- files changed: `extract_memories.py` (new), `tests/test_extract_memories_runner.py` (new)
+- exit gate: ExtractMemoriesRunner.run() returns ExtractionResult AND MAX_TURNS=5
+  AND whitelist enforced → PASS (11 new tests)
+- notes: `base_messages` is stored as a snapshot copy at construction time but is NOT
+  injected into the inner message loop in M4 (M5 will determine what context to pass).
+  Tool whitelist enforced via `_execute_tool` dispatcher: non-whitelisted tools return
+  is_error=True without touching the registry; `write_memory_entry` creates a local
+  `ProjectMemory(memory_dir)` instance (path traversal defense from M1 still active).
+  `_build_whitelist_tools()` iterates sorted whitelist, pulling specs from registry for
+  read_file/list_files/search_text and using hardcoded schema for write_memory_entry
+  (since the registry may have it bound to a different ProjectMemory). The for/else
+  pattern cleanly handles the MAX_TURNS=5 cap without a separate sentinel flag.
