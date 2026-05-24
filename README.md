@@ -86,6 +86,8 @@ Both entry points support `--verbose` (stream `[trace] [<channel>] …` events t
 
 The REPL also accepts fine-grained threshold overrides: `--microcompact-keep-recent`, `--output-headroom`, `--compact-headroom`, `--min-session-tokens` (PDF-aligned auto-compaction knobs), and `--snip-nudge-growth-tokens` (tokens of growth since the last snip that arm the model-driven `snip_history` nudge — lower it with a roomy `--max-context-tokens` to exercise model snips without auto-compact preempting them). See `simple-agent --help` / `simple-agent-openai --help` for the authoritative, current list.
 
+Both REPLs also accept `--microcompact-minutes N` (override `MicroCompactor.threshold_minutes`; default 60; `0` clears compactable tool_results on the next turn; resolved through the same explicit-flag > `--aggressive-thresholds` preset > built-in-default precedence as the overrides above). `simple-agent-openai --repl` additionally accepts `--max-turns N`, which exits the REPL cleanly (same shutdown path as `/exit`) after exactly N user turns — slash commands do not count — for scripted artifact capture.
+
 Both REPLs additionally accept `--extract-memories` (enable automatic post-turn memory extraction; default off, also honoured via env `SIMPLE_AGENT_EXTRACT_MEMORIES=1`) and `--extract-throttle N` (run extraction at most once every `N` turns; default 1, also honoured via env `SIMPLE_AGENT_EXTRACT_THROTTLE`). Extraction is opt-in because it spends extra model tokens; `/stats` surfaces `extract_invocations` / `extract_writes` so the cost stays visible.
 
 ## Running the demo (safe, no API key required)
