@@ -12,7 +12,7 @@ For the active-initiative pointer and the bootstrap procedure, see
 
 | Slug | Status | Period | Milestones | Final commit |
 |---|---|---|---|---|
-| _(none — `initiatives/current/` is empty)_ | — | — | — | — |
+| [ctx-mgmt-demo](./current/) | in progress | 2026-05-25 – ? | M1 → M3 | _(pending)_ |
 
 ## Archived
 

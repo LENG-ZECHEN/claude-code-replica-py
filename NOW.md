@@ -6,9 +6,35 @@
 
 ## Active initiative
 
-**None.**
+**ctx-mgmt-demo** — see
+[`initiatives/current/`](./initiatives/current/).
 
-`initiatives/current/` is empty (`.gitkeep` only).
+| | |
+|---|---|
+| Slug | `ctx-mgmt-demo` |
+| Bootstrapped | 2026-05-25 |
+| Milestones | M1 → M3 |
+| Baseline commit | `9ba662b` |
+| Baseline pytest | 816 passing |
+| Plan | [`PLAN.md`](./initiatives/current/PLAN.md) |
+| Per-milestone prompts | [`prompts/`](./initiatives/current/prompts/) |
+| Current handoff | [`HANDOFF.md`](./initiatives/current/HANDOFF.md) |
+
+**Milestone summary:**
+
+- **M1** — `cli-flags-microcompact-minutes-and-max-turns`: two
+  additive CLI flags (`--microcompact-minutes` on both CLIs;
+  `--max-turns` on `simple-agent-openai` REPL). ≤ 3 src files, ≥ 3
+  new tests. No new abstractions.
+- **M2** — `capture-real-api-artifacts-for-3-scenarios`: real
+  DashScope API captures for snip+externalize, full compact, and
+  microcompact scenarios. Pure side-effect; no src/. Artifacts
+  committed under `demo/_artifacts/`.
+- **M3** — `write-3-notebooks-and-readme`: notebook-style markdown
+  embedding the M2 artifacts. Pure docs.
+
+**Next step:** run `./automation/scripts/run_all_milestones.sh`
+from `python-replica/`.
 
 ## Last completed initiative
 
