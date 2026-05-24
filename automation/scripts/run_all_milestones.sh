@@ -42,7 +42,17 @@ LOGS_DIR="$CURRENT_DIR/logs"
 SCRATCH_LOGS_DIR="$REPLICA_DIR/automation/logs"
 REVIEW_TEMPLATE="$REPLICA_DIR/automation/templates/review.md"
 
-CLAUDE_MODEL="claude-opus-4-7"
+# Milestone (coding) sessions and the final review session run with
+# different model + effort so the cheaper/faster model carries the bulk
+# of the work and the more expensive reviewer only runs once at the end.
+# Override per-run via env vars, e.g.
+#   MILESTONE_MODEL=claude-haiku-4-5-20251001 ./run_all_milestones.sh
+#   REVIEW_EFFORT=high ./run_all_milestones.sh
+MILESTONE_MODEL="${MILESTONE_MODEL:-claude-sonnet-4-6}"
+MILESTONE_EFFORT="${MILESTONE_EFFORT:-max}"
+
+REVIEW_MODEL="${REVIEW_MODEL:-claude-opus-4-7}"
+REVIEW_EFFORT="${REVIEW_EFFORT:-max}"
 
 # ---------------------------------------------------------------------------
 # Notification config (ntfy.sh)
@@ -179,7 +189,8 @@ notify_run_context() {
 Project: $(basename "${REPLICA_DIR:-unknown}")
 Initiative: ${INITIATIVE_SLUG:-unknown}
 Prefix: ${COMMIT_PREFIX:-unknown}
-Model: ${CLAUDE_MODEL:-unknown}
+Milestone model: ${MILESTONE_MODEL:-unknown} (effort=${MILESTONE_EFFORT:-unknown})
+Review model:    ${REVIEW_MODEL:-unknown} (effort=${REVIEW_EFFORT:-unknown})
 Branch: $(git_branch_name)
 HEAD: $(git_head_summary)
 Elapsed: $(duration_since "$RUN_STARTED_AT")
@@ -427,7 +438,8 @@ fi
 printf 'slug       : %s\n' "$INITIATIVE_SLUG"
 printf 'prefix     : %s\n' "$COMMIT_PREFIX"
 printf 'archive    : %s\n' "$ARCHIVE_SLUG"
-printf 'model      : %s\n' "$CLAUDE_MODEL"
+printf 'milestone  : model=%s effort=%s\n' "$MILESTONE_MODEL" "$MILESTONE_EFFORT"
+printf 'review     : model=%s effort=%s\n' "$REVIEW_MODEL" "$REVIEW_EFFORT"
 
 ALL_MILESTONES=()
 while IFS= read -r m; do
@@ -535,7 +547,9 @@ Started: $(date)" \
   # see anthropics/claude-code#41796). Without --verbose, --print only
   # emits the final response text — a session that never reaches
   # end_turn produces a 0/1-byte log, making post-mortem debugging hard.
-  if ! claude --print --verbose --model "$CLAUDE_MODEL" \
+  if ! claude --print --verbose \
+       --model "$MILESTONE_MODEL" \
+       --effort "$MILESTONE_EFFORT" \
        --allowedTools "$ALLOWED_TOOLS" \
        --disallowedTools "$DISALLOWED_TOOLS" \
        < "$PROMPT" 2>&1 | tee "$LOG"; then
@@ -655,8 +669,10 @@ Started: $(date)" \
 # Review session runs interactively with --remote-control. The agent
 # writes its own log to initiatives/_archive/${ARCHIVE_SLUG}/logs/review.log
 # as part of its Phase 2C Step 10 (see automation/templates/review.md).
-if ! claude --remote-control --model "$CLAUDE_MODEL" \
-     --allowedTools "$ALLOWED_TOOLS" \
+if ! claude --remote-control \
+     --model "$REVIEW_MODEL" \
+     --effort "$REVIEW_EFFORT" \
+     --permission-mode auto \
      --disallowedTools "$DISALLOWED_TOOLS" \
      < "$REVIEW_PROMPT"; then
   die "review session exited non-zero"
@@ -686,11 +702,6 @@ if [ -n "$CURRENT_CONTENTS" ]; then
   die "review wrap-gate check 5 failed: initiatives/current contains files other than .gitkeep"
 fi
 
-if [ -n "$(git -C "$REPLICA_DIR" status --short)" ]; then
-  git -C "$REPLICA_DIR" status --short
-  die "review wrap-gate check 6 failed: working tree dirty after wrap commit (Tier A/B edits may not have been staged)"
-fi
-
 ARCHIVED_REVIEW_LOG="$REPLICA_DIR/initiatives/_archive/$ARCHIVE_SLUG/logs/review.log"
 
 # The agent writes review.log to the archive path as part of Step 10.
@@ -701,6 +712,11 @@ if [ -f "$ARCHIVED_REVIEW_LOG" ]; then
   if ! git -C "$REPLICA_DIR" diff --cached --quiet -- "initiatives/_archive/$ARCHIVE_SLUG/logs/review.log"; then
     git -C "$REPLICA_DIR" commit --amend --no-edit
   fi
+fi
+
+if [ -n "$(git -C "$REPLICA_DIR" status --short)" ]; then
+  git -C "$REPLICA_DIR" status --short
+  die "review wrap-gate check 6 failed: working tree dirty after wrap commit (Tier A/B edits may not have been staged)"
 fi
 
 printf '\n================================================================\n'
