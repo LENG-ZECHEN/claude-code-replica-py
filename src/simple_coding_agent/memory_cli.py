@@ -26,6 +26,7 @@ easy to grep or pipe.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -141,6 +142,32 @@ def _cmd_update(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_migrate_format(args: argparse.Namespace) -> int:
+    """Convert legacy .json memory entries to .md format (idempotent)."""
+    storage = _resolve_storage_dir()
+    storage.mkdir(parents=True, exist_ok=True)
+    migrated = 0
+    for json_path in sorted(storage.glob("*.json")):
+        entry_id = json_path.stem
+        md_path = storage / f"{entry_id}.md"
+        if md_path.exists():
+            continue  # already migrated — idempotent
+        try:
+            with open(json_path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            entry = MemoryEntry.from_dict(data)
+        except Exception as exc:
+            print(f"warning: skipping {json_path.name}: {exc}", file=sys.stderr)
+            continue
+        try:
+            md_path.write_text(entry.to_md_text(), encoding="utf-8")
+            migrated += 1
+        except Exception as exc:
+            print(f"warning: could not write {md_path.name}: {exc}", file=sys.stderr)
+    print(f"Migrated {migrated} entries. Run again to verify (idempotent).")
+    return 0
+
+
 def _cmd_show(args: argparse.Namespace) -> int:
     entry = _store().load(str(args.id))
     if entry is None:
@@ -208,6 +235,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="New body text. Multiple words are joined with single spaces.",
     )
 
+    sub.add_parser(
+        "migrate-format",
+        help="Convert legacy .json entries to .md format (idempotent).",
+    )
+
     return parser
 
 
@@ -226,6 +258,7 @@ def main(argv: list[str] | None = None) -> int:
         "search": _cmd_search,
         "show": _cmd_show,
         "update": _cmd_update,
+        "migrate-format": _cmd_migrate_format,
     }[str(args.cmd)]
     return handler(args)
 

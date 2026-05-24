@@ -11,7 +11,6 @@ also live in this REPL since it shares the cli helpers.
 from __future__ import annotations
 
 import io
-import json
 from pathlib import Path
 from typing import Any
 
@@ -197,10 +196,12 @@ def test_openai_repl_remember_writes_through_project_memory(
     out = capsys.readouterr().out
 
     assert rc == 0
-    saved = memory_dir / "indent_pref.json"
+    saved = memory_dir / "indent_pref.md"
     assert saved.exists(), out
-    payload = json.loads(saved.read_text(encoding="utf-8"))
-    assert payload["body"] == "user prefers 4-space indentation"
+    from simple_coding_agent.memory import ProjectMemory
+    entry = ProjectMemory(storage_dir=str(memory_dir)).load("indent_pref")
+    assert entry is not None
+    assert entry.body == "user prefers 4-space indentation"
 
 
 def test_openai_repl_jizhu_cue_prints_save_prompt(

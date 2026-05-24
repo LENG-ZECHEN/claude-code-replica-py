@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 
 import pytest
@@ -214,17 +213,18 @@ def test_project_memory_save_and_load(tmp_path: object) -> None:
     assert loaded.type == MemoryType.FEEDBACK
 
 
-def test_project_memory_save_writes_json_file(tmp_path: object) -> None:
+def test_project_memory_save_writes_md_file(tmp_path: object) -> None:
     pm = ProjectMemory(storage_dir=str(tmp_path))
     entry = MemoryEntry(name="x", body="some body", type=MemoryType.USER)
     pm.save(entry)
-    json_path = os.path.join(str(tmp_path), f"{entry.id}.json")
-    assert os.path.exists(json_path)
-    with open(json_path) as f:
-        data = json.load(f)
-    assert data["name"] == "x"
-    assert data["body"] == "some body"
-    assert data["type"] == "user"
+    md_path = os.path.join(str(tmp_path), f"{entry.id}.md")
+    assert os.path.exists(md_path)
+    content = open(md_path).read()
+    assert "name: x" in content
+    assert "type: user" in content
+    assert "some body" in content
+    # Must start with YAML frontmatter delimiter
+    assert content.startswith("---")
 
 
 def test_project_memory_load_unknown_returns_none(tmp_path: object) -> None:

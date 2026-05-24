@@ -8,12 +8,12 @@ Covers Section 3.2 of RUNTIME_ACTIVATION_PLAN.md:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
 from simple_coding_agent.cli import main
+from simple_coding_agent.memory import ProjectMemory
 
 
 def _run(
@@ -46,12 +46,13 @@ def test_add_creates_entry_json_on_disk(
         monkeypatch=monkeypatch,
     )
     assert rc == 0
-    json_files = sorted(p for p in storage.iterdir() if p.suffix == ".json")
-    assert len(json_files) == 1
-    data = json.loads(json_files[0].read_text(encoding="utf-8"))
-    assert data["name"] == "fav-editor"
-    assert data["body"] == "I prefer Helix."
-    assert data["type"] == "user"
+    md_files = sorted(p for p in storage.iterdir() if p.suffix == ".md" and p.name != "MEMORY.md")
+    assert len(md_files) == 1
+    entry = ProjectMemory(storage_dir=str(storage)).load("fav-editor")
+    assert entry is not None
+    assert entry.name == "fav-editor"
+    assert entry.body == "I prefer Helix."
+    assert entry.type.value == "user"
 
 
 def test_add_rejects_secret_body(
@@ -67,7 +68,7 @@ def test_add_rejects_secret_body(
     )
     assert rc == 2
     if storage.exists():
-        assert not any(p.suffix == ".json" for p in storage.iterdir())
+        assert not any(p.suffix == ".md" and p.name != "MEMORY.md" for p in storage.iterdir())
     err = capsys.readouterr().err.lower()
     assert "secret" in err
 
@@ -170,7 +171,7 @@ def test_delete_removes_file_and_updates_manifest(
     _run("add", "user", "removeme", "bye",
          env={"SIMPLE_AGENT_MEMORY_DIR": str(storage)},
          monkeypatch=monkeypatch)
-    assert (storage / "removeme.json").exists()
+    assert (storage / "removeme.md").exists()
 
     rc = _run(
         "delete", "removeme",
@@ -178,7 +179,7 @@ def test_delete_removes_file_and_updates_manifest(
         monkeypatch=monkeypatch,
     )
     assert rc == 0
-    assert not (storage / "removeme.json").exists()
+    assert not (storage / "removeme.md").exists()
     manifest = (storage / "MEMORY.md").read_text(encoding="utf-8")
     assert "removeme" not in manifest
 
@@ -264,7 +265,7 @@ def test_storage_dir_from_env(
         monkeypatch=monkeypatch,
     )
     assert rc == 0
-    assert (target / "named.json").exists()
+    assert (target / "named.md").exists()
 
 
 def test_storage_dir_default_under_workspace(
@@ -275,7 +276,7 @@ def test_storage_dir_default_under_workspace(
     rc = _run("add", "user", "named", "body", monkeypatch=monkeypatch)
     assert rc == 0
     default_dir = tmp_path / ".simple-agent" / "memory"
-    assert (default_dir / "named.json").exists()
+    assert (default_dir / "named.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -300,8 +301,9 @@ def test_update_changes_body(
         monkeypatch=monkeypatch,
     )
     assert rc == 0
-    data = json.loads((storage / "fav-editor.json").read_text(encoding="utf-8"))
-    assert data["body"] == "Actually I switched to Vim."
+    entry = ProjectMemory(storage_dir=str(storage)).load("fav-editor")
+    assert entry is not None
+    assert entry.body == "Actually I switched to Vim."
 
 
 def test_update_preserves_id_and_type(
@@ -314,7 +316,9 @@ def test_update_preserves_id_and_type(
         env={"SIMPLE_AGENT_MEMORY_DIR": str(storage)},
         monkeypatch=monkeypatch,
     ) == 0
-    before = json.loads((storage / "tabs.json").read_text(encoding="utf-8"))
+    pm = ProjectMemory(storage_dir=str(storage))
+    before = pm.load("tabs")
+    assert before is not None
 
     assert _run(
         "update", "tabs", "user prefers spaces now",
@@ -322,12 +326,13 @@ def test_update_preserves_id_and_type(
         monkeypatch=monkeypatch,
     ) == 0
 
-    after = json.loads((storage / "tabs.json").read_text(encoding="utf-8"))
-    assert after["id"] == before["id"]
-    assert after["type"] == before["type"] == "feedback"
-    assert after["name"] == before["name"]
-    assert after["created_at"] == before["created_at"]
-    assert after["body"] == "user prefers spaces now"
+    after = pm.load("tabs")
+    assert after is not None
+    assert after.id == before.id
+    assert after.type.value == before.type.value == "feedback"
+    assert after.name == before.name
+    assert after.created_at == before.created_at
+    assert after.body == "user prefers spaces now"
 
 
 def test_update_unknown_id_exits_2(
@@ -369,5 +374,6 @@ def test_update_rejects_secret_body(
     err = capsys.readouterr().err.lower()
     assert "secret" in err
     # Disk content must remain unchanged.
-    data = json.loads((storage / "harmless.json").read_text(encoding="utf-8"))
-    assert data["body"] == "nothing to see here"
+    entry = ProjectMemory(storage_dir=str(storage)).load("harmless")
+    assert entry is not None
+    assert entry.body == "nothing to see here"

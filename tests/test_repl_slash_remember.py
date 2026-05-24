@@ -18,7 +18,6 @@ points at a tmp dir so test runs never touch real on-disk memory.
 from __future__ import annotations
 
 import io
-import json
 from pathlib import Path
 
 import pytest
@@ -63,11 +62,13 @@ def test_remember_command_adds_to_project_memory(
     out = capsys.readouterr().out
 
     assert rc == 0
-    saved = memory_dir / "tabs_pref.json"
+    saved = memory_dir / "tabs_pref.md"
     assert saved.exists(), out
-    payload = json.loads(saved.read_text(encoding="utf-8"))
-    assert payload["type"] == "feedback"
-    assert payload["body"] == "user prefers tabs over spaces"
+    from simple_coding_agent.memory import ProjectMemory
+    entry = ProjectMemory(storage_dir=str(memory_dir)).load("tabs_pref")
+    assert entry is not None
+    assert entry.type.value == "feedback"
+    assert entry.body == "user prefers tabs over spaces"
     assert "Remembered tabs_pref" in out
 
 
@@ -87,7 +88,7 @@ def test_remember_command_rejects_unknown_type(
 
     assert rc == 0
     assert "Unknown memory type" in out
-    assert not list(memory_dir.glob("name1.json"))
+    assert not list(memory_dir.glob("name1.md"))
 
 
 def test_remember_command_rejects_secret_body(
@@ -107,7 +108,7 @@ def test_remember_command_rejects_secret_body(
     assert rc == 0
     assert "Could not save memory" in out
     assert "secret" in out.lower()
-    assert not (memory_dir / "oops.json").exists()
+    assert not (memory_dir / "oops.md").exists()
 
 
 def test_remember_command_usage_when_args_missing(
