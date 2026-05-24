@@ -1,0 +1,90 @@
+# Transcript
+
+## 1. user (text)
+Please use the read_file tool to read small.txt and summarize it.
+
+## 2. assistant (tool_use)
+tool_use read_file({'path': 'small.txt'})
+
+## 3. user (tool_result)
+tool_result: [Snipped: superseded by later call]
+
+## 4. assistant (text)
+Here's a summary of **small.txt**:
+
+The file contains a brief design note about context management in a conversational system. It explains that:
+
+- Context grows monotonically (i.e., it only increases over time).
+- Tool results older than a `keep_recent` threshold are removed ("snipped").
+- This snipping process preserves the overall transcript shape while clearing out content that has been superseded.
+
+## 5. user (text)
+Please use the read_file tool to read small.txt again to verify.
+
+## 6. assistant (tool_use)
+tool_use read_file({'path': 'small.txt'})
+
+## 7. user (tool_result)
+tool_result: [Snipped: superseded by later call]
+
+## 8. assistant (text)
+Verified. The content of **small.txt** is exactly the same as my first read:
+
+> Context management design notes: context grows monotonically, tool results older than keep_recent are snipped, snipping preserves transcript shape while clearing superseded content. (< 300 chars)
+
+My earlier summary remains accurate.
+
+## 9. user (text)
+Please use the read_file tool to read small.txt one more time and check for changes.
+
+## 10. assistant (tool_use)
+tool_use read_file({'path': 'small.txt'})
+
+## 11. user (tool_result)
+tool_result: Context management design notes: context grows monotonically, tool results older than keep_recent are snipped, snipping preserves transcript shape while clearing superseded content. (< 300 chars)
+
+## 12. assistant (text)
+I have checked `small.txt` again. The content remains unchanged:
+
+> Context management design notes: context grows monotonically, tool results older than keep_recent are snipped, snipping preserves transcript shape while clearing superseded content. (< 300 chars)
+
+There are no changes from the previous reads.
+
+## 13. user (text)
+Please use the read_file tool to read large.txt and give an overview.
+
+## 14. system (compact_boundary)
+Conversation compacted
+
+## 15. assistant (text)
+I have checked `small.txt` again. The content remains unchanged:
+
+> Context management design notes: context grows monotonically, tool results older than keep_recent are snipped, snipping preserves transcript shape while clearing superseded content. (< 300 chars)
+
+There are no changes from the previous reads.
+
+## 16. user (text)
+Please use the read_file tool to read large.txt and give an overview.
+
+## 17. assistant (tool_use)
+tool_use read_file({'path': 'large.txt'})
+
+## 18. user (tool_result)
+tool_result: context token data context token data context token data context token data context token data context token data context token data context token data context token data context token data context token data context token data context token data context token data context token data context token d... [+3500]
+
+## 19. system (compact_boundary)
+Conversation compacted
+
+## 20. assistant (tool_use)
+tool_use read_file({'path': 'large.txt'})
+
+## 21. user (tool_result)
+tool_result: context token data context token data context token data context token data context token data context token data context token data context token data context token data context token data context token data context token data context token data context token data context token data context token d... [+3500]
+
+## 22. assistant (text)
+Here's an overview of `large.txt`:
+
+- **Content**: The file consists entirely of the repeated phrase **"context token data"**, repeated hundreds of times with no variation, punctuation, or meaningful structure.
+- **Size**: ~3,800 characters (as shown in the preview).
+- **Purpose**: This appears to be a synthetic/test file, likely used to simulate a large context payload or to test how the system handles large file reads and context truncation.
+- **Key observation**: There is no unique or actionable information in the file — it's purely repetitive filler text.

@@ -1,0 +1,10 @@
+# model: qwen3.6-plus
+Context-management metrics:
+  full compacts:         2
+  reactive compacts:     0
+  microcompact runs:     1
+  snip runs:             2
+  externalized bytes:    0
+  turns recorded:        8
+  last-turn tokens:      1908
+  extract_invocations=0 extract_writes=0

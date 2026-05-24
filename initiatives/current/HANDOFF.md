@@ -1,6 +1,6 @@
-# HANDOFF — Next: M2 (capture-real-api-artifacts-for-3-scenarios)
+# HANDOFF — Next: M3 (optional — see PLAN for scope)
 
-> Updated by: `M1` session
+> Updated by: `M2` session
 > Date: 2026-05-25
 > Re-verify Section 3 numbers before starting work — do not trust this
 > file blindly.
@@ -10,9 +10,9 @@
 ## 1. Current initiative
 
 - **slug**: `ctx-mgmt-demo`
-- **current milestone**: just-completed `M1` — cli-flags-microcompact-minutes-and-max-turns
-- **next milestone**: `M2` — capture-real-api-artifacts-for-3-scenarios
-- **all milestones (per PLAN)**: M1 [done], M2 [next], M3 [pending]
+- **current milestone**: just-completed `M2` — capture-real-api-artifacts-for-3-scenarios
+- **next milestone**: `M3` — (see `initiatives/current/PLAN.md` for M3 scope)
+- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [pending]
 
 ## 2. Completed milestones
 
@@ -28,12 +28,25 @@
 - **known limitations**:
   - (none)
 
+### M2
+
+- **commit**: `(see git log)` `[ctx-demo/M2] real-API artifact captures for snip+externalize, full compact, microcompact`
+- **files changed**: `demo/_scripts/capture_scenario.py`, `demo/_artifacts/01_tool_result_management/{transcript.txt,trace.stderr,metrics.json,stats_output.txt}`, `demo/_artifacts/02_full_compact/{...}`, `demo/_artifacts/03_microcompact/{...}`
+- **tests added**: 0 (M2 is a pure side-effect milestone)
+- **behavior implemented**: Created `demo/_scripts/capture_scenario.py` (≤200 LOC SDK-based capture driver). Runs three scenarios against the DashScope API using `qwen3.6-plus`, writes 4 artifacts per scenario. All three exit gates pass.
+- **design decisions (deviations from PLAN)**:
+  - **Scenario 01 needs 3 reads, not 2**: `should_snip()` in `snip.py` uses `_PATH_THRESHOLD=3` (requires 3 reads of the same path before returning True). The PLAN assumed 2 reads would suffice. Added a 3rd "check for changes" read of `small.txt` so snip fires. See `snip.py:147`.
+  - **`microcompact_minutes=60` for scenario 01**: The aggressive preset sets `microcompact_minutes=1`, but `qwen3.6-plus` in thinking mode takes ~60 seconds per API call. With the preset, microcompact would fire after the 2nd turn and clear tool results before snip could accumulate 3 reads. Explicitly passing `microcompact_minutes=60` (overrides the preset via three-state precedence) prevents this interference.
+  - **`externalized_bytes` read from context builder**: `_build_repl_loop` creates `ToolResultStore(max_inline_chars=2000)` and passes it to `ContextBuilder`, but does NOT wire it to `AgentLoop`. Therefore `AgentLoop._tool_result_store = None` and `_refresh_externalized_bytes()` always returns 0. Trace confirms externalization DID happen (`[trace] [externalize] bytes=3800`). The driver reads `loop._context_builder._store.total_externalized_bytes` directly and patches the metrics dict before writing `metrics.json`. No `src/` changes were made.
+- **known limitations**:
+  - See Section 5 for the wiring bug.
+
 ## 3. Current repo state
 
 > Re-verify these numbers before starting. Do not trust this list blindly.
 
 - **last commit**: `(see git log)` — `git -C python-replica log --oneline -1`
-- **tests**: 819 passing (was 816 before M1, delta +3)
+- **tests**: 819 passing (unchanged from M1 — M2 adds no tests)
 - **mypy**: clean (no issues in 26 source files)
 - **ruff**: clean
 - **branch**: main
@@ -41,7 +54,7 @@
 
 ## 4. Important constraints (carried forward)
 
-> Invariants that M2 and subsequent milestones MUST respect. Update by
+> Invariants that M3 and subsequent milestones MUST respect. Update by
 > ADDING — only remove a constraint by quoting it and explaining why it
 > is retired.
 
@@ -54,21 +67,12 @@
   - `--microcompact-minutes N` accepts N=0 (immediate) through any positive integer. Argparse type is `int`, no explicit lower bound in argparse (the guard in `compact.py` handles N<0 at construction time).
   - `--max-turns N` is openai_cli only; `simple-agent --repl` does not expose it (by design; MockProvider REPL has no artifacts to capture).
 
-## 5. Next milestone guidance
+## 5. Known bugs / technical debt for M3+
 
-For `M2` — capture-real-api-artifacts-for-3-scenarios:
+### Bug: `_build_repl_loop` does not wire `tool_result_store` to `AgentLoop`
 
-- **next scope**: Pure side-effect milestone. Run three scenarios against the real DashScope API (via `python-replica/.env`) and write artifacts under `demo/_artifacts/{01_tool_result_management,02_full_compact,03_microcompact}/`. Each scenario needs four files: `transcript.txt`, `trace.stderr`, `metrics.json`, `stats_output.txt` (first line `# model: <SIMPLE_AGENT_MODEL>`). Use an SDK-based capture driver (not shell-pipe stdin scripting) under `demo/_scripts/`, mirroring `examples/visibility_full_demo.py`. The `--microcompact-minutes 0` flag from M1 makes scenario 03 instantaneous.
-- **relevant files**:
-  - `examples/visibility_full_demo.py` — structural reference; reuse `_parse_trace_events` and `_new_run_dir` patterns
-  - `python-replica/.env` — pre-configured with `DASHSCOPE_API_KEY`, `OPENAI_BASE_URL`, `SIMPLE_AGENT_MODEL`; do NOT create env.sample
-  - `src/simple_coding_agent/openai_cli.py` — the CLI that M2 drives; now has `--max-turns` and `--microcompact-minutes` from M1
-  - `demo/` — empty directory reserved for this initiative; M2 populates `demo/_scripts/` and `demo/_artifacts/`
-- **expected tests**: M2 is a pure side-effect milestone (real-API artifact capture). No new tests.
-- **risks**:
-  - **`--microcompact-minutes 0` behavior**: The guard was relaxed to accept 0; `should_microcompact` fires when `current_time - latest_assistant_time > timedelta(minutes=0)`, i.e., any non-zero age. In practice this fires on the very next turn since processing takes >0ms. If for any reason the second turn's assistant timestamp equals the current time exactly (clock skew edge case), microcompact will NOT fire. Use a brief `time.sleep(0.01)` between turns in the capture driver if this proves flaky (unlikely in real API calls which take seconds).
-  - **Model quota exhaustion**: See PLAN M2 notes for the swappable-model playbook (5 alternatives via the same `OPENAI_BASE_URL`). If two consecutive alternates fail with quota errors, STOP and surface to the owner.
-  - **Per-scenario cost cap**: $0.10 per scenario, $0.20 total. Stop and report if exceeded rather than retrying.
-
-The full ready-to-run prompt is at:
-`initiatives/current/prompts/M2.md`
+- **location**: `src/simple_coding_agent/cli.py` — the `_build_repl_loop` function's `loop_kwargs` dict (around line 505–523)
+- **symptom**: `loop._metrics.externalized_bytes` is always 0 even when externalization DID occur (visible in `[trace] [externalize] bytes=N` events).
+- **root cause**: `_build_repl_loop` creates `ToolResultStore(max_inline_chars=2000)` and passes it to `ContextBuilder(tool_result_store=...)`, but `loop_kwargs` does NOT include `tool_result_store`. Therefore `AgentLoop._tool_result_store = None`, and `AgentLoop._refresh_externalized_bytes()` (which reads `self._tool_result_store.total_externalized_bytes`) returns early with 0.
+- **workaround (M2)**: Read the real value from `loop._context_builder._store.total_externalized_bytes`. This is the same store that `ContextBuilder` uses for externalization.
+- **fix (M3+)**: Add `"tool_result_store": tool_result_store` to `loop_kwargs` in `_build_repl_loop`. This is a 1-line `src/` change; M2 was not allowed to make it.

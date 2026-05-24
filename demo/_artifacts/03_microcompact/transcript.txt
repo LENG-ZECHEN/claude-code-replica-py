@@ -1,0 +1,23 @@
+# Transcript
+
+## 1. user (text)
+Please use the read_file tool to read notes.txt and tell me its contents.
+
+## 2. assistant (tool_use)
+tool_use read_file({'path': 'notes.txt'})
+
+## 3. user (tool_result)
+tool_result: Microcompact demo: data cleared when threshold_minutes=0 fires next turn.
+
+## 4. assistant (text)
+The contents of **notes.txt** are:
+
+> Microcompact demo: data cleared when threshold_minutes=0 fires next turn.
+
+## 5. user (text)
+What do you remember from the notes.txt file you just read?
+
+## 6. assistant (text)
+The content of `notes.txt` was:
+
+"Microcompact demo: data cleared when threshold_minutes=0 fires next turn."

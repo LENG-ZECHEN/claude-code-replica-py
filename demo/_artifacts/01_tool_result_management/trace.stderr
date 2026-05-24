@@ -1,0 +1,22 @@
+[trace] [microcompact] cleared=0 messages=1
+[trace] [claude_md] cached=0 chars=0 read_error=0 sections=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=56 externalized=0 messages=1 system_tokens=32
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=190 externalized=0 messages=3 system_tokens=32
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=325 externalized=0 messages=5 system_tokens=32
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=459 externalized=0 messages=7 system_tokens=32
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=575 externalized=0 messages=9 system_tokens=32
+[trace] [snip] deleted=0 messages=11 snipped=2
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=629 externalized=0 messages=11 system_tokens=32
+[trace] [snip] deleted=0 messages=13 snipped=0
+[trace] [compact] messages=13 post_tokens=112 pre_tokens=709 summarized=11
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=604 externalized=0 messages=3 system_tokens=420
+[trace] [compact] messages=5 post_tokens=1035 pre_tokens=1147 summarized=3
+[trace] [externalize] bytes=3800 tool_use_id=call_41d35f98ea5846429098f558
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=1908 externalized=1 messages=3 system_tokens=240

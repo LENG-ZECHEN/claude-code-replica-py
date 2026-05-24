@@ -1,0 +1,16 @@
+{
+  "full_compacts": 1,
+  "snip_invocations": 0,
+  "microcompact_invocations": 1,
+  "reactive_compacts": 0,
+  "externalized_bytes": 0,
+  "tokens_per_turn": [
+    58,
+    162,
+    231,
+    336,
+    406,
+    511,
+    794
+  ]
+}

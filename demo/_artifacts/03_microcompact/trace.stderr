@@ -1,0 +1,9 @@
+[trace] [microcompact] cleared=0 messages=1
+[trace] [claude_md] cached=0 chars=0 read_error=0 sections=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=58 externalized=0 messages=1 system_tokens=32
+[trace] [microcompact] cleared=0 messages=3
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=161 externalized=0 messages=3 system_tokens=32
+[trace] [microcompact] cleared=0 messages=5
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=220 externalized=0 messages=5 system_tokens=32

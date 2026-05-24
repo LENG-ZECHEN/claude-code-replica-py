@@ -1,0 +1,16 @@
+[trace] [microcompact] cleared=0 messages=1
+[trace] [claude_md] cached=0 chars=0 read_error=0 sections=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=58 externalized=0 messages=1 system_tokens=32
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=162 externalized=0 messages=3 system_tokens=32
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=231 externalized=0 messages=5 system_tokens=32
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=336 externalized=0 messages=7 system_tokens=32
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=406 externalized=0 messages=9 system_tokens=32
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=511 externalized=0 messages=11 system_tokens=32
+[trace] [compact] messages=13 post_tokens=299 pre_tokens=778 summarized=11
+[trace] [claude_md] cached=1 chars=0
+[trace] [budget] available=3488 dropped=0 estimated_tokens=794 externalized=0 messages=3 system_tokens=377
