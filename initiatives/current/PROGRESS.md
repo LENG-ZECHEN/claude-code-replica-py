@@ -22,3 +22,16 @@ exists in this file. Deleting or rewriting a prior block halts the loop.
   - `migrate-format` CLI subcommand (idempotent JSON→MD)
   - `_SAFE_ENTRY_ID_PATTERN` extended to allow `/` for subdir IDs (`.` excluded, `..` blocked)
   - New test files: `test_memory_frontmatter.py` (4), `test_memory_manifest_format.py` (4), `test_memory_scan_recursive.py` (3), `test_memory_migrate.py` (2)
+
+## M2 — done 2026-05-24
+
+- commit: [auto-mem/M2] (see git log)
+- tests: 724 → 734 (+10 new tests in `test_write_memory_tool.py`)
+- mypy: clean | ruff: clean
+- files changed: `coding_tools.py`, `loop.py`, `tests/test_write_memory_tool.py`
+- exit gate: write_memory_entry exported + 10 schema/quota/upsert/registration tests pass → PASS
+- notes: `project_memory` kwarg on AgentLoop was already present from P9-M5; only added
+  `_memory_writes_this_turn` counter, `_register_tools()` method, and reset in run()/run_stream().
+  Registration function is inline closure inside `_register_tools` (captures `self`) rather than
+  a standalone exported function — this gives the closure direct access to `self._memory_writes_this_turn`
+  for resetting without a separate mutable container.

@@ -34,6 +34,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 
+from .coding_tools import (
+    WRITE_MEMORY_ENTRY_SCHEMA,
+    WRITE_MEMORY_ENTRY_TOOL_DESCRIPTION,
+    WRITE_MEMORY_ENTRY_TOOL_NAME,
+    write_memory_entry,
+)
 from .compact import ContextCompactor, MicroCompactor
 from .context import ContextBudget, ContextBuilder
 from .memory import ProjectMemory, SessionMemory
@@ -52,7 +58,7 @@ from .provider import STOP_MAX_TOKENS, PromptTooLongError, Provider
 from .snip import SnipTool
 from .snip_tool_model import SnipNudge, snippable_candidate_uuids
 from .tool_result_store import ToolResultStore
-from .tools import ToolExecutor, ToolRegistry, UnknownToolError
+from .tools import Tool, ToolExecutor, ToolRegistry, UnknownToolError
 from .trace import NullTracer, Tracer
 from .transcript import Transcript
 
@@ -228,6 +234,11 @@ class AgentLoop:
         self._snip_nudge_growth_tokens = snip_nudge_growth_tokens
         self._tokens_since_last_snip = 0
         self._snip_nudge_suppressed = False
+        # M2 (auto-memory-overhaul): per-turn write quota counter; reset at
+        # the start of each run() / run_stream(). The closure in _register_tools
+        # captures self so the reset is visible to subsequent tool calls.
+        self._memory_writes_this_turn: int = 0
+        self._register_tools()
 
     # ------------------------------------------------------------------
     # Public API
@@ -242,6 +253,7 @@ class AgentLoop:
         compacted_overall = False
         reactive_compact_attempted = False
         self._snip_attempted_this_turn = False
+        self._memory_writes_this_turn = 0
 
         for turn in range(1, self._max_steps + 1):
             self._maybe_microcompact()
@@ -389,6 +401,7 @@ class AgentLoop:
         compacted_overall = False
         reactive_compact_attempted = False
         self._snip_attempted_this_turn = False
+        self._memory_writes_this_turn = 0
 
         for turn in range(1, self._max_steps + 1):
             self._maybe_microcompact()
@@ -554,6 +567,39 @@ class AgentLoop:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _register_tools(self) -> None:
+        """Register tools that require optional components to be present.
+
+        Called once at the end of __init__. write_memory_entry is only added
+        when project_memory is provided so the model cannot call it in sessions
+        that have no memory store.
+        """
+        if self._project_memory is None or self._registry is None:
+            return
+        pm = self._project_memory
+
+        def _write_memory_fn(
+            type: str,
+            id: str,
+            name: str,
+            description: str,
+            body: str,
+            tags: list[str] | None = None,
+        ) -> str:
+            if self._memory_writes_this_turn >= 3:
+                raise RuntimeError("memory write quota exhausted this turn (max 3)")
+            self._memory_writes_this_turn += 1
+            return write_memory_entry(pm, type, id, name, description, body, tags)
+
+        self._registry.register(
+            Tool(
+                name=WRITE_MEMORY_ENTRY_TOOL_NAME,
+                description=WRITE_MEMORY_ENTRY_TOOL_DESCRIPTION,
+                input_schema=WRITE_MEMORY_ENTRY_SCHEMA,
+                fn=_write_memory_fn,
+            )
+        )
 
     def _maybe_compact(self) -> bool:
         """Run compaction if the compactor says we are over budget."""

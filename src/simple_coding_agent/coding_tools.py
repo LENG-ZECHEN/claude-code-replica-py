@@ -26,6 +26,15 @@ import subprocess
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Any
+
+from .memory import (
+    _SAFE_ENTRY_ID_PATTERN,
+    MemoryEntry,
+    MemoryType,
+    ProjectMemory,
+    _check_body_for_secrets,
+)
 
 # ---------------------------------------------------------------------------
 # Public exception
@@ -454,7 +463,78 @@ def run_shell(
     )
 
 
+# ---------------------------------------------------------------------------
+# write_memory_entry
+# ---------------------------------------------------------------------------
+
+_VALID_MEMORY_TYPES: frozenset[str] = frozenset({"user", "feedback", "project", "reference"})
+
+WRITE_MEMORY_ENTRY_TOOL_NAME: str = "write_memory_entry"
+WRITE_MEMORY_ENTRY_TOOL_DESCRIPTION: str = (
+    "Save a memory entry to the project memory store to persist important information "
+    "across sessions. type must be one of: user, feedback, project, reference. "
+    "id is the entry identifier (alphanumeric, hyphens, underscores, forward slashes). "
+    "description must be 150 characters or fewer. Calling with an existing id overwrites it."
+)
+WRITE_MEMORY_ENTRY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "type": {"type": "string"},
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "description": {"type": "string"},
+        "body": {"type": "string"},
+        "tags": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["type", "id", "name", "description", "body"],
+}
+
+
+def write_memory_entry(
+    project_memory: ProjectMemory,
+    type: str,
+    id: str,
+    name: str,
+    description: str,
+    body: str,
+    tags: list[str] | None = None,
+) -> str:
+    """Validate inputs and save a memory entry to project memory.
+
+    Raises ValueError on invalid inputs; ToolExecutor surfaces these as is_error=True.
+    """
+    if type not in _VALID_MEMORY_TYPES:
+        raise ValueError(
+            f"Invalid type '{type}'. Must be one of: user, feedback, project, reference"
+        )
+    if not _SAFE_ENTRY_ID_PATTERN.fullmatch(id):
+        raise ValueError(
+            f"Invalid id '{id}'. Use only alphanumeric characters, hyphens, "
+            "underscores, and forward slashes."
+        )
+    if len(description) > 150:
+        raise ValueError(
+            f"Description too long ({len(description)} chars). Maximum is 150 characters."
+        )
+    _check_body_for_secrets(body)
+
+    entry = MemoryEntry(
+        id=id,
+        name=name,
+        body=body,
+        type=MemoryType(type),
+        description=description,
+        tags=list(tags) if tags else [],
+    )
+    project_memory.save(entry)
+    abs_path = (Path(project_memory._dir) / f"{id}.md").resolve()
+    return f"Saved memory '{id}' as {type} ({abs_path})"
+
+
 __all__ = [
+    "WRITE_MEMORY_ENTRY_SCHEMA",
+    "WRITE_MEMORY_ENTRY_TOOL_DESCRIPTION",
+    "WRITE_MEMORY_ENTRY_TOOL_NAME",
     "SearchMatch",
     "ShellMode",
     "WorkspaceBoundaryError",
@@ -466,4 +546,5 @@ __all__ = [
     "run_shell",
     "search_text",
     "write_file",
+    "write_memory_entry",
 ]
