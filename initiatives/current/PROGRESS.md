@@ -68,3 +68,26 @@ exists in this file. Deleting or rewriting a prior block halts the loop.
   read_file/list_files/search_text and using hardcoded schema for write_memory_entry
   (since the registry may have it bound to a different ProjectMemory). The for/else
   pattern cleanly handles the MAX_TURNS=5 cap without a separate sentinel flag.
+
+## M5 — done 2026-05-24
+
+- commit: [auto-mem/M5] (see git log)
+- tests: 750 → 768 (+18 new tests across `test_has_memory_writes_since.py` (7),
+  `test_extract_memories_gating.py` (8), `test_extract_memories_e2e.py` (3))
+- mypy: clean | ruff: clean
+- files changed: `extraction_hooks.py` (new), `loop.py` (modified, 788 lines),
+  `metrics.py` (modified), `cli.py` (modified), `openai_cli.py` (modified),
+  `tests/test_has_memory_writes_since.py` (new),
+  `tests/test_extract_memories_gating.py` (new),
+  `tests/test_extract_memories_e2e.py` (new)
+- exit gate: `AgentLoop.run()` and `run_stream()` call `_run_stop_hooks(result)`
+  before every return AND `maybe_extract_memories` enforces 7-layer gating in order
+  AND `hasMemoryWritesSince` returns True for writes after cursor, False otherwise
+  AND cursor advances on success, does NOT advance on exception (at-least-once)
+  AND `--extract-memories` flag on both CLIs (env SIMPLE_AGENT_EXTRACT_MEMORIES)
+  AND `MetricsCollector` gains `extract_invocations` + `extract_writes` counters
+  AND 18 new tests → PASS
+- notes: `extraction_hooks.py` extracted from loop.py to keep loop.py ≤800 lines
+  (788). Defensive `hasattr(project_memory, "_dir")` check ensures pre-existing
+  tests with mock ProjectMemory objects don't break. Both CLIs resolve
+  `SIMPLE_AGENT_EXTRACT_MEMORIES` env var when flag is absent.

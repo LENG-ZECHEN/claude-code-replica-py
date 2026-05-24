@@ -212,6 +212,25 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--extract-memories",
+        action="store_true",
+        default=None,
+        help=(
+            "Enable automatic memory extraction after each turn (REPL mode). "
+            "Also honoured via env SIMPLE_AGENT_EXTRACT_MEMORIES=1."
+        ),
+    )
+    parser.add_argument(
+        "--extract-throttle",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Run extraction at most once every N turns (default 1). "
+            "Also honoured via env SIMPLE_AGENT_EXTRACT_THROTTLE."
+        ),
+    )
+    parser.add_argument(
         "--shell-mode",
         choices=("mock", "allowlist"),
         default="mock",
@@ -339,6 +358,8 @@ def _build_openai_repl_loop(
     shell_mode: ShellMode = ShellMode.MOCK,
     tracer: Tracer | None = None,
     aggressive_thresholds: bool = False,
+    extract_memories_enabled: bool = False,
+    extract_throttle_n: int = 1,
 ) -> AgentLoop:
     """Wire a real-provider AgentLoop using the cli helper for everything else.
 
@@ -366,6 +387,8 @@ def _build_openai_repl_loop(
         shell_mode=shell_mode,
         tracer=tracer,
         aggressive_thresholds=aggressive_thresholds,
+        extract_memories_enabled=extract_memories_enabled,
+        extract_throttle_n=extract_throttle_n,
     )
 
 
@@ -383,6 +406,8 @@ def _run_openai_repl(
     shell_mode: ShellMode = ShellMode.MOCK,
     verbose: bool = False,
     aggressive_thresholds: bool = False,
+    extract_memories_enabled: bool = False,
+    extract_throttle_n: int = 1,
 ) -> int:
     """Drive the OpenAI-backed REPL, sharing slash commands with ``cli``.
 
@@ -413,6 +438,8 @@ def _run_openai_repl(
         shell_mode=shell_mode,
         tracer=tracer,
         aggressive_thresholds=aggressive_thresholds,
+        extract_memories_enabled=extract_memories_enabled,
+        extract_throttle_n=extract_throttle_n,
     )
 
     if resume is not None:
@@ -460,6 +487,12 @@ def main(argv: list[str] | None = None) -> int:
     shell_mode = ShellMode[str(args.shell_mode).upper()]
 
     if repl_mode:
+        extract_enabled = bool(args.extract_memories) or bool(
+            os.environ.get("SIMPLE_AGENT_EXTRACT_MEMORIES", "")
+        )
+        extract_throttle = args.extract_throttle or int(
+            os.environ.get("SIMPLE_AGENT_EXTRACT_THROTTLE", "1")
+        )
         return _run_openai_repl(
             workspace=workspace,
             model=model,
@@ -473,6 +506,8 @@ def main(argv: list[str] | None = None) -> int:
             shell_mode=shell_mode,
             verbose=bool(args.verbose),
             aggressive_thresholds=bool(args.aggressive_thresholds),
+            extract_memories_enabled=extract_enabled,
+            extract_throttle_n=extract_throttle,
         )
 
     return _run_task(

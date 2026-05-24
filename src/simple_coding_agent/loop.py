@@ -1,28 +1,4 @@
-"""
-AgentLoop: minimal while-loop that orchestrates one user turn.
-
-Source mapping:
-  AgentLoop.run     <- queryLoop() in src/query.ts (while True { ... })
-  LoopStatus        <- distilled from queryLoop()'s exit branches
-                        (end_turn -> COMPLETED, max-iterations -> MAX_STEPS,
-                         empty response -> MALFORMED)
-  LoopResult        <- distilled summary of one queryLoop() invocation
-
-Per-step pipeline (mirrors the spec in PYTHON_REPLICA_SPEC section 12):
-  1. Compaction check (ContextCompactor.should_compact)
-  2. Memory snippets (SessionMemory + ProjectMemory)
-  3. Build context (ContextBuilder.build)
-  4. Provider call (Provider.call)
-  5. Branch on response:
-       text-only         -> COMPLETED
-       tool_calls        -> execute, append, loop
-       neither           -> MALFORMED
-  6. After max_steps tool turns with no final answer -> MAX_STEPS
-
-The loop never raises on agent-runtime conditions (unknown tool, tool
-exception, malformed response, exhausted max_steps).  All of those become
-fields on the returned LoopResult so callers can react without try/except.
-"""
+"""AgentLoop: while-loop that orchestrates one user turn (mirrors queryLoop() in query.ts)."""
 
 from __future__ import annotations
 
@@ -33,6 +9,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+from pathlib import Path
 
 from .coding_tools import (
     WRITE_MEMORY_ENTRY_SCHEMA,
@@ -42,6 +19,7 @@ from .coding_tools import (
 )
 from .compact import ContextCompactor, MicroCompactor
 from .context import ContextBudget, ContextBuilder
+from .extraction_hooks import maybe_extract_memories
 from .memory import ProjectMemory, SessionMemory
 from .metrics import MetricsCollector
 from .models import (
@@ -139,26 +117,7 @@ class LoopStreamEvent:
 # ---------------------------------------------------------------------------
 
 class AgentLoop:
-    """Synchronous agent loop.
-
-    Constructor wires together every component built in Phases 2-8:
-      - Provider                  produces assistant responses
-      - ToolExecutor              runs tool calls and captures errors
-      - ToolRegistry (optional)   supplies the tool spec passed to the provider
-      - Transcript                the running message history
-      - ContextBuilder            assembles the per-turn API payload
-      - ContextBudget             token budget shared with the compactor
-      - ContextCompactor (opt)    summarizes old messages on threshold breach
-      - SnipTool (opt)            folds redundant tool result bodies
-      - SessionMemory (opt)       ephemeral memory injected into system prompt
-      - ProjectMemory (opt)       file-backed memory injected into system prompt
-      - ToolResultStore (opt)     externalizes oversized tool results to disk
-
-    The loop keeps the most recent CompactSummary so it can re-inject the
-    summary on subsequent turns even after the boundary marker has scrolled
-    past.  The source persists this via the transcript itself, but our
-    Transcript only stores the boundary marker, not the summary text.
-    """
+    """Synchronous agent loop (run) and streaming variant (run_stream)."""
 
     def __init__(
         self,
@@ -180,6 +139,9 @@ class AgentLoop:
         max_steps: int = _DEFAULT_MAX_STEPS,
         recent_files_capacity: int = _DEFAULT_RECENT_FILES_CAPACITY,
         snip_nudge_growth_tokens: int = _DEFAULT_SNIP_NUDGE_GROWTH_TOKENS,
+        extract_memories_enabled: bool = False,
+        extract_throttle_n: int = 1,
+        is_subloop: bool = False,
     ) -> None:
         if max_steps < 1:
             raise ValueError(f"max_steps must be >= 1, got {max_steps}")
@@ -201,13 +163,6 @@ class AgentLoop:
         self._compactor = compactor
         self._tracer: Tracer = tracer or NullTracer()
         self._microcompactor = microcompactor or MicroCompactor()
-        # Track the uuid of the latest assistant message at the time of
-        # the most recent microcompact. ``None`` means "never microcompacted
-        # in this loop". When a new assistant message arrives (different
-        # uuid), ``_maybe_microcompact`` is allowed to re-evaluate the
-        # aging window — this preserves the "don't spam every turn"
-        # intent while still letting long REPL sessions clear newly aged
-        # tool results.
         self._microcompacted_against_assistant_uuid: str | None = None
         self._snip_tool = snip_tool or SnipTool()
         self._snip_attempted_this_turn = False
@@ -218,26 +173,26 @@ class AgentLoop:
         self._system_prompt = system_prompt
         self._max_steps = max_steps
         self._last_summary: CompactSummary | None = None
-        # M3: live snapshots of recently read files, captured in _execute_one
-        # at read_file success time. Survives across compactions so each
-        # compact can re-attach the same / updated set. Newest-wins per path.
         self._recent_files_capacity = recent_files_capacity
         self._recent_file_snapshots: deque[FileSnapshot] = deque(
             maxlen=recent_files_capacity
         )
-        # M4: model-driven snip nudge state. ``_tokens_since_last_snip``
-        # accumulates the estimated tokens of each tool turn and resets on
-        # any snip (engine or model) or full compact. When it crosses
-        # ``_snip_nudge_growth_tokens`` the next build() is armed with a
-        # SnipNudge. ``_snip_nudge_suppressed`` latches True once reactive
-        # compact fires — snip is irrelevant after that for the loop's life.
         self._snip_nudge_growth_tokens = snip_nudge_growth_tokens
         self._tokens_since_last_snip = 0
         self._snip_nudge_suppressed = False
-        # M2 (auto-memory-overhaul): per-turn write quota counter; reset at
-        # the start of each run() / run_stream(). The closure in _register_tools
-        # captures self so the reset is visible to subsequent tool calls.
         self._memory_writes_this_turn: int = 0
+        self._is_subloop: bool = is_subloop
+        self._extract_memories_enabled: bool = extract_memories_enabled
+        self._memory_dir: Path | None = (
+            Path(project_memory._dir)
+            if project_memory is not None and hasattr(project_memory, "_dir")
+            else None
+        )
+        self._auto_memory_enabled: bool = self._memory_dir is not None
+        self._extraction_in_progress: bool = False
+        self._last_memory_message_uuid: str | None = None
+        self._turns_since_last_extraction: int = 0
+        self._extract_throttle_n: int = max(1, extract_throttle_n)
         self._register_tools()
 
     # ------------------------------------------------------------------
@@ -284,7 +239,7 @@ class AgentLoop:
                     break
                 except PromptTooLongError:
                     if reactive_compact_attempted or self._compactor is None:
-                        return LoopResult(
+                        result = LoopResult(
                             answer=None,
                             steps=steps,
                             status=LoopStatus.MAX_TOKENS,
@@ -292,17 +247,14 @@ class AgentLoop:
                             last_summary=self._last_summary,
                             metrics=self._metrics,
                         )
+                        return self._run_stop_hooks(result)
                     reactive_compact_attempted = True
-                    # M4: snip is irrelevant once we've had to reactively
-                    # compact — suppress the nudge for this loop's lifetime.
                     self._snip_nudge_suppressed = True
                     compacted_this_turn = self._force_compact()
                     self._tracer.emit("reactive", turn=turn)
                     self._metrics.record_reactive_compact()
                     compacted_overall = True
 
-            # Branch 0: provider hit max_tokens; preserve any partial text but
-            # do not report the turn as a clean completion.
             if response.stop_reason == STOP_MAX_TOKENS:
                 if response.text:
                     partial_msg = Message.assistant(response.text)
@@ -318,7 +270,7 @@ class AgentLoop:
                     ))
                     self._metrics.record_turn_tokens(built.estimated_tokens)
                 self._refresh_externalized_bytes()
-                return LoopResult(
+                result = LoopResult(
                     answer=response.text,
                     steps=steps,
                     status=LoopStatus.MAX_TOKENS,
@@ -326,11 +278,12 @@ class AgentLoop:
                     last_summary=self._last_summary,
                     metrics=self._metrics,
                 )
+                return self._run_stop_hooks(result)
 
             # Branch 1: malformed (no text, no tool calls)
             if not response.text and not response.tool_calls:
                 self._refresh_externalized_bytes()
-                return LoopResult(
+                result = LoopResult(
                     answer=None,
                     steps=steps,
                     status=LoopStatus.MALFORMED,
@@ -338,6 +291,7 @@ class AgentLoop:
                     last_summary=self._last_summary,
                     metrics=self._metrics,
                 )
+                return self._run_stop_hooks(result)
 
             # Branch 2: tool calls -> execute and continue
             if response.tool_calls:
@@ -372,7 +326,7 @@ class AgentLoop:
             ))
             self._metrics.record_turn_tokens(built.estimated_tokens)
             self._refresh_externalized_bytes()
-            return LoopResult(
+            result = LoopResult(
                 answer=response.text,
                 steps=steps,
                 status=LoopStatus.COMPLETED,
@@ -380,10 +334,11 @@ class AgentLoop:
                 last_summary=self._last_summary,
                 metrics=self._metrics,
             )
+            return self._run_stop_hooks(result)
 
         # Hit max_steps without a final answer.
         self._refresh_externalized_bytes()
-        return LoopResult(
+        result = LoopResult(
             answer=None,
             steps=steps,
             status=LoopStatus.MAX_STEPS,
@@ -391,6 +346,7 @@ class AgentLoop:
             last_summary=self._last_summary,
             metrics=self._metrics,
         )
+        return self._run_stop_hooks(result)
 
     def run_stream(self, user_input: str) -> Iterator[LoopStreamEvent]:
         """Run the loop and yield assistant text as provider chunks arrive."""
@@ -445,11 +401,9 @@ class AgentLoop:
                             last_summary=self._last_summary,
                             metrics=self._metrics,
                         )
-                        yield LoopStreamEvent.done(result)
+                        yield LoopStreamEvent.done(self._run_stop_hooks(result))
                         return
                     reactive_compact_attempted = True
-                    # M4: snip is irrelevant once we've had to reactively
-                    # compact — suppress the nudge for this loop's lifetime.
                     self._snip_nudge_suppressed = True
                     compacted_this_turn = self._force_compact()
                     self._tracer.emit("reactive", turn=turn)
@@ -466,7 +420,7 @@ class AgentLoop:
                     last_summary=self._last_summary,
                     metrics=self._metrics,
                 )
-                yield LoopStreamEvent.done(result)
+                yield LoopStreamEvent.done(self._run_stop_hooks(result))
                 return
 
             if response.stop_reason == STOP_MAX_TOKENS:
@@ -492,7 +446,7 @@ class AgentLoop:
                     last_summary=self._last_summary,
                     metrics=self._metrics,
                 )
-                yield LoopStreamEvent.done(result)
+                yield LoopStreamEvent.done(self._run_stop_hooks(result))
                 return
 
             if not response.text and not response.tool_calls:
@@ -505,7 +459,7 @@ class AgentLoop:
                     last_summary=self._last_summary,
                     metrics=self._metrics,
                 )
-                yield LoopStreamEvent.done(result)
+                yield LoopStreamEvent.done(self._run_stop_hooks(result))
                 return
 
             if response.tool_calls:
@@ -550,7 +504,7 @@ class AgentLoop:
                 last_summary=self._last_summary,
                 metrics=self._metrics,
             )
-            yield LoopStreamEvent.done(result)
+            yield LoopStreamEvent.done(self._run_stop_hooks(result))
             return
 
         self._refresh_externalized_bytes()
@@ -562,19 +516,40 @@ class AgentLoop:
             last_summary=self._last_summary,
             metrics=self._metrics,
         )
-        yield LoopStreamEvent.done(result)
+        yield LoopStreamEvent.done(self._run_stop_hooks(result))
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _register_tools(self) -> None:
-        """Register tools that require optional components to be present.
+    def _run_stop_hooks(self, result: LoopResult) -> LoopResult:
+        """Run post-turn hooks before returning from run() / run_stream()."""
+        self._turns_since_last_extraction += 1
+        if self._memory_dir is not None and self._registry is not None:
+            self._extraction_in_progress = True
+            outcome = maybe_extract_memories(
+                messages=self._transcript.all_messages(),
+                base_messages_snapshot=self._transcript.normalize_for_api(),
+                is_subloop=self._is_subloop,
+                extract_memories_enabled=self._extract_memories_enabled,
+                auto_memory_enabled=self._auto_memory_enabled,
+                extraction_in_progress=False,
+                last_memory_message_uuid=self._last_memory_message_uuid,
+                turns_since_last_extraction=self._turns_since_last_extraction,
+                throttle_n=self._extract_throttle_n,
+                provider=self._provider,
+                memory_dir=self._memory_dir,
+                system_prompt=self._system_prompt,
+                tool_registry=self._registry,
+                metrics=self._metrics,
+            )
+            self._extraction_in_progress = False
+            self._last_memory_message_uuid = outcome.last_memory_message_uuid
+            self._turns_since_last_extraction = outcome.turns_since_last_extraction
+        return result
 
-        Called once at the end of __init__. write_memory_entry is only added
-        when project_memory is provided so the model cannot call it in sessions
-        that have no memory store.
-        """
+    def _register_tools(self) -> None:
+        """Wire write_memory_entry when project_memory is present."""
         if self._project_memory is None or self._registry is None:
             return
         pm = self._project_memory
@@ -611,12 +586,7 @@ class AgentLoop:
         return True
 
     def _force_compact(self) -> bool:
-        """Run compaction without checking the threshold.
-
-        M3: the recent-file snapshot deque is read ONCE here (as a tuple) and
-        passed into compact(), so reads that happen later in the session do
-        not retroactively change this compaction's re-attached files.
-        """
+        """Run compaction unconditionally."""
         if self._compactor is None:
             return False
         snapshots = tuple(self._recent_file_snapshots)
@@ -629,14 +599,7 @@ class AgentLoop:
         return True
 
     def _maybe_microcompact(self) -> bool:
-        """Run cold-cache tool-result cleanup when stale tool results age in.
-
-        Runs at most once per "wave" of stale tool results: if the latest
-        assistant message is the same one we already microcompacted
-        against, skip. Otherwise let
-        :meth:`MicroCompactor.should_microcompact` decide whether the
-        60-minute aging window is crossed.
-        """
+        """Clear stale tool results; skip if already ran against this assistant msg."""
         messages = self._transcript.all_messages()
         latest_assistant_uuid = self._latest_assistant_uuid(messages)
         if (
@@ -676,13 +639,7 @@ class AgentLoop:
         return True
 
     def _refresh_externalized_bytes(self) -> None:
-        """Sync metrics.externalized_bytes with the store's cumulative total.
-
-        Tool externalization can happen in two places (per-item path in
-        ``_execute_one`` and the total-budget rebatch in
-        ``ContextBuilder._process_tool_results``), so the metric is sampled
-        rather than incremented at each call site.
-        """
+        """Sample total externalized bytes from the store into metrics."""
         if self._tool_result_store is None:
             return
         self._metrics.externalized_bytes = (
@@ -724,19 +681,10 @@ class AgentLoop:
         self._transcript.append(results_msg)
         return asst_msg, tool_results
 
-    # ------------------------------------------------------------------
-    # M4: snip-nudge growth tracking
-    # ------------------------------------------------------------------
-
     def _track_snip_nudge_growth(
         self, asst_msg: Message, tool_results: list[ToolResult]
     ) -> None:
-        """Update the snip-nudge growth window after one tool turn.
-
-        A successful model snip (a ``snip_history`` call that did not error)
-        resets the window; otherwise the estimated tokens of the tool turn
-        accumulate so the nudge arms once growth crosses the threshold.
-        """
+        """Reset the snip-nudge window on a successful model snip, else accumulate."""
         if self._snipped_via_tool(asst_msg, tool_results):
             self._tokens_since_last_snip = 0
             return
@@ -775,11 +723,7 @@ class AgentLoop:
         return total
 
     def _compute_snip_nudge(self) -> SnipNudge | None:
-        """Arm a SnipNudge when growth crossed the threshold and candidates exist.
-
-        Returns ``None`` (silent skip) when suppressed after reactive compact,
-        below the growth threshold, or when no snippable candidates remain.
-        """
+        """Return a SnipNudge when growth threshold is crossed and candidates exist."""
         if self._snip_nudge_suppressed:
             return None
         if self._tokens_since_last_snip < self._snip_nudge_growth_tokens:

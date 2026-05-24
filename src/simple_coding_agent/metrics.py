@@ -46,6 +46,8 @@ class MetricsCollector:
     reactive_compacts: int = 0
     externalized_bytes: int = 0
     tokens_per_turn: list[int] = field(default_factory=list)
+    extract_invocations: int = 0
+    extract_writes: int = 0
 
     def record_full_compact(self) -> None:
         self.full_compacts += 1
@@ -58,6 +60,9 @@ class MetricsCollector:
 
     def record_reactive_compact(self) -> None:
         self.reactive_compacts += 1
+
+    def record_extract_invocation(self) -> None:
+        self.extract_invocations += 1
 
     def add_externalized_bytes(self, byte_count: int) -> None:
         if byte_count < 0:
@@ -85,6 +90,10 @@ class MetricsCollector:
         if self.tokens_per_turn:
             last = self.tokens_per_turn[-1]
             lines.append(f"  last-turn tokens:      {last}")
+        lines.append(
+            f"  extract_invocations={self.extract_invocations} "
+            f"extract_writes={self.extract_writes}"
+        )
         return "\n".join(lines)
 
 

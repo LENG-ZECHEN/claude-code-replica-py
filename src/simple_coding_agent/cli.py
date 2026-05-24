@@ -372,6 +372,8 @@ def _build_repl_loop(
     shell_mode: ShellMode = ShellMode.MOCK,
     tracer: Tracer | None = None,
     aggressive_thresholds: bool = False,
+    extract_memories_enabled: bool = False,
+    extract_throttle_n: int = 1,
 ) -> AgentLoop:
     """Wire one shared AgentLoop for the REPL session.
 
@@ -510,6 +512,8 @@ def _build_repl_loop(
         "tracer": active_tracer,
         "max_steps": resolved_max_steps,
         "snip_nudge_growth_tokens": resolved_snip_nudge_growth_tokens,
+        "extract_memories_enabled": extract_memories_enabled,
+        "extract_throttle_n": extract_throttle_n,
     }
     if system_prompt is not None:
         loop_kwargs["system_prompt"] = system_prompt
@@ -814,6 +818,8 @@ def _run_repl(
     shell_mode: ShellMode = ShellMode.MOCK,
     verbose: bool = False,
     aggressive_thresholds: bool = False,
+    extract_memories_enabled: bool = False,
+    extract_throttle_n: int = 1,
 ) -> int:
     """Run the interactive REPL.
 
@@ -857,6 +863,8 @@ def _run_repl(
         shell_mode=shell_mode,
         tracer=tracer,
         aggressive_thresholds=aggressive_thresholds,
+        extract_memories_enabled=extract_memories_enabled,
+        extract_throttle_n=extract_throttle_n,
     )
 
     if resume is not None:
@@ -995,6 +1003,25 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--extract-memories",
+        action="store_true",
+        default=None,
+        help=(
+            "Enable automatic memory extraction after each turn. "
+            "Also honoured via env SIMPLE_AGENT_EXTRACT_MEMORIES=1."
+        ),
+    )
+    parser.add_argument(
+        "--extract-throttle",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Run extraction at most once every N turns (default 1). "
+            "Also honoured via env SIMPLE_AGENT_EXTRACT_THROTTLE."
+        ),
+    )
+    parser.add_argument(
         "--resume",
         default=None,
         metavar="NAME",
@@ -1048,6 +1075,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.repl or args.resume is not None:
         workspace = _resolve_workspace_arg(args.workspace)
+        extract_enabled = bool(args.extract_memories) or bool(
+            os.environ.get("SIMPLE_AGENT_EXTRACT_MEMORIES", "")
+        )
+        extract_throttle = args.extract_throttle or int(
+            os.environ.get("SIMPLE_AGENT_EXTRACT_THROTTLE", "1")
+        )
         return _run_repl(
             workspace=workspace,
             max_steps=args.max_steps,
@@ -1063,6 +1096,8 @@ def main(argv: list[str] | None = None) -> int:
             shell_mode=shell_mode,
             verbose=bool(args.verbose),
             aggressive_thresholds=bool(args.aggressive_thresholds),
+            extract_memories_enabled=extract_enabled,
+            extract_throttle_n=extract_throttle,
         )
 
     # One-shot demo (unchanged behavior; default shell_mode is MOCK).

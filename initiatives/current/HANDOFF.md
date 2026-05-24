@@ -1,6 +1,6 @@
-# HANDOFF — Next: M5 (extract-stop-hook-and-gating)
+# HANDOFF — Next: M6 (provider-selector-and-memdir-infra)
 
-> Updated by: M4 execution (auto-mem/M4 session)
+> Updated by: M5 execution (auto-mem/M5 session)
 > Date: 2026-05-24
 > Re-verify Section 3 numbers before starting work — do not trust this
 > file blindly.
@@ -10,9 +10,9 @@
 ## 1. Current initiative
 
 - **slug**: `auto-memory-overhaul`
-- **current milestone**: just-completed `M4` — extract-memories-runner
-- **next milestone**: `M5` — extract-stop-hook-and-gating
-- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [done], M4 [done], M5 [next], M6 [pending], M7 [pending]
+- **current milestone**: just-completed `M5` — extract-stop-hook-and-gating
+- **next milestone**: `M6` — provider-selector-and-memdir-infra
+- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [done], M4 [done], M5 [done], M6 [next], M7 [pending]
 
 ## 2. Completed milestones
 
@@ -61,14 +61,50 @@
 - **known limitations**:
   - `_get_existing_manifest` is a stub (reads MEMORY.md[:2000]). M6 replaces it with `format_memory_manifest(scan_memory_files(memory_dir))`. M7 wires it as the canonical call.
 
+### M5
+
+- **commit**: `[auto-mem/M5]` (see git log)
+- **files changed**: `extraction_hooks.py` (new), `loop.py` (modified, 788 lines),
+  `metrics.py` (modified), `cli.py` (modified), `openai_cli.py` (modified),
+  `tests/test_has_memory_writes_since.py` (new, 7 tests),
+  `tests/test_extract_memories_gating.py` (new, 8 tests),
+  `tests/test_extract_memories_e2e.py` (new, 3 tests)
+- **tests added**: 18 new tests. Total: 750 → 768 (+18)
+- **behavior implemented**: `extraction_hooks.py` introduces `ExtractionHookOutcome`
+  (frozen dataclass), `hasMemoryWritesSince(messages, since_uuid)`, and
+  `maybe_extract_memories(**kwargs)` with 7-layer gating. `AgentLoop._run_stop_hooks`
+  is the single choke-point called before every return in `run()` and every yield in
+  `run_stream()`; it increments `_turns_since_last_extraction` and calls
+  `maybe_extract_memories`. Cursor (`_last_memory_message_uuid`) advances on success,
+  is preserved on exception (at-least-once semantics). `MetricsCollector` gains
+  `extract_invocations` and `extract_writes`. Both CLIs gain `--extract-memories`
+  (default off) and `--extract-throttle N` (default 1), resolvable via env vars
+  `SIMPLE_AGENT_EXTRACT_MEMORIES` and `SIMPLE_AGENT_EXTRACT_THROTTLE`.
+- **design decisions (deviations from PLAN)**:
+  - **`extraction_hooks.py` extracted from `loop.py`**: PLAN proposed adding
+    `_maybe_extract_memories` and `hasMemoryWritesSince` directly to loop.py, but loop.py
+    was already at 895 lines. Both functions live in the new module to keep loop.py ≤800
+    lines (788 after trimming). Import is `from .extraction_hooks import maybe_extract_memories`.
+  - **Defensive `hasattr(project_memory, "_dir")` check**: Pre-existing tests use
+    `_RecordingProjectMemory` mock objects without `_dir`. The `_memory_dir` field is set
+    only when the real `_dir` attribute exists; mock objects get `_memory_dir = None` and
+    extraction is silently disabled (gate 3: `auto_memory_enabled = False`).
+  - **`_run_stop_hooks` passes `extraction_in_progress=False` explicitly**: The flag is set
+    on `self._extraction_in_progress` before the call and cleared after, but the re-entrancy
+    guard is satisfied by passing `False` directly — the inner `maybe_extract_memories` call
+    is not itself a subloop so the guard fires at the `self._extraction_in_progress` check
+    level, not inside the function.
+- **known limitations**:
+  - `_get_existing_manifest` in `ExtractMemoriesRunner` is still the M4 stub (reads
+    MEMORY.md[:2000]). M6 replaces it with `format_memory_manifest(scan_memory_files(memory_dir))`.
+
 ## 3. Current repo state
 
 > Re-verify these numbers before starting. Do not trust this list blindly.
 
-- **last commit**: `[auto-mem/M4]` — `git -C python-replica log --oneline -1`
-- **tests**: 750 passing (was 739 after M3, delta +11)
-- **mypy**: clean (23 source files, no issues)
-- **ruff**: clean
+- **last commit**: `[auto-mem/M5]` — `git -C python-replica log --oneline -1`
+- **tests**: 768 passing (was 750 after M4, delta +18)
+- **mypy**: clean | **ruff**: clean
 - **branch**: main
 - **known failing checks**: `test_null_tracer_zero_overhead` — pre-existing before this initiative, not a regression
 
@@ -77,38 +113,37 @@
 - **dual-read compat window**: `ProjectMemory.all()` and `load()` MUST continue reading legacy `.json` files until the migrate-format pass is run. Do not remove the `.json` fallback path until an explicit retirement milestone.
 - **no PyYAML dependency**: frontmatter parsing stays hand-rolled (`_parse_frontmatter`); fail-soft (broken frontmatter yields `MemoryHeader(description=None)`, never raises).
 - **atomic manifest writes**: `_update_manifest` uses `tempfile.mkstemp` + `os.replace`. Do not revert to direct open/write.
-- **path traversal defense**: `_SAFE_ENTRY_ID_PATTERN` allows `/` for subdir IDs but excludes `.` — `Path.is_relative_to(root)` is the second gate. Both layers must be preserved in M5+.
+- **path traversal defense**: `_SAFE_ENTRY_ID_PATTERN` allows `/` for subdir IDs but excludes `.` — `Path.is_relative_to(root)` is the second gate. Both layers must be preserved in M6+.
 - **secret rejection**: `_check_body_for_secrets` in `ProjectMemory.save()` must remain active and surface as `ValueError` for all callers (CLI exit code 2, tool `is_error=True`).
-- **quota counter reset**: `AgentLoop._memory_writes_this_turn` is reset to `0` at the start of each `run()` / `run_stream()`. M5+ must not remove or bypass this reset.
-- **conditional tool registration**: `write_memory_entry` is registered in `AgentLoop._register_tools()` ONLY when `self._project_memory is not None`. M5 must pass a `ProjectMemory` instance to `AgentLoop.__init__` for the tool to be active.
-- **`_MEMORY_MANAGEMENT_SECTION` is a frozen constant**: M5's integration must NOT modify or shadow this constant; the section's byte-identical content is required for prompt-cache stability.
-- **M4's `ExtractMemoriesRunner` must receive a snapshot of `base_messages`**: The runner makes a `list()` copy at construction. M5's stop hook must pass a frozen snapshot (e.g., `list(transcript.to_api_messages())`) — not a live reference.
-- **`ExtractMemoriesRunner.run()` does NOT set `_is_subloop` on the AgentLoop**: M5's stop hook must ensure the runner's inner call path cannot recursively trigger another extraction. The gating layer `(1) is_subloop` in `_maybe_extract_memories` is the safeguard — the runner itself has no concept of subloop state.
+- **quota counter reset**: `AgentLoop._memory_writes_this_turn` is reset to `0` at the start of each `run()` / `run_stream()`. M6+ must not remove or bypass this reset.
+- **conditional tool registration**: `write_memory_entry` is registered in `AgentLoop._register_tools()` ONLY when `self._project_memory is not None`.
+- **`_MEMORY_MANAGEMENT_SECTION` is a frozen constant**: M6's integration must NOT modify or shadow this constant; the section's byte-identical content is required for prompt-cache stability.
+- **`ExtractMemoriesRunner.run()` must receive serialized dict messages**: `base_messages` is typed `list[dict[str, Any]]` (M4 deviation). Pass `self._transcript.normalize_for_api()` — not raw `Message` objects.
+- **loop.py must stay ≤800 lines**: Currently 788. M6 changes to `loop.py` must account for this. If M6 adds >12 lines, extract helpers first.
 
 ## 5. Next milestone guidance
 
-For `M5` — extract-stop-hook-and-gating:
+For `M6` — provider-selector-and-memdir-infra:
 
-- **next scope**: Wire `ExtractMemoriesRunner` into `AgentLoop.run()` and `run_stream()` via a `_run_stop_hooks(result)` call before each method returns. The core logic lives in `_maybe_extract_memories()`, which enforces 7 gating layers in order: (1) is_subloop guard, (2) `extract_memories_enabled` flag, (3) `auto_memory_enabled`, (4) `extraction_in_progress` lock, (5) `hasMemoryWritesSince(messages, since_uuid)` check for new writes since the last extraction cursor, (6) throttle counter (`_turns_since_last_extraction`), (7) actually call `runner.run()`. The cursor `_last_memory_message_uuid` advances on success and does NOT advance on exception (at-least-once semantics). `--extract-memories` flag is exposed on both CLIs (default off, resolvable via `SIMPLE_AGENT_EXTRACT_MEMORIES` env var). `MetricsCollector` gains two new counters: `extract_invocations` and `extract_writes`.
+- **next scope**: Infrastructure milestone — no AgentLoop touch. Two deliverables:
+  1. `Provider` Protocol gains `call_selector(*, system, user, output_schema, max_tokens=256) -> dict`; `MockProvider` returns scripted selector responses round-robin; `OpenAIProvider` uses a configurable cheaper model (default "gpt-4o-mini") with JSON mode and temperature=0; raises `SelectorError` on API failure / malformed JSON / schema mismatch.
+  2. New module `src/simple_coding_agent/memdir.py` exports `scan_memory_files`, `format_memory_manifest`, `collect_recent_successful_tools`, and the verbatim `SELECT_MEMORIES_SYSTEM_PROMPT` constant (copied VERBATIM from `claude-code-source-code/src/memdir/findRelevantMemories.ts` lines 18-24 — do NOT paraphrase).
 - **relevant files**:
-  - `src/simple_coding_agent/extract_memories.py` — the runner M4 delivered; M5 calls `.run()` from the stop hook
-  - `src/simple_coding_agent/loop.py` — add `_run_stop_hooks`, `_maybe_extract_memories`, `_last_memory_message_uuid`, `_extraction_in_progress`, `_turns_since_last_extraction` fields + `extract_memories_enabled` / `auto_memory_enabled` constructor kwargs
-  - `src/simple_coding_agent/metrics.py` — add `extract_invocations: int = 0` and `extract_writes: int = 0` to `MetricsCollector`
-  - `src/simple_coding_agent/cli.py` — add `--extract-memories` flag and `_resolve_threshold`-style precedence
-  - `src/simple_coding_agent/openai_cli.py` — same flag; delegates through `_cli._build_repl_loop`
-  - `tests/test_extract_memories_gating.py` — new; one test per gating layer
-  - `tests/test_has_memory_writes_since.py` — new; cursor logic
-  - `tests/test_extract_memories_e2e.py` — new; end-to-end MockProvider driven run
-- **expected tests** (≥9 per PLAN):
-  - One test per each of the 7 gating layers verifying that layer short-circuits extraction
-  - `hasMemoryWritesSince` with a message that has a `write_memory_entry` tool_use after the cursor → True
-  - `hasMemoryWritesSince` with cursor past the message → False
-  - Cursor advances on success; does NOT advance on exception
-  - `extract_invocations` and `extract_writes` counters increment correctly
+  - `src/simple_coding_agent/provider.py` — add `call_selector` to Protocol + both impls
+  - `src/simple_coding_agent/memdir.py` — new module
+  - `tests/test_provider_selector.py` — new
+  - `tests/test_memdir_scan.py` — new
+  - `tests/test_memdir_manifest_format.py` — new
+  - `tests/test_memdir_recent_tools.py` — new
+- **expected tests**: ≥10 new tests
+- **critical implementation notes**:
+  - `scan_memory_files` reads only the first 30 lines per file (`FRONTMATTER_MAX_LINES = 30`) to build `MemoryHeader` cheaply.
+  - `collect_recent_successful_tools` reverse-scans the transcript from end until the previous human turn; correlates `tool_use.id` to `tool_result.tool_use_id` to filter errored calls (mirrors pairing logic in `snip.py`).
+  - `OpenAIProvider` gains `__init__` kwarg `selector_model: str = "gpt-4o-mini"` so DashScope / qwen3.6-plus can swap in their own cheap model.
+  - `SELECT_MEMORIES_SYSTEM_PROMPT` must be byte-identical to the TypeScript source — the "if a list of recently-used tools is provided" clause and the "warnings, gotchas, or known issues" carve-out are both load-bearing.
 - **risks**:
-  - `ExtractMemoriesRunner` receives `base_messages: list[dict[str, Any]]` — M4 deviated from the PLAN's `list[Message]` type. M5 must pass the serialized dict form from the transcript (e.g., using `ContextBuilder._normalize_messages()` or `Transcript.to_api_messages()` if that method exists). Check what the correct serialization call is before writing the stop hook.
-  - The 7-layer gating must be ordered exactly as specified: `is_subloop` first (prevents recursion), `extraction_in_progress` fourth (prevents concurrent runs). Reordering breaks the at-least-once guarantee.
-  - The runner's inner `provider.call()` path creates no new `AgentLoop` — there is no subloop flag to set. M5's guard is purely the `_maybe_extract_memories` gating, not a flag on the runner itself.
+  - `SelectorError` is a new exception type — define it in `provider.py` and import from there everywhere.
+  - Do not break existing `Provider.call()` / `Provider.stream_call()` signatures — `call_selector` is additive only.
 
 The full ready-to-run prompt is at:
-`initiatives/current/prompts/M5.md`
+`initiatives/current/prompts/M6.md`
