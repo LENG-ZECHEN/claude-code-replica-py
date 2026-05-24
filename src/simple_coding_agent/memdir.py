@@ -1,31 +1,42 @@
 """
-memdir.py — Memory directory infrastructure for sideQuery-based recall (M6).
+memdir.py — Memory directory infrastructure for sideQuery-based recall (M6+M7).
 
-Provides the import surface M7 will use:
-  SELECT_MEMORIES_SYSTEM_PROMPT  verbatim from TS source findRelevantMemories.ts
-  scan_memory_files              re-exported from memory.py
-  MemoryHeader                   re-exported from memory.py
-  FRONTMATTER_MAX_LINES          re-exported from memory.py
-  format_memory_manifest         formats headers as MEMORY.md-style index
+Provides the import surface for memory selection and surfacing:
+  SELECT_MEMORIES_SYSTEM_PROMPT    verbatim from TS source findRelevantMemories.ts
+  scan_memory_files                re-exported from memory.py
+  MemoryHeader                     re-exported from memory.py
+  FRONTMATTER_MAX_LINES            re-exported from memory.py
+  format_memory_manifest           formats headers as MEMORY.md-style index
   collect_recent_successful_tools  reverse-scans messages for successful tools
+  find_relevant_memories           4-gate selector call + Jaccard fallback (M7)
+  read_memories_for_surfacing      reads files with truncation + staleness header (M7)
 
 Source mapping:
-  SELECT_MEMORIES_SYSTEM_PROMPT  <- findRelevantMemories.ts lines 18-24
-  format_memory_manifest         <- formatMemoryManifest() in memoryScan.ts
+  SELECT_MEMORIES_SYSTEM_PROMPT   <- findRelevantMemories.ts lines 18-24
+  format_memory_manifest          <- formatMemoryManifest() in memoryScan.ts
   collect_recent_successful_tools <- collectRecentTools() pattern in memdir.ts
+  find_relevant_memories          <- findRelevantMemories() in findRelevantMemories.ts
+  read_memories_for_surfacing     <- readMemoriesForSurfacing() in memdir.ts
 """
 
 from __future__ import annotations
 
+import re
+import time
+from pathlib import Path
+
 from .memory import FRONTMATTER_MAX_LINES, MemoryHeader, scan_memory_files
 from .models import Message, Role, ToolCall, ToolResult
+from .provider import Provider, SelectorError
 
 __all__ = [
     "FRONTMATTER_MAX_LINES",
     "MemoryHeader",
     "SELECT_MEMORIES_SYSTEM_PROMPT",
     "collect_recent_successful_tools",
+    "find_relevant_memories",
     "format_memory_manifest",
+    "read_memories_for_surfacing",
     "scan_memory_files",
 ]
 
@@ -125,3 +136,180 @@ def collect_recent_successful_tools(messages: list[Message]) -> list[str]:
         for tool_use_id, name in tool_use_names.items()
         if tool_result_errors.get(tool_use_id) is False
     ]
+
+
+# ---------------------------------------------------------------------------
+# M7: find_relevant_memories
+# ---------------------------------------------------------------------------
+
+_SESSION_BYTES_CEILING: int = 60 * 1024  # 60 KB
+
+_SELECTOR_OUTPUT_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {"filenames": {"type": "array", "items": {"type": "string"}}},
+    "required": ["filenames"],
+}
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _jaccard_score(query: str, text: str) -> float:
+    """Jaccard similarity over lowercase alphanumeric tokens."""
+    q = set(_TOKEN_RE.findall(query.lower()))
+    t = set(_TOKEN_RE.findall(text.lower()))
+    if not q or not t:
+        return 0.0
+    return len(q & t) / len(q | t)
+
+
+def _jaccard_fallback(
+    query: str,
+    headers: list[MemoryHeader],
+    already_surfaced: set[str],
+    read_file_state: set[str],
+    n: int = 5,
+) -> list[MemoryHeader]:
+    """Jaccard fallback used when call_selector raises SelectorError."""
+    candidates = [
+        h for h in headers
+        if h.id not in already_surfaced and h.id not in read_file_state
+    ]
+    if not candidates:
+        return []
+    scored = [
+        (_jaccard_score(query, f"{h.name or ''} {h.description or ''}"), i, h)
+        for i, h in enumerate(candidates)
+    ]
+    if all(s == 0.0 for s, _, _ in scored):
+        return [h for _, _, h in scored[:n]]
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [h for _, _, h in scored[:n]]
+
+
+def find_relevant_memories(
+    query: str,
+    dir: Path,
+    selector: Provider,
+    *,
+    already_surfaced: set[str],
+    read_file_state: set[str],
+    recent_tools: list[str],
+    session_bytes_used: int,
+    auto_memory_enabled: bool = True,
+) -> list[MemoryHeader]:
+    """Return up to 5 relevant MemoryHeaders for *query*.
+
+    Enforces 4 gates (all must pass; returns [] on first failure):
+      1. auto_memory_enabled is True
+      2. query is not empty
+      3. query is multi-word (>1 word)
+      4. session_bytes_used < 60 KB
+
+    On passing all gates: calls selector.call_selector() with the
+    SELECT_MEMORIES_SYSTEM_PROMPT and the manifest. Validates returned
+    filenames against scan_memory_files(dir) — hallucinated filenames are
+    silently dropped. Filters already_surfaced and read_file_state paths.
+    Falls back to Jaccard MemorySelector on SelectorError.
+    """
+    if not auto_memory_enabled:
+        return []
+    if not query.strip():
+        return []
+    if len(query.split()) <= 1:
+        return []
+    if session_bytes_used >= _SESSION_BYTES_CEILING:
+        return []
+
+    headers = scan_memory_files(dir)
+    if not headers:
+        return []  # nothing to select from; skip selector call
+    valid_ids = {h.id for h in headers}
+    manifest = format_memory_manifest(headers)
+
+    query_payload = f"Query: {query}\n\nAvailable memories:\n{manifest}"
+    if recent_tools:
+        query_payload += f"\n\nRecently-used tools: {', '.join(recent_tools)}"
+
+    try:
+        result = selector.call_selector(
+            system=SELECT_MEMORIES_SYSTEM_PROMPT,
+            user=query_payload,
+            output_schema=_SELECTOR_OUTPUT_SCHEMA,
+        )
+        raw_filenames: list[str] = result.get("filenames", [])
+        selected: list[MemoryHeader] = []
+        header_by_id = {h.id: h for h in headers}
+        for fname in raw_filenames:
+            entry_id = fname.removesuffix(".md")
+            if entry_id not in valid_ids:
+                continue  # hallucination guard
+            if entry_id in already_surfaced or entry_id in read_file_state:
+                continue
+            if entry_id in header_by_id:
+                selected.append(header_by_id[entry_id])
+        return selected[:5]
+    except SelectorError:
+        return _jaccard_fallback(
+            query, headers, already_surfaced, read_file_state
+        )
+
+
+# ---------------------------------------------------------------------------
+# M7: read_memories_for_surfacing
+# ---------------------------------------------------------------------------
+
+_MAX_LINES_PER_MEMORY: int = 200
+_MAX_BYTES_PER_MEMORY: int = 4096  # 4 KB
+
+
+def read_memories_for_surfacing(selected: list[MemoryHeader]) -> list[str]:
+    """Read memory files and return formatted strings for injection.
+
+    For each MemoryHeader:
+      - Reads ≤200 lines AND ≤4 KB of the .md file.
+      - If truncated, appends "[...truncated — N lines omitted]".
+      - Prefixes with a staleness-aware header based on mtime:
+          "Memory (saved today):"  or  "Memory (saved N days ago):"
+
+    Source: readMemoriesForSurfacing() in memdir.ts.
+    """
+    results: list[str] = []
+    now_ts = time.time()
+
+    for header in selected:
+        days_ago = int((now_ts - header.mtime) / 86400)
+        if days_ago == 0:
+            staleness = "Memory (saved today):"
+        else:
+            staleness = f"Memory (saved {days_ago} days ago):"
+
+        try:
+            with open(header.path, encoding="utf-8", errors="replace") as fh:
+                raw_lines = fh.readlines()
+        except OSError:
+            results.append(f"{staleness}\n(could not read memory file)")
+            continue
+
+        kept: list[str] = []
+        total_bytes = 0
+        truncated_at: int | None = None
+
+        for i, line in enumerate(raw_lines):
+            if i >= _MAX_LINES_PER_MEMORY:
+                truncated_at = i
+                break
+            line_bytes = len(line.encode("utf-8"))
+            if total_bytes + line_bytes > _MAX_BYTES_PER_MEMORY:
+                truncated_at = i
+                break
+            kept.append(line.rstrip("\n\r"))
+            total_bytes += line_bytes
+
+        body = "\n".join(kept)
+        if truncated_at is not None:
+            remaining = len(raw_lines) - truncated_at
+            body += f"\n[...truncated — {remaining} lines omitted]"
+
+        results.append(f"{staleness}\n{body}")
+
+    return results

@@ -1,6 +1,6 @@
-# HANDOFF — Next: M7 (sidequery-recall-and-injection)
+# HANDOFF — Initiative complete (auto-memory-overhaul, M1–M7)
 
-> Updated by: M6 execution (auto-mem/M6 session)
+> Updated by: M7 execution (auto-mem/M7 session)
 > Date: 2026-05-24
 > Re-verify Section 3 numbers before starting work — do not trust this
 > file blindly.
@@ -10,9 +10,9 @@
 ## 1. Current initiative
 
 - **slug**: `auto-memory-overhaul`
-- **current milestone**: just-completed `M6` — provider-selector-and-memdir-infra
-- **next milestone**: `M7` — sidequery-recall-and-injection
-- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [done], M4 [done], M5 [done], M6 [done], M7 [next]
+- **current milestone**: just-completed `M7` — sidequery-recall-and-injection
+- **next milestone**: none — all milestones complete
+- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [done], M4 [done], M5 [done], M6 [done], M7 [done]
 
 ## 2. Completed milestones
 
@@ -131,72 +131,63 @@
 - **known limitations**:
   - (none)
 
+### M7
+
+- **commit**: `[auto-mem/M7]` (see git log)
+- **files changed**: `src/simple_coding_agent/memdir.py` (extended), `src/simple_coding_agent/loop.py` (modified, exactly 800 lines), `src/simple_coding_agent/context.py` (docstring only), `src/simple_coding_agent/models.py` (ATTACHMENT_MEMORY type + factory), `src/simple_coding_agent/recall_hooks.py` (new), `tests/test_sidequery_recall.py` (new, 9 tests), `tests/test_memdir_surfacing.py` (new, 9 tests), `tests/test_loop_memory_injection.py` (new, 5 tests)
+- **tests added**: `test_sidequery_recall.py` (+9), `test_memdir_surfacing.py` (+9), `test_loop_memory_injection.py` (+5). Total: 784 → 807 (+23)
+- **behavior implemented**: `memdir.find_relevant_memories(query, dir, selector, *, already_surfaced, read_file_state, recent_tools, session_bytes_used, auto_memory_enabled=True) -> list[MemoryHeader]` with 4-gate guard (auto_memory_enabled / non-empty query / multi-word query / session_bytes < 60KB), `scan_memory_files` manifest build, `Provider.call_selector` call with hallucination guard (filename→id validation against manifest), and `_jaccard_fallback` on `SelectorError`. `memdir.read_memories_for_surfacing(selected) -> list[str]` reads each `.md` file with ≤200-line + ≤4KB-byte truncation (smallest limit wins), appends `[...truncated — N lines omitted]` warning when truncated, and prepends a staleness header (`Memory (saved today):` or `Memory (saved N days ago):`). New `recall_hooks.inject_memory_attachments(transcript, query, provider, memory_dir, auto_memory_enabled, already_surfaced, read_file_state, session_bytes_used, tracer) -> int` orchestrates find + read + inject and returns updated `session_bytes_used`. `AgentLoop.__init__` gains `_already_surfaced_memories: set[str]`, `_read_file_state: set[str]`, and `_session_bytes_used: int = 0`. Both `run()` and `run_stream()` call `inject_memory_attachments` before the inner `for turn` loop. Injected content is wrapped in `<system-reminder>` tags and stored as `Message.attachment_memory()` (Role.USER, type=ATTACHMENT_MEMORY). `models.MessageType.ATTACHMENT_MEMORY` and `Message.attachment_memory()` factory added.
+- **design decisions (deviations from PLAN)**:
+  - **`recall_hooks.py` extracted instead of inlining in `loop.py`**: loop.py was at 788 lines with 12-line budget. The 4-line injection call fits; the full orchestration (find + read + inject) did not. Extracted to `recall_hooks.py` mirroring M5's `extraction_hooks.py` pattern. loop.py stays at exactly 800 lines. Visible in: `recall_hooks.py`, `loop.py`. Impact on review session: none — pure internal detail.
+  - **Empty manifest short-circuit before `call_selector`**: After `scan_memory_files(dir)` returns `[]`, `find_relevant_memories` returns `[]` immediately without calling `selector.call_selector`. This is required for backward compatibility: pre-M6 test stubs (`_ReactiveProvider`, `_RecordingProvider`) satisfy the `Provider` Protocol but do not implement `call_selector`. An empty memory dir is the correct guard — no memories to select. Visible in: `memdir.py:find_relevant_memories`. Impact on review session: none.
+  - **Staleness uses `mtime` not `created_at`**: `MemoryHeader` carries `mtime: float` (file modification time) but no `created_at` field. `read_memories_for_surfacing` computes `days_ago = int((time.time() - header.mtime) / 86400)`. This is slightly conservative (edits reset the clock) but correct for the replica's purpose. Visible in: `memdir.py:read_memories_for_surfacing`. Impact on review session: none.
+- **known limitations**:
+  - (none)
+
 ## 3. Current repo state
 
 > Re-verify these numbers before starting. Do not trust this list blindly.
 
-- **last commit**: `[auto-mem/M6]` — `git -C python-replica log --oneline -1`
-- **tests**: 784 passing (was 768 after M5, delta +16)
+- **last commit**: `[auto-mem/M7]` — `git -C python-replica log --oneline -1`
+- **tests**: 807 passing (was 784 after M6, delta +23)
 - **mypy**: clean | **ruff**: clean
 - **branch**: main
-- **known failing checks**: `test_null_tracer_zero_overhead` — pre-existing before this initiative, not a regression
+- **known failing checks**: `test_null_tracer_zero_overhead` — pre-existing before this initiative, not a regression (timeit-based test is environment-sensitive; quarantined under coverage runs)
 
 ## 4. Important constraints (carried forward)
 
 - **dual-read compat window**: `ProjectMemory.all()` and `load()` MUST continue reading legacy `.json` files until the migrate-format pass is run. Do not remove the `.json` fallback path until an explicit retirement milestone.
 - **no PyYAML dependency**: frontmatter parsing stays hand-rolled (`_parse_frontmatter`); fail-soft (broken frontmatter yields `MemoryHeader(description=None)`, never raises).
 - **atomic manifest writes**: `_update_manifest` uses `tempfile.mkstemp` + `os.replace`. Do not revert to direct open/write.
-- **path traversal defense**: `_SAFE_ENTRY_ID_PATTERN` allows `/` for subdir IDs but excludes `.` — `Path.is_relative_to(root)` is the second gate. Both layers must be preserved in M7+.
+- **path traversal defense**: `_SAFE_ENTRY_ID_PATTERN` allows `/` for subdir IDs but excludes `.` — `Path.is_relative_to(root)` is the second gate. Both layers must be preserved.
 - **secret rejection**: `_check_body_for_secrets` in `ProjectMemory.save()` must remain active and surface as `ValueError` for all callers (CLI exit code 2, tool `is_error=True`).
-- **quota counter reset**: `AgentLoop._memory_writes_this_turn` is reset to `0` at the start of each `run()` / `run_stream()`. M7 must not remove or bypass this reset.
+- **quota counter reset**: `AgentLoop._memory_writes_this_turn` is reset to `0` at the start of each `run()` / `run_stream()`.
 - **conditional tool registration**: `write_memory_entry` is registered in `AgentLoop._register_tools()` ONLY when `self._project_memory is not None`.
-- **`_MEMORY_MANAGEMENT_SECTION` is a frozen constant**: M7's integration must NOT modify or shadow this constant; the section's byte-identical content is required for prompt-cache stability.
+- **`_MEMORY_MANAGEMENT_SECTION` is a frozen constant**: Do NOT modify or shadow this constant; its byte-identical content is required for prompt-cache stability.
 - **`ExtractMemoriesRunner.run()` must receive serialized dict messages**: `base_messages` is typed `list[dict[str, Any]]` (M4 deviation). Pass `self._transcript.normalize_for_api()` — not raw `Message` objects.
-- **loop.py must stay ≤800 lines**: Currently 788. M7 changes to `loop.py` must account for this. If M7 adds >12 lines, extract helpers first.
-- **M7 extends `memdir.py` — do not add `find_relevant_memories` or `read_memories_for_surfacing` in M6**: Those functions belong to M7. M6 only builds the infrastructure (Protocol method + memdir module).
-- **M7 adds ATTACHMENT_MEMORY message type to `context.py`**: Ensure `_coalesce_same_role` is not broken by same-role adjacent messages when the new type is inserted.
-- **`SelectorError` is the canonical error for call_selector failures**: M7 must import `SelectorError` from `provider.py`, not redefine it. Selector failure must fall back to Jaccard MemorySelector — never propagate SelectorError out of the AgentLoop.
-- **`SELECT_MEMORIES_SYSTEM_PROMPT` is read-only**: M7 uses it as-is; do not modify or shadow it.
+- **loop.py must stay ≤800 lines**: Currently exactly 800. Any future change to loop.py must account for this; extract helpers first.
+- **`SelectorError` is the canonical error for `call_selector` failures**: Import from `provider.py`, do not redefine. Selector failure must fall back to Jaccard — never propagate `SelectorError` out of AgentLoop.
+- **`SELECT_MEMORIES_SYSTEM_PROMPT` is read-only**: Use as-is; do not modify or shadow it.
+- **`already_surfaced` and `_read_file_state` are session-scoped sets**: Initialized in `AgentLoop.__init__`, not per-turn. They persist across turns to avoid re-surfacing the same memory in one session.
+- **`_SESSION_BYTES_CEILING = 60 * 1024`**: The 60KB ceiling in `find_relevant_memories` must remain the single source of truth. Do not duplicate the constant.
+- **ATTACHMENT_MEMORY messages are USER-role**: They pass through `_normalize_messages` and `_coalesce_same_role` naturally. Do not change their role or add special-case filtering.
+- **Empty manifest short-circuits before `call_selector`**: `find_relevant_memories` returns `[]` immediately when `scan_memory_files(dir)` returns nothing. This is load-bearing for backward compat with pre-M6 Provider stubs.
+
+**All 7 milestones complete. No further invariants to propagate — review session handles doc updates.**
 
 ## 5. Next milestone guidance
 
-For `M7` — sidequery-recall-and-injection:
+This is the final milestone of the `auto-memory-overhaul` initiative. The review session should:
 
-- **next scope**: M7 extends `memdir.py` with `find_relevant_memories` (4-gate guard:
-  auto_memory_enabled / non-empty / multi-word / session_bytes<60KB, filename validation
-  against scan manifest) and `read_memories_for_surfacing` (≤200 lines + ≤4KB per file,
-  staleness-aware header). `AgentLoop.run()` and `run_stream()` call these synchronously
-  before `Provider.call()` and inject results as `<system-reminder>`-wrapped ATTACHMENT
-  messages. Selector failure falls back to Jaccard MemorySelector; failure never raises
-  out of the loop. Tracer emits on the existing `memory_select` channel.
-- **relevant files**:
-  - `src/simple_coding_agent/memdir.py` — extend with `find_relevant_memories` and
-    `read_memories_for_surfacing`; M6 already provides the infrastructure
-  - `src/simple_coding_agent/loop.py` — add sideQuery call + ATTACHMENT injection in
-    `run()` and `run_stream()`; currently 788 lines (12 lines of budget before hitting cap)
-  - `src/simple_coding_agent/context.py` — recognize ATTACHMENT_MEMORY sub-type;
-    serialize without breaking `_coalesce_same_role`
-  - `src/simple_coding_agent/provider.py` — `call_selector` and `SelectorError` already
-    there from M6; M7 consumes them
-  - `tests/test_sidequery_recall.py` (new)
-  - `tests/test_memdir_surfacing.py` (new)
-  - `tests/test_loop_memory_injection.py` (new)
-- **expected tests**: ≥9 new tests covering gates (auto_memory, non-empty, multi-word,
-  session_bytes), filename validation, truncation (≤200 lines + ≤4KB), fallback to Jaccard,
-  and end-to-end injection into system prompt.
-- **risks**:
-  - **loop.py line budget is tight (788 / 800)**: If M7 needs more than 12 lines in
-    loop.py, extract the sideQuery orchestration into a helper in memdir.py or a new
-    `recall_hooks.py` — mirror the M5 decision to extract `extraction_hooks.py`.
-  - **`_coalesce_same_role` must handle ATTACHMENT_MEMORY**: The ctx-mgmt-pdf-align
-    post-review added `_coalesce_same_role`/`_merge_content` to avoid adjacent same-role
-    API messages. ATTACHMENT injection adds user-role messages — verify the coalescing
-    logic still handles them correctly and that the coalesced form is Anthropic-API
-    compatible.
-  - **`already_surfaced` set and `read_file_state` deduplication**: The session-scoped
-    sets must be initialized on `AgentLoop.__init__` (not per-turn) so they persist
-    across turns and avoid re-surfacing the same memory file. This adds two fields to
-    `AgentLoop.__init__` which counts against the 800-line cap.
+- **Audit**: Verify exit gates for all 7 milestones are satisfied. Run `pytest python-replica -x -q` to confirm 807 passing (or current count). Confirm mypy and ruff clean.
+- **Archive**: Move `initiatives/current/` → `initiatives/_archive/2026-05-auto-memory-overhaul/` per the RUNBOOK.md Phase 2 wrap-up procedure. Update `NOW.md` to reflect no active initiative.
+- **Write `REVIEW.md`**: Summarize prompt quality, execution quality, deviations, and any follow-up recommendations.
 
-The full ready-to-run prompt is at:
-`initiatives/current/prompts/M7.md`
+**Pending follow-up initiative (M-ε)**: `auto-memory-overhaul` deferred threading the sideQuery selector call asynchronously. Currently `inject_memory_attachments` in `recall_hooks.py` calls `provider.call_selector` synchronously in the main turn path, adding latency before `Provider.call()`. A follow-up M-ε initiative should thread this onto a background thread (started at the top of `run()`, joined before `Provider.call()`), matching the TypeScript source's async pattern. This is low-risk (the call is read-only) but out of scope for the current initiative due to the loop.py line budget and the complexity of thread-safe transcript access.
+
+**Pre-existing test failure**: `test_null_tracer_zero_overhead` (in `tests/test_trace.py`) has been failing since the `observable-thresholds` initiative. It is environment-sensitive (timeit assertion: 100k emit calls < 20ms) and is skipped under coverage runs. It is NOT a regression from `auto-memory-overhaul`. The review session should document this in `REVIEW.md` but need not fix it.
+
+**Deferred items across M1–M7**:
+- `_get_existing_manifest` in `ExtractMemoriesRunner` (M4 stub) was left as MEMORY.md[:2000] read. The canonical `format_memory_manifest(scan_memory_files(memory_dir))` call was available from M6 onward but was not wired into the runner. This is a known gap — the extraction prompt receives a potentially stale manifest. Fix in a future initiative.
+- Async sideQuery (M-ε, described above).
+- The `MemorySelector` in `memory.py` uses lexical Jaccard only. No embedding-based or BM25 selector was added (noted as a known limitation in CLAUDE.md). Acceptable for the replica's purpose.

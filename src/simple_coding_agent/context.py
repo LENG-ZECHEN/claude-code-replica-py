@@ -117,11 +117,14 @@ def _normalize_messages(messages: list[Message]) -> list[dict[str, Any]]:
     Filters: is_virtual, COMPACT_BOUNDARY, SNIP_BOUNDARY, SYSTEM role.
     ATTACHMENT messages (M3 recent-file re-injection) are NOT filtered — they
     are user-role content the model must see and pass through unchanged.
+    ATTACHMENT_MEMORY messages (M7 sideQuery injection) are also USER-role
+    and pass through unchanged; _coalesce_same_role merges adjacent user
+    messages so the <system-reminder> content lands before the user turn.
     M4: each TOOL_RESULT message's block content is wrapped in
     ``<msg uuid="...">...</msg>`` so the model can target it via the
     ``snip_history`` tool (OpenAI Chat Completions strips per-message
-    metadata). ATTACHMENT messages are NOT wrapped (they are not snippable
-    history) — the wrap gates on ``msg.type == TOOL_RESULT``.
+    metadata). ATTACHMENT/ATTACHMENT_MEMORY messages are NOT wrapped — the
+    wrap gates on ``msg.type == TOOL_RESULT``.
     """
     result: list[dict[str, Any]] = []
 

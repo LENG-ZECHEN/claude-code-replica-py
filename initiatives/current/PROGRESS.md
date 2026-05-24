@@ -112,3 +112,23 @@ exists in this file. Deleting or rewriting a prior block halts the loop.
   content (real human turns), correlates ToolCall.id → ToolResult.tool_use_id, returns
   names where is_error is False (using `is False` to exclude missing results). No
   AgentLoop changes — pure infrastructure milestone.
+
+## M7 — done 2026-05-24
+
+- commit: [auto-mem/M7] (see git log)
+- tests: 784 → 807 (+23 new tests across `test_sidequery_recall.py` (9),
+  `test_memdir_surfacing.py` (9), `test_loop_memory_injection.py` (5))
+- mypy: clean | ruff: clean
+- files changed: `memdir.py`, `loop.py`, `context.py`, `models.py`,
+  `recall_hooks.py` (new), `test_sidequery_recall.py`, `test_memdir_surfacing.py`,
+  `test_loop_memory_injection.py`
+- exit gate: find_relevant_memories 4-gate enforced (auto_memory_enabled / non-empty /
+  multi-word / session_bytes<60KB) AND hallucinated filenames dropped AND Jaccard fallback
+  on SelectorError AND read_memories_for_surfacing ≤200 lines + ≤4KB truncation + staleness
+  header AND AgentLoop.run() and run_stream() inject ATTACHMENT_MEMORY before Provider.call()
+  AND already_surfaced deduplication AND session_bytes accumulates → PASS
+- notes: loop.py extraction to `recall_hooks.py` (mirrors M5 `extraction_hooks.py`
+  pattern) kept loop.py at exactly 800 lines. Empty memory directory short-circuits before
+  calling call_selector (handles non-conforming Provider stubs in pre-M6 tests). ATTACHMENT_MEMORY
+  messages are USER-role; `_coalesce_same_role` in context.py handles adjacency. models.py
+  gains `MessageType.ATTACHMENT_MEMORY` and `Message.attachment_memory()` factory.

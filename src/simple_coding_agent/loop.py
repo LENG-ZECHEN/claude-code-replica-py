@@ -33,6 +33,7 @@ from .models import (
     ToolResult,
 )
 from .provider import STOP_MAX_TOKENS, PromptTooLongError, Provider
+from .recall_hooks import inject_memory_attachments
 from .snip import SnipTool
 from .snip_tool_model import SnipNudge, snippable_candidate_uuids
 from .tool_result_store import ToolResultStore
@@ -193,6 +194,9 @@ class AgentLoop:
         self._last_memory_message_uuid: str | None = None
         self._turns_since_last_extraction: int = 0
         self._extract_throttle_n: int = max(1, extract_throttle_n)
+        self._already_surfaced_memories: set[str] = set()
+        self._read_file_state: set[str] = set()
+        self._session_bytes_used: int = 0
         self._register_tools()
 
     # ------------------------------------------------------------------
@@ -209,6 +213,10 @@ class AgentLoop:
         reactive_compact_attempted = False
         self._snip_attempted_this_turn = False
         self._memory_writes_this_turn = 0
+        self._session_bytes_used = inject_memory_attachments(
+            self._transcript, user_input, self._provider, self._memory_dir,
+            self._auto_memory_enabled, self._already_surfaced_memories,
+            self._read_file_state, self._session_bytes_used, self._tracer)
 
         for turn in range(1, self._max_steps + 1):
             self._maybe_microcompact()
@@ -358,6 +366,10 @@ class AgentLoop:
         reactive_compact_attempted = False
         self._snip_attempted_this_turn = False
         self._memory_writes_this_turn = 0
+        self._session_bytes_used = inject_memory_attachments(
+            self._transcript, user_input, self._provider, self._memory_dir,
+            self._auto_memory_enabled, self._already_surfaced_memories,
+            self._read_file_state, self._session_bytes_used, self._tracer)
 
         for turn in range(1, self._max_steps + 1):
             self._maybe_microcompact()

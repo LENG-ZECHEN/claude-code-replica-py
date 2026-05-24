@@ -51,7 +51,8 @@ class MessageType(StrEnum):
     TOOL_RESULT = "tool_result"
     COMPACT_BOUNDARY = "compact_boundary"
     SNIP_BOUNDARY = "snip_boundary"
-    ATTACHMENT = "attachment"  # recent-file re-injection; serialized as a user message
+    ATTACHMENT = "attachment"        # recent-file re-injection; serialized as a user message
+    ATTACHMENT_MEMORY = "attachment_memory"  # sideQuery memory injection (M7)
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +194,23 @@ class Message:
             content=body,
             timestamp=_now_iso(),
             type=MessageType.ATTACHMENT,
+            is_meta=True,
+        )
+
+    @classmethod
+    def attachment_memory(cls, content: str) -> Message:
+        """Create a sideQuery memory injection message (M7).
+
+        Carries memory file content wrapped in <system-reminder> tags, injected
+        before Provider.call() each turn. USER-role so it reaches the API;
+        _coalesce_same_role merges it with adjacent user messages.
+        """
+        return cls(
+            uuid=_new_uuid(),
+            role=Role.USER,
+            content=content,
+            timestamp=_now_iso(),
+            type=MessageType.ATTACHMENT_MEMORY,
             is_meta=True,
         )
 

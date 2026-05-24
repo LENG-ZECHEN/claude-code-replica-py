@@ -266,6 +266,8 @@ milestones:
       the loop continues with Jaccard results — never raises out of the loop.
 ---
 
+> STATUS: complete (M1–M7 shipped on 2026-05-24)
+
 > Bootstrapped on 2026-05-24. Baseline commit: `6aed9ec`. Baseline pytest: 710 passing (1 pre-existing failure in `test_null_tracer_zero_overhead` — pre-initiative). Baseline mypy/ruff: clean. Sizing assessment: all 7 milestones are single-concern pre-splits; the largest (M1) touches 3 src files + ~10 new tests and does NOT combine abstraction+wire+CLI. SIZING WAIVED: none.
 
 # Goal
