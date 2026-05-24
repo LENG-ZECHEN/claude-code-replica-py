@@ -184,7 +184,7 @@ goal is to surface size risk at planning time rather than at turn 243.
 | 5 | **Generate `config.yaml`** from PLAN's YAML front-matter. Include `slug`, `commit_prefix`, `archive_slug`, `baseline_commit` (output of `git -C python-replica rev-parse HEAD` at Phase 1 entry — the same SHA recorded in PLAN.md's provenance header and HANDOFF.md Section 3 baseline), and the full `milestones` table. `baseline_commit` lets `run_all_milestones.sh` and the review session restrict every commit-subject grep to this initiative's range (`baseline_commit..HEAD`), preventing collisions with prior-initiative commits that may have reused the same `commit_prefix`. | `initiatives/current/config.yaml` |
 | 6 | **Write `HANDOFF.md`** using `automation/templates/handoff_initial.md`. Fill `slug`, baseline commit/pytest/mypy/ruff, first milestone's name. | `initiatives/current/HANDOFF.md` |
 | 7 | **Write `PROGRESS.md`** using `automation/templates/progress_entry.md` as the file header (no milestone entries yet). | `initiatives/current/PROGRESS.md` |
-| 8 | **Write per-milestone prompts.** For every M{N} in PLAN's `milestones` block, write `initiatives/current/prompts/M{N}.md` using `automation/templates/milestone_prompt.md` as a skeleton. Customize every section using PLAN content, INBOX `notes`, and CLAUDE.md execution rules. Each prompt MUST include sections **§1 Baseline, §2 Scope, §2.5 Out of scope, §3 Mandatory reading, §4 Implementation requirements, §5 Exit ritual** (§2.5 is REQUIRED — the template fails open if missing). | N files |
+| 8 | **Write per-milestone prompts.** For every M{N} in PLAN's `milestones` block, write `initiatives/current/prompts/M{N}.md` using `automation/templates/milestone_prompt.md` as a skeleton. Customize every section using PLAN content, INBOX `notes`, and CLAUDE.md execution rules. Each prompt MUST include sections **§1 Baseline, §2 Scope, §2.5 Out of scope, §3 Mandatory reading, §4 Implementation requirements, §5 Exit ritual** (§2.5 is REQUIRED — the template fails open if missing). **Critical §5 order constraint**: in the generated §5, PROGRESS.md (step 2) and HANDOFF.md (step 3) MUST be written before the git commit (step 4), and all files land in one `[<prefix>/M{N}]` commit. Reversing this order produces a second commit without the prefix and fails exit-gate checks 1 and 2. | N files |
 | 9 | **Reset `automation/INBOX.md`** to the blank template (`automation/templates/inbox.md`). This is the file you'll edit next time. | reset INBOX |
 | 10 | **Rewrite `NOW.md`** to reflect the new active initiative (slug, milestone count, planned exit, recent archive entries). | rewritten `NOW.md` |
 | 11 | **Append index row** to `initiatives/README.md` Active table. | updated index |
@@ -278,18 +278,23 @@ that REQUIRES the agent to:
 
 1. Verify the milestone's `exit_gate` (per config.yaml) objectively —
    quote the verifying command's output, not "feels complete".
-2. Commit with `[<commit_prefix>/M{N}]` subject.
-3. **APPEND** a milestone block to `initiatives/current/PROGRESS.md`
-   (terse-fact-log format — see `automation/templates/progress_entry.md`).
+2. **APPEND** a milestone block to `initiatives/current/PROGRESS.md`
+   **before committing** (terse-fact-log format — see
+   `automation/templates/progress_entry.md`).
    Prior milestones' `## M{i} — done` blocks MUST remain verbatim;
    exit-gate check 6 enforces this.
-4. Rewrite `initiatives/current/HANDOFF.md` using the 5-section
-   structure in `automation/templates/handoff_milestone.md` so M{N+1}
-   can read it. Section 4 "Important constraints" propagates invariants;
-   Section 5 "Next milestone guidance" is written FOR the next agent.
-   In Section 2 "Completed milestones", **APPEND** a new `### M{N}`
-   subsection — prior `### M{i}` subsections MUST be preserved
-   verbatim; exit-gate check 6 enforces this too.
+3. Rewrite `initiatives/current/HANDOFF.md` **before committing**, using
+   the 5-section structure in `automation/templates/handoff_milestone.md`
+   so M{N+1} can read it. Section 4 "Important constraints" propagates
+   invariants; Section 5 "Next milestone guidance" is written FOR the
+   next agent. In Section 2 "Completed milestones", **APPEND** a new
+   `### M{N}` subsection — prior `### M{i}` subsections MUST be
+   preserved verbatim; exit-gate check 6 enforces this too.
+4. Commit implementation files **plus** `initiatives/current/PROGRESS.md`
+   and `initiatives/current/HANDOFF.md` together in **one** commit with
+   subject `[<commit_prefix>/M{N}]`. Exit-gate checks 1 and 2 both
+   require HANDOFF.md to appear in that same commit; a second cleanup
+   commit without the prefix fails both.
 5. (last milestone only) Mark `initiatives/current/PLAN.md` STATUS as
    `complete`.
 
