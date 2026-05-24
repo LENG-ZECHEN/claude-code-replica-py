@@ -100,6 +100,7 @@ _DEFAULT_RESERVED_OUTPUT_TOKENS: int = 8_192
 # mirror the compact.py constructor defaults; they have no _AGGRESSIVE_THRESHOLDS
 # preset entry, so (like --max-steps) they resolve to explicit-flag-or-default.
 _DEFAULT_MICROCOMPACT_KEEP_RECENT: int = 5
+_DEFAULT_MICROCOMPACT_MINUTES: int = 60
 _DEFAULT_OUTPUT_HEADROOM: int = 12_000
 _DEFAULT_COMPACT_HEADROOM: int = 20_000
 _DEFAULT_MIN_SESSION_TOKENS: int = 30_000
@@ -361,6 +362,7 @@ def _build_repl_loop(
     max_context_tokens: int | None = None,
     reserved_output_tokens: int | None = None,
     microcompact_keep_recent: int | None = None,
+    microcompact_minutes: int | None = None,
     output_headroom: int | None = None,
     compact_headroom: int | None = None,
     min_session_tokens: int | None = None,
@@ -420,6 +422,10 @@ def _build_repl_loop(
         microcompact_keep_recent, None, _DEFAULT_MICROCOMPACT_KEEP_RECENT,
         aggressive=aggressive_thresholds,
     )
+    resolved_microcompact_minutes = _resolve_threshold(
+        microcompact_minutes, "microcompact_minutes", _DEFAULT_MICROCOMPACT_MINUTES,
+        aggressive=aggressive_thresholds,
+    )
     resolved_output_headroom = _resolve_threshold(
         output_headroom, None, _DEFAULT_OUTPUT_HEADROOM,
         aggressive=aggressive_thresholds,
@@ -447,7 +453,6 @@ def _build_repl_loop(
     if aggressive_thresholds:
         compact_threshold = float(_AGGRESSIVE_THRESHOLDS["compact_threshold"])
         keep_recent_kept = int(_AGGRESSIVE_THRESHOLDS["keep_recent"])
-        microcompact_minutes = int(_AGGRESSIVE_THRESHOLDS["microcompact_minutes"])
         max_inline_chars = int(_AGGRESSIVE_THRESHOLDS["max_inline_chars"])
         total_budget_chars = int(_AGGRESSIVE_THRESHOLDS["total_budget_chars"])
         snip_keep_recent = int(_AGGRESSIVE_THRESHOLDS["snip_keep_recent"])
@@ -465,7 +470,7 @@ def _build_repl_loop(
             tracer=active_tracer,
         )
         microcompactor = MicroCompactor(
-            threshold_minutes=microcompact_minutes,
+            threshold_minutes=resolved_microcompact_minutes,
             keep_recent=resolved_microcompact_keep_recent,
             tracer=active_tracer,
         )
@@ -479,6 +484,7 @@ def _build_repl_loop(
             tracer=active_tracer,
         )
         microcompactor = MicroCompactor(
+            threshold_minutes=resolved_microcompact_minutes,
             keep_recent=resolved_microcompact_keep_recent,
             tracer=active_tracer,
         )
@@ -757,6 +763,7 @@ def _drive_repl_session(
     stream: bool,
     session_memory: SessionMemory,
     session_mem_path: Path,
+    max_turns: int | None = None,
 ) -> int:
     """Drive the interactive read-input/run-turn loop on a pre-built loop.
 
@@ -765,7 +772,12 @@ def _drive_repl_session(
     slash-command, KeyboardInterrupt, EOF, auto-learn-cue, and
     session-memory-save behaviour exactly. The function returns 0 on a
     clean ``/exit`` / EOF and never raises ``KeyboardInterrupt``.
+
+    ``max_turns`` caps the number of user turns before a clean exit (same
+    path as ``/exit``). Slash commands do not count as turns. When None
+    (default) the loop runs until EOF or ``/exit``.
     """
+    _turn_count = 0
 
     def _save_session() -> None:
         try:
@@ -774,6 +786,10 @@ def _drive_repl_session(
             print(f"(warning: could not save session memory: {err})")
 
     while True:
+        if max_turns is not None and _turn_count >= max_turns:
+            _save_session()
+            return 0
+
         line = _read_input_line()
         if line is None:
             print()
@@ -801,6 +817,8 @@ def _drive_repl_session(
             print("\n(interrupted; transcript preserved)")
             continue
 
+        _turn_count += 1
+
 
 def _run_repl(
     *,
@@ -810,6 +828,7 @@ def _run_repl(
     reserved_output_tokens: int | None,
     stream: bool,
     microcompact_keep_recent: int | None = None,
+    microcompact_minutes: int | None = None,
     output_headroom: int | None = None,
     compact_headroom: int | None = None,
     min_session_tokens: int | None = None,
@@ -854,6 +873,7 @@ def _run_repl(
         max_context_tokens=max_context_tokens,
         reserved_output_tokens=reserved_output_tokens,
         microcompact_keep_recent=microcompact_keep_recent,
+        microcompact_minutes=microcompact_minutes,
         output_headroom=output_headroom,
         compact_headroom=compact_headroom,
         min_session_tokens=min_session_tokens,
@@ -961,6 +981,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "MicroCompactor.keep_recent: preserve the N most recent compactable "
             "tool_results during cold-cache cleanup (default: 5). 0 clears all."
+        ),
+    )
+    parser.add_argument(
+        "--microcompact-minutes",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "MicroCompactor.threshold_minutes: clear compactable tool_results "
+            "older than N minutes (default: 60). 0 clears on the next turn. "
+            "If --aggressive-thresholds is also set and you do not pass this "
+            "flag, the preset value applies; otherwise the built-in default "
+            "applies."
         ),
     )
     parser.add_argument(
@@ -1087,6 +1120,7 @@ def main(argv: list[str] | None = None) -> int:
             max_context_tokens=args.max_context_tokens,
             reserved_output_tokens=args.reserved_output_tokens,
             microcompact_keep_recent=args.microcompact_keep_recent,
+            microcompact_minutes=args.microcompact_minutes,
             output_headroom=args.output_headroom,
             compact_headroom=args.compact_headroom,
             min_session_tokens=args.min_session_tokens,

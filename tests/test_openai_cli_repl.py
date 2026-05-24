@@ -425,3 +425,59 @@ def test_openai_repl_explicit_budget_overrides_preset_like_cli(
     assert loop._snip_tool._keep_recent == cli_mod._AGGRESSIVE_THRESHOLDS[
         "snip_keep_recent"
     ]
+
+
+# ---------------------------------------------------------------------------
+# M1 (ctx-mgmt-demo): --microcompact-minutes and --max-turns flags
+# ---------------------------------------------------------------------------
+
+def test_openai_repl_microcompact_minutes_flag_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """``--microcompact-minutes N`` must propagate to the openai REPL's MicroCompactor."""
+    monkeypatch.setattr(openai_cli, "OpenAIProvider", _FakeOpenAIProvider)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _set_stdin(monkeypatch, "/exit")
+
+    rc = openai_cli.main([
+        "--no-dotenv",
+        "--repl",
+        "--workspace", str(tmp_path),
+        "--model", "test-model",
+        "--microcompact-minutes", "3",
+    ])
+    assert rc == 0
+    loops = _captured_loops()
+    assert loops
+    assert loops[0]._microcompactor._threshold_minutes == 3
+
+
+def test_openai_repl_max_turns_exits_after_n_turns(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """``--max-turns 2`` causes the REPL to exit cleanly after exactly 2 user turns."""
+    monkeypatch.setattr(openai_cli, "OpenAIProvider", _FakeOpenAIProvider)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    # Provide 5 inputs; max-turns=2 should stop after turn1 + turn2.
+    _set_stdin(monkeypatch, "turn1", "turn2", "turn3", "turn4", "turn5")
+
+    rc = openai_cli.main([
+        "--no-dotenv",
+        "--repl",
+        "--workspace", str(tmp_path),
+        "--model", "test-model",
+        "--max-turns", "2",
+    ])
+    assert rc == 0
+    loops = _captured_loops()
+    assert loops
+    msgs = loops[0]._transcript.all_messages()
+    user_texts = [
+        m.content for m in msgs
+        if m.role.value == "user" and isinstance(m.content, str)
+    ]
+    assert "turn1" in user_texts
+    assert "turn2" in user_texts
+    assert "turn3" not in user_texts

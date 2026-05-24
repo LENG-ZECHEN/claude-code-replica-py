@@ -212,3 +212,23 @@ def test_cli_help_snapshot_pins_preset_precedence_line(
     assert "preset" in help_text
     # Exact M2 phrase, pinned so future edits cannot silently drop it.
     assert "preset value applies" in help_text
+
+
+# ---------------------------------------------------------------------------
+# M1 (ctx-mgmt-demo): --microcompact-minutes flag wiring
+# ---------------------------------------------------------------------------
+
+def test_cli_microcompact_minutes_flag_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """``--microcompact-minutes N`` must propagate to MicroCompactor._threshold_minutes."""
+    import simple_coding_agent.claude_md as cm
+    monkeypatch.setattr(cm, "_DEFAULT_USER_CLAUDE_MD", tmp_path / "no_claude.md")
+    monkeypatch.setattr("sys.stdin", io.StringIO("/exit\n"))
+
+    rc = main(["--repl", "--microcompact-minutes", "5", "--workspace", str(tmp_path)])
+    assert rc == 0
+    loops = list(getattr(cli_mod, "_LAST_LOOPS", []))
+    assert loops, "REPL should have built at least one AgentLoop"
+    assert loops[0]._microcompactor._threshold_minutes == 5

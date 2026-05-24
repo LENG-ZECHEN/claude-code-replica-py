@@ -140,6 +140,30 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--microcompact-minutes",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "MicroCompactor.threshold_minutes (REPL only; default: 60): "
+            "clear compactable tool_results older than N minutes. 0 clears on "
+            "the next turn. If --aggressive-thresholds is also set and you do "
+            "not pass this flag, the preset value applies; otherwise the "
+            "built-in default applies."
+        ),
+    )
+    parser.add_argument(
+        "--max-turns",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "REPL only: exit cleanly after exactly N user turns, taking the "
+            "same shutdown path as /exit. Slash commands do not count as turns. "
+            "Useful for scripted artifact capture (M2 demo scenarios)."
+        ),
+    )
+    parser.add_argument(
         "--reserved-output-tokens",
         type=int,
         default=None,
@@ -354,6 +378,7 @@ def _build_openai_repl_loop(
     max_context_tokens: int | None,
     reserved_output_tokens: int | None,
     snip_nudge_growth_tokens: int | None = None,
+    microcompact_minutes: int | None = None,
     session_memory: SessionMemory,
     shell_mode: ShellMode = ShellMode.MOCK,
     tracer: Tracer | None = None,
@@ -380,6 +405,7 @@ def _build_openai_repl_loop(
         max_context_tokens=max_context_tokens,
         reserved_output_tokens=reserved_output_tokens,
         snip_nudge_growth_tokens=snip_nudge_growth_tokens,
+        microcompact_minutes=microcompact_minutes,
         session_memory=session_memory,
         project_memory=project_memory,
         provider=provider,  # type: ignore[arg-type]
@@ -401,6 +427,8 @@ def _run_openai_repl(
     max_context_tokens: int | None,
     reserved_output_tokens: int | None,
     snip_nudge_growth_tokens: int | None = None,
+    microcompact_minutes: int | None = None,
+    max_turns: int | None = None,
     stream: bool,
     resume: str | None,
     shell_mode: ShellMode = ShellMode.MOCK,
@@ -434,6 +462,7 @@ def _run_openai_repl(
         max_context_tokens=max_context_tokens,
         reserved_output_tokens=reserved_output_tokens,
         snip_nudge_growth_tokens=snip_nudge_growth_tokens,
+        microcompact_minutes=microcompact_minutes,
         session_memory=session_memory,
         shell_mode=shell_mode,
         tracer=tracer,
@@ -452,6 +481,7 @@ def _run_openai_repl(
         stream=stream,
         session_memory=session_memory,
         session_mem_path=session_mem_path,
+        max_turns=max_turns,
     )
 
 
@@ -501,6 +531,8 @@ def main(argv: list[str] | None = None) -> int:
             max_context_tokens=args.max_context_tokens,
             reserved_output_tokens=args.reserved_output_tokens,
             snip_nudge_growth_tokens=args.snip_nudge_growth_tokens,
+            microcompact_minutes=args.microcompact_minutes,
+            max_turns=args.max_turns,
             stream=not bool(args.no_stream),
             resume=args.resume,
             shell_mode=shell_mode,

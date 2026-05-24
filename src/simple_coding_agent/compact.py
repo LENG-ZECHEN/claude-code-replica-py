@@ -316,8 +316,8 @@ class MicroCompactor:
         keep_recent: int = _DEFAULT_MICROCOMPACT_KEEP_RECENT,
         tracer: Tracer | None = None,
     ) -> None:
-        if threshold_minutes < 1:
-            raise ValueError("threshold_minutes must be >= 1")
+        if threshold_minutes < 0:
+            raise ValueError("threshold_minutes must be >= 0")
         if keep_recent < 0:
             raise ValueError("keep_recent must be >= 0")
         self._threshold_minutes = threshold_minutes
