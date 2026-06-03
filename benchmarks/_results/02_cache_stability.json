@@ -1,0 +1,67 @@
+{
+  "context_naive": {
+    "all_identical": false,
+    "mode": "naive",
+    "prefix_hashes": [
+      "75823cc64948076c60822bfabd5b52b000f28b73bc5f0f6cf5d2a0b9d24d2c78",
+      "8e761477ad9c80137233c64d4dbcbf28e14fd90a7eb177375a5ae2efc4861e42",
+      "90728edec855364e31b93b2fe6b4fd94356376694e69a3bfb2d3cfa3c5ec6cb1",
+      "dc0f2b82a52766a0c8b6c717b6c904020121f3f18e1663e05de28861994b7337",
+      "12044f60f5c06ec5644ab435b6a19f3be3d37cee396cbe7b4cde90e0ec5cabe2"
+    ],
+    "rounds": 5,
+    "stability_score": "1/5",
+    "unique_hash_count": 5
+  },
+  "context_stable": {
+    "all_identical": true,
+    "mode": "stable",
+    "prefix_hashes": [
+      "48dacd24dc7f89c3e1955b397fe264dd28f5afc4d625b1a76012f07157787ac9",
+      "48dacd24dc7f89c3e1955b397fe264dd28f5afc4d625b1a76012f07157787ac9",
+      "48dacd24dc7f89c3e1955b397fe264dd28f5afc4d625b1a76012f07157787ac9",
+      "48dacd24dc7f89c3e1955b397fe264dd28f5afc4d625b1a76012f07157787ac9",
+      "48dacd24dc7f89c3e1955b397fe264dd28f5afc4d625b1a76012f07157787ac9"
+    ],
+    "rounds": 5,
+    "stability_score": "5/5",
+    "unique_hash_count": 1
+  },
+  "drifting_prefix_examples": [
+    "[run-1 timestamp: 2026-05-25T00:00:01Z]\nRunning command...\n",
+    "[run-2 timestamp: 2026-05-25T00:00:02Z]\nRunning command...\n",
+    "[run-3 timestamp: 2026-05-25T00:00:03Z]\nRunning command...\n",
+    "[run-4 timestamp: 2026-05-25T00:00:04Z]\nRunning command...\n",
+    "[run-5 timestamp: 2026-05-25T00:00:05Z]\nRunning command...\n"
+  ],
+  "pointer_naive": {
+    "all_identical": false,
+    "mode": "naive",
+    "pointer_hashes": [
+      "6edd3cbaba7731a176faa560aceef4d6270a2a86014ebb7bc4cb4cbcc4b62ad5",
+      "37c5315ccdddfcedbbcc91d03734021c5a6aa22314cd1d029847ee93fab827af",
+      "d3b9d13fdd8e98dcc071fdb0281755e2d87323b836ff7c54f0d0553b93485a94",
+      "c93ea1334236308fada8b3be6e602c7b17d24e9e06e0e6982cd752d719580e85",
+      "5ace7ce2c5c0239d4ba427157fb10a67c9a4560083c5ffb0abc07d8b857b2b82"
+    ],
+    "rounds": 5,
+    "stability_score": "1/5",
+    "unique_hash_count": 5
+  },
+  "pointer_stable": {
+    "all_identical": true,
+    "mode": "stable",
+    "pointer_hashes": [
+      "b940a31b55bf85691f69428777de48a8b061996589dfa0d48fd6b76fee7bc6d4",
+      "b940a31b55bf85691f69428777de48a8b061996589dfa0d48fd6b76fee7bc6d4",
+      "b940a31b55bf85691f69428777de48a8b061996589dfa0d48fd6b76fee7bc6d4",
+      "b940a31b55bf85691f69428777de48a8b061996589dfa0d48fd6b76fee7bc6d4",
+      "b940a31b55bf85691f69428777de48a8b061996589dfa0d48fd6b76fee7bc6d4"
+    ],
+    "rounds": 5,
+    "stability_score": "5/5",
+    "unique_hash_count": 1
+  },
+  "rounds_per_mode": 5,
+  "scenario": "Prompt-cache prefix stability under content drift"
+}

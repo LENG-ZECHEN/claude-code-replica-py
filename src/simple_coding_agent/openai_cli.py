@@ -264,6 +264,18 @@ def _build_parser() -> argparse.ArgumentParser:
             "allowlist (pwd, ls, cat, grep, python -m pytest)."
         ),
     )
+    parser.add_argument(
+        "--summarizer",
+        choices=("auto", "rule", "llm"),
+        default="auto",
+        help=(
+            "Compaction summarizer. 'auto' (default) reuses THIS "
+            "OpenAIProvider instance (same model, same API key, same "
+            "base_url) for LLM-based summarization. 'rule' forces "
+            "RuleBasedSummarizer (no extra API call). 'llm' is identical "
+            "to 'auto' here since openai-agent always has a real provider."
+        ),
+    )
     return parser
 
 
@@ -385,12 +397,15 @@ def _build_openai_repl_loop(
     aggressive_thresholds: bool = False,
     extract_memories_enabled: bool = False,
     extract_throttle_n: int = 1,
+    summarizer_mode: str = "auto",
 ) -> AgentLoop:
     """Wire a real-provider AgentLoop using the cli helper for everything else.
 
     The provider is the only difference from ``cli._build_repl_loop`` --
     we pass an ``OpenAIProvider`` instance instead of the MockProvider
-    factory, plus a coder-oriented system prompt.
+    factory, plus a coder-oriented system prompt. ``summarizer_mode``
+    propagates through to ``cli._build_repl_loop`` so the OpenAIProvider
+    instance gets reused for LLM-based summarization in "auto" mode.
     """
     provider = OpenAIProvider(
         model=model,
@@ -408,13 +423,14 @@ def _build_openai_repl_loop(
         microcompact_minutes=microcompact_minutes,
         session_memory=session_memory,
         project_memory=project_memory,
-        provider=provider,  # type: ignore[arg-type]
+        provider=provider,
         system_prompt=_DEFAULT_SYSTEM_PROMPT,
         shell_mode=shell_mode,
         tracer=tracer,
         aggressive_thresholds=aggressive_thresholds,
         extract_memories_enabled=extract_memories_enabled,
         extract_throttle_n=extract_throttle_n,
+        summarizer_mode=summarizer_mode,
     )
 
 
@@ -436,6 +452,8 @@ def _run_openai_repl(
     aggressive_thresholds: bool = False,
     extract_memories_enabled: bool = False,
     extract_throttle_n: int = 1,
+    show_steps: bool = False,
+    summarizer_mode: str = "auto",
 ) -> int:
     """Drive the OpenAI-backed REPL, sharing slash commands with ``cli``.
 
@@ -469,6 +487,7 @@ def _run_openai_repl(
         aggressive_thresholds=aggressive_thresholds,
         extract_memories_enabled=extract_memories_enabled,
         extract_throttle_n=extract_throttle_n,
+        summarizer_mode=summarizer_mode,
     )
 
     if resume is not None:
@@ -482,6 +501,7 @@ def _run_openai_repl(
         session_memory=session_memory,
         session_mem_path=session_mem_path,
         max_turns=max_turns,
+        show_steps=show_steps,
     )
 
 
@@ -540,6 +560,8 @@ def main(argv: list[str] | None = None) -> int:
             aggressive_thresholds=bool(args.aggressive_thresholds),
             extract_memories_enabled=extract_enabled,
             extract_throttle_n=extract_throttle,
+            show_steps=bool(args.show_steps),
+            summarizer_mode=str(args.summarizer),
         )
 
     return _run_task(

@@ -740,3 +740,60 @@ def test_snip_nudge_growth_tokens_parsed_by_main(
     assert loop._snip_nudge_growth_tokens == 500
 
 
+# ---------------------------------------------------------------------------
+# --show-steps wiring (regression: was silently dropped in REPL paths)
+# ---------------------------------------------------------------------------
+
+def _show_steps_provider_factory(_workspace: Path) -> MockProvider:
+    """Two-response script: first turn calls list_files, second ends the turn."""
+    return MockProvider([
+        MockProvider.tool_call("list_files", {"path": "."}),
+        MockProvider.direct_answer("listed the workspace"),
+    ])
+
+
+def test_repl_show_steps_renders_tool_calls_to_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli_mod, "_make_repl_provider", _show_steps_provider_factory)
+    _set_stdin(monkeypatch, "list please", "/exit")
+    rc = main(["--repl", "--show-steps", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "Tool: list_files" in captured.err
+    # Tool may succeed (Result:) or fail (ERROR:) under the MockProvider test
+    # registry — either marker proves the tool_step rendering pipeline fires.
+    assert ("Result:" in captured.err) or ("ERROR:" in captured.err)
+    assert "listed the workspace" in captured.out
+
+
+def test_repl_without_show_steps_omits_tool_call_lines(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli_mod, "_make_repl_provider", _show_steps_provider_factory)
+    _set_stdin(monkeypatch, "list please", "/exit")
+    rc = main(["--repl", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "Tool: list_files" not in captured.err
+    assert "listed the workspace" in captured.out
+
+
+def test_repl_show_steps_stream_mode_renders_tool_step_events(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli_mod, "_make_repl_provider", _show_steps_provider_factory)
+    _set_stdin(monkeypatch, "list please", "/exit")
+    rc = main(["--repl", "--stream", "--show-steps", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "Tool: list_files" in captured.err
+    assert "listed the workspace" in captured.out
+
+

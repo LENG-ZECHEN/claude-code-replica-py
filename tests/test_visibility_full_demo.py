@@ -32,7 +32,12 @@ from typing import Any
 
 import pytest
 
-from simple_coding_agent.provider import MockProvider
+from simple_coding_agent.provider import (
+    MockProvider,
+    ProviderResponse,
+    ProviderStreamEvent,
+    TokenUsage,
+)
 
 _EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
 _DEMO_PATH = _EXAMPLES_DIR / "visibility_full_demo.py"
@@ -99,15 +104,48 @@ def _install_scripted_provider(
     ]
     inner = MockProvider(script)
 
+    # LLMSummarizer (auto-enabled when a real provider is present) issues an
+    # extra provider.call() with a fixed system prompt. Detect that prompt and
+    # return a synthetic <summary> response so the main-loop script size stays
+    # decoupled from compaction frequency.
+    _SUMMARIZER_SYSTEM_MARKER = "compacted coding-agent transcripts"
+    _SYNTHETIC_SUMMARY_TEXT = (
+        "<summary>Compacted transcript synopsis (mock).</summary>"
+    )
+
+    def _is_summarizer_call(args: tuple[object, ...], kwargs: dict[str, object]) -> bool:
+        if "system" in kwargs:
+            system_val = kwargs["system"]
+        elif args:
+            system_val = args[0]
+        else:
+            return False
+        return isinstance(system_val, str) and _SUMMARIZER_SYSTEM_MARKER in system_val
+
+    def _synthetic_summary_response() -> ProviderResponse:
+        return ProviderResponse(
+            text=_SYNTHETIC_SUMMARY_TEXT,
+            tool_calls=[],
+            usage=TokenUsage(),
+            stop_reason="end_turn",
+        )
+
     class _ScriptedOpenAIProvider:
         def __init__(self, *args: object, **kwargs: object) -> None:
             self._inner = inner
 
         def call(self, *args: object, **kwargs: object) -> Any:
+            if _is_summarizer_call(args, kwargs):
+                return _synthetic_summary_response()
             return self._inner.call(*args, **kwargs)
 
         def stream_call(self, *args: object, **kwargs: object) -> Any:
-            return self._inner.stream_call(*args, **kwargs)
+            if _is_summarizer_call(args, kwargs):
+                synthetic = _synthetic_summary_response()
+                yield ProviderStreamEvent.text_delta(_SYNTHETIC_SUMMARY_TEXT)
+                yield ProviderStreamEvent.done(synthetic)
+                return
+            yield from self._inner.stream_call(*args, **kwargs)
 
     monkeypatch.setattr(module, "OpenAIProvider", _ScriptedOpenAIProvider)
     return inner

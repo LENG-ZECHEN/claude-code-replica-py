@@ -1,0 +1,32 @@
+{
+  "compaction": {
+    "compression_ratio_pct": 96.65,
+    "fired": true,
+    "messages_summarized": 87,
+    "post_tokens": 3601,
+    "pre_tokens": 107508,
+    "tokens_saved": 103907
+  },
+  "config": {
+    "budget_max_tokens": 10000,
+    "budget_reserved_output_tokens": 2000,
+    "compactor_keep_recent": 4,
+    "compactor_threshold": 0.5,
+    "estimated_tokens_seeded": 105000,
+    "tool_exchanges": 30,
+    "tool_result_chars_each": 14000,
+    "total_chars_seeded": 420000
+  },
+  "loop_status": "completed",
+  "metrics": {
+    "externalized_bytes": 0,
+    "full_compacts": 1,
+    "microcompact_invocations": 0,
+    "reactive_compacts": 0,
+    "snip_invocations": 1,
+    "tokens_per_turn": [
+      4218
+    ]
+  },
+  "scenario": "Single-turn full compaction at ~100K-token scale"
+}

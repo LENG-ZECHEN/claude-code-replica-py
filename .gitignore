@@ -27,3 +27,10 @@ initiatives/current/logs/
 #                                  bundles written by visibility_full_demo.py.
 #                                  Local-only; never committed.
 examples/_artifacts/
+
+# Runtime cache from 'simple-agent' REPL (per-workspace state)
+src/simple_coding_agent/.simple-agent/
+
+# Personal job-application docs — kept local only
+RESUME.md
+VERIFICATION.md

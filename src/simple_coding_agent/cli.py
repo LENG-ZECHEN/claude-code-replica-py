@@ -29,6 +29,16 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Importing readline upgrades the built-in input() to a proper line editor:
+# backspace/delete redraw correctly past terminal width (fixes long-line
+# deletion lag), arrow-key history works, and unbound escape sequences from
+# mouse-wheel events are swallowed instead of echoed as garbage. Inert when
+# stdin is not a TTY, so test monkeypatches over sys.stdin are unaffected.
+try:
+    import readline  # noqa: F401
+except ImportError:
+    pass
+
 from .auto_learn import detect_cue, format_hint
 from .claude_md import ClaudeMdLoader
 from .coding_tools import ShellMode
@@ -44,7 +54,7 @@ from .memory import (
 )
 from .metrics import MetricsCollector
 from .models import ToolCall
-from .provider import MockProvider, ProviderResponse
+from .provider import MockProvider, Provider, ProviderResponse
 from .session_store import (
     InvalidSessionNameError,
     SessionNotFoundError,
@@ -369,13 +379,14 @@ def _build_repl_loop(
     snip_nudge_growth_tokens: int | None = None,
     session_memory: SessionMemory | None = None,
     project_memory: ProjectMemory | None = None,
-    provider: MockProvider | None = None,
+    provider: Provider | None = None,
     system_prompt: str | None = None,
     shell_mode: ShellMode = ShellMode.MOCK,
     tracer: Tracer | None = None,
     aggressive_thresholds: bool = False,
     extract_memories_enabled: bool = False,
     extract_throttle_n: int = 1,
+    summarizer_mode: str = "auto",
 ) -> AgentLoop:
     """Wire one shared AgentLoop for the REPL session.
 
@@ -392,6 +403,34 @@ def _build_repl_loop(
     ``--verbose`` flag activates trace output across the whole pipeline.
     """
     active_tracer: Tracer = tracer if tracer is not None else NullTracer()
+    # Resolve provider EARLY so ContextCompactor can reuse the SAME instance
+    # for LLM-based summarization. The kwarg `provider` is non-None only when
+    # a real provider (e.g. OpenAIProvider via openai_cli) was injected by
+    # the caller; the simple-agent REPL falls back to MockProvider, in which
+    # case `summarizer_provider` stays None and ContextCompactor keeps using
+    # RuleBasedSummarizer (preserving the no-extra-API-call test contract).
+    #
+    # `summarizer_mode` lets the operator override the auto-detect:
+    #   * "auto" (default) — use real provider when present, else rule-based
+    #   * "rule"          — force RuleBasedSummarizer (cost = 0)
+    #   * "llm"           — force LLMSummarizer (errors if no real provider)
+    resolved_provider = provider if provider is not None else _make_repl_provider(workspace)
+    if summarizer_mode not in ("auto", "rule", "llm"):
+        raise ValueError(
+            f"summarizer_mode must be one of 'auto', 'rule', 'llm'; "
+            f"got {summarizer_mode!r}"
+        )
+    if summarizer_mode == "rule":
+        summarizer_provider: Provider | None = None
+    elif summarizer_mode == "llm":
+        if provider is None:
+            raise SystemExit(
+                "--summarizer llm requires a real provider (e.g. via "
+                "openai-agent with OPENAI_API_KEY or DASHSCOPE_API_KEY set)."
+            )
+        summarizer_provider = provider
+    else:  # "auto"
+        summarizer_provider = provider  # None when MockProvider fallback
     # M4: the transcript is created BEFORE the registry so the snip_history
     # tool registered inside build_default_registry closes over the SAME
     # Transcript instance the AgentLoop holds — model snips reach live history.
@@ -467,6 +506,7 @@ def _build_repl_loop(
             output_headroom=resolved_output_headroom,
             compact_headroom=resolved_compact_headroom,
             min_session_tokens=resolved_min_session_tokens,
+            provider=summarizer_provider,
             tracer=active_tracer,
         )
         microcompactor = MicroCompactor(
@@ -481,6 +521,7 @@ def _build_repl_loop(
             output_headroom=resolved_output_headroom,
             compact_headroom=resolved_compact_headroom,
             min_session_tokens=resolved_min_session_tokens,
+            provider=summarizer_provider,
             tracer=active_tracer,
         )
         microcompactor = MicroCompactor(
@@ -503,7 +544,7 @@ def _build_repl_loop(
         tracer=active_tracer,
     )
     loop_kwargs: dict[str, object] = {
-        "provider": provider if provider is not None else _make_repl_provider(workspace),
+        "provider": resolved_provider,
         "tool_executor": executor,
         "transcript": transcript,
         "context_builder": builder,
@@ -731,15 +772,65 @@ def _handle_load_command(args: list[str], loop: AgentLoop | None) -> None:
 
 
 def _read_input_line() -> str | None:
-    """Read one line from stdin. Return None on EOF."""
+    """Read one line from stdin. Return None on EOF.
+
+    Flush stdout/stderr before input() so that all banner/trace output is
+    rendered before readline takes the terminal — otherwise the first
+    keystroke can race with deferred output and the first line appears to
+    be dropped on cold start.
+    """
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except (OSError, ValueError):
+        pass
     try:
         return input(_REPL_PROMPT)
     except EOFError:
         return None
 
 
-def _run_turn(loop: AgentLoop, user_input: str, stream: bool) -> None:
-    """Drive one user turn; print the assistant answer."""
+_STEP_PREVIEW_CHARS: int = 240
+
+
+def _format_step_preview(text: str, limit: int = _STEP_PREVIEW_CHARS) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"... [+{len(text) - limit} more chars]"
+
+
+def _print_tool_step(call_name: str, call_input: object, result_text: str, is_error: bool) -> None:
+    """Render one tool_use+tool_result pair to stderr so it interleaves
+    cleanly with both streamed assistant text on stdout and `[trace]` lines."""
+    marker = "ERROR" if is_error else "Result"
+    print(file=sys.stderr)
+    print(f"Tool: {call_name}({call_input})", file=sys.stderr)
+    print(f"{marker}: {_format_step_preview(result_text)}", file=sys.stderr)
+    print(file=sys.stderr)
+
+
+def _print_steps_from_result(result: object) -> None:
+    """Non-stream path: walk the LoopResult.steps and print each tool pair."""
+    for step in getattr(result, "steps", ()) or ():
+        if not getattr(step, "tool_calls", None):
+            continue
+        print(f"--- Turn {step.turn} ---", file=sys.stderr)
+        for call, tool_result in zip(step.tool_calls, step.tool_results, strict=True):
+            _print_tool_step(
+                call.name, call.input, tool_result.content, bool(tool_result.is_error)
+            )
+
+
+def _run_turn(
+    loop: AgentLoop, user_input: str, stream: bool, *, show_steps: bool = False
+) -> None:
+    """Drive one user turn; print the assistant answer.
+
+    When ``show_steps`` is True, also render each tool_use+tool_result pair —
+    in stream mode via ``tool_step`` events as they arrive, in non-stream mode
+    by walking ``LoopResult.steps`` after the turn. Steps go to stderr so
+    they don't tangle with streamed assistant text on stdout.
+    """
     if stream:
         streamed = False
         final_answer: str | None = None
@@ -747,6 +838,18 @@ def _run_turn(loop: AgentLoop, user_input: str, stream: bool) -> None:
             if event.type == "text_delta" and event.text:
                 print(event.text, end="", flush=True)
                 streamed = True
+            elif (
+                event.type == "tool_step"
+                and show_steps
+                and event.tool_call is not None
+                and event.tool_result is not None
+            ):
+                _print_tool_step(
+                    event.tool_call.name,
+                    event.tool_call.input,
+                    event.tool_result.content,
+                    bool(event.tool_result.is_error),
+                )
             elif event.type == "done" and event.result is not None:
                 final_answer = event.result.answer
         if streamed:
@@ -755,6 +858,8 @@ def _run_turn(loop: AgentLoop, user_input: str, stream: bool) -> None:
         print(final_answer or "(no answer)")
         return
     result = loop.run(user_input)
+    if show_steps:
+        _print_steps_from_result(result)
     print(result.answer or "(no answer)")
 
 
@@ -765,6 +870,7 @@ def _drive_repl_session(
     session_memory: SessionMemory,
     session_mem_path: Path,
     max_turns: int | None = None,
+    show_steps: bool = False,
 ) -> int:
     """Drive the interactive read-input/run-turn loop on a pre-built loop.
 
@@ -813,7 +919,7 @@ def _drive_repl_session(
             print(format_hint(cue))
 
         try:
-            _run_turn(loop, stripped, stream)
+            _run_turn(loop, stripped, stream, show_steps=show_steps)
         except KeyboardInterrupt:
             print("\n(interrupted; transcript preserved)")
             continue
@@ -840,6 +946,8 @@ def _run_repl(
     aggressive_thresholds: bool = False,
     extract_memories_enabled: bool = False,
     extract_throttle_n: int = 1,
+    show_steps: bool = False,
+    summarizer_mode: str = "auto",
 ) -> int:
     """Run the interactive REPL.
 
@@ -886,6 +994,7 @@ def _run_repl(
         aggressive_thresholds=aggressive_thresholds,
         extract_memories_enabled=extract_memories_enabled,
         extract_throttle_n=extract_throttle_n,
+        summarizer_mode=summarizer_mode,
     )
 
     if resume is not None:
@@ -898,6 +1007,7 @@ def _run_repl(
         stream=stream,
         session_memory=session_memory,
         session_mem_path=session_mem_path,
+        show_steps=show_steps,
     )
 
 
@@ -922,6 +1032,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--stream",
         action="store_true",
         help="Stream assistant text as it arrives (REPL mode).",
+    )
+    parser.add_argument(
+        "--show-steps",
+        action="store_true",
+        help=(
+            "Print each tool call and its result preview to stderr as the "
+            "turn progresses (REPL mode). Pairs cleanly with --verbose."
+        ),
     )
     parser.add_argument(
         "--verbose",
@@ -1074,6 +1192,20 @@ def _build_parser() -> argparse.ArgumentParser:
             "allowlist (pwd, ls, cat, grep, python -m pytest)."
         ),
     )
+    parser.add_argument(
+        "--summarizer",
+        choices=("auto", "rule", "llm"),
+        default="auto",
+        help=(
+            "Compaction summarizer. 'auto' (default) reuses the active "
+            "real provider (e.g. via openai-agent) for LLM-based "
+            "summarization; falls back to RuleBasedSummarizer when only "
+            "MockProvider is available (the simple-agent default). 'rule' "
+            "forces RuleBasedSummarizer (no extra API call). 'llm' forces "
+            "LLMSummarizer (errors at startup if no real provider is "
+            "configured)."
+        ),
+    )
     return parser
 
 
@@ -1133,6 +1265,8 @@ def main(argv: list[str] | None = None) -> int:
             aggressive_thresholds=bool(args.aggressive_thresholds),
             extract_memories_enabled=extract_enabled,
             extract_throttle_n=extract_throttle,
+            show_steps=bool(args.show_steps),
+            summarizer_mode=str(args.summarizer),
         )
 
     # One-shot demo (unchanged behavior; default shell_mode is MOCK).

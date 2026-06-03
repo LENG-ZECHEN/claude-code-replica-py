@@ -1,0 +1,129 @@
+{
+  "answers_preview": {
+    "full": [
+      "From the prior reads, **module_000.py** is a synthetic Python file generated for",
+      "Module_001.py is identical in structure to module_000: a synthetic cost-benchmar",
+      "**Module_002.py**: Identical synthetic pattern\u2014100 empty `function_x` definition",
+      "So far, I have seen:  \n- `module_000.py`  \n- `module_001.py`  \n- `module_002.py`",
+      "The codebase consists entirely of 8 identical, synthetic Python modules\u2014each con"
+    ],
+    "naive": [
+      "From the prior reads, I learned that `module_000.py` is a synthetic Python file ",
+      "`module_001.py` is identical in structure to `module_000.py`: a synthetic benchm",
+      "- **module_002**: Identical to `module_000` and `module_001` \u2014 exactly 1000 `def",
+      "- `module_000.py`  \n- `module_001.py`  \n- `module_002.py`  \n- `module_003.py`  \n",
+      "The codebase consists of eight identical synthetic Python modules (`module_000.p"
+    ]
+  },
+  "config": {
+    "full_budget_tokens": 8000,
+    "input_price_per_1m": 0.11,
+    "model": "qwen-plus-latest",
+    "naive_budget_tokens": 200000,
+    "output_price_per_1m": 0.28,
+    "price_source": "model-table",
+    "summarizer_mode": "llm",
+    "tool_exchanges": 8,
+    "tool_result_chars_each": 6000,
+    "turns": 5
+  },
+  "full": {
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "calls": 6,
+    "input_cost_usd": 0.002107,
+    "input_tokens": 19153,
+    "output_cost_usd": 0.000239,
+    "output_tokens": 855,
+    "per_call": [
+      {
+        "cache_create": 0,
+        "cache_read": 0,
+        "input": 7658,
+        "output": 435
+      },
+      {
+        "cache_create": 0,
+        "cache_read": 0,
+        "input": 2055,
+        "output": 130
+      },
+      {
+        "cache_create": 0,
+        "cache_read": 0,
+        "input": 2214,
+        "output": 72
+      },
+      {
+        "cache_create": 0,
+        "cache_read": 0,
+        "input": 2313,
+        "output": 67
+      },
+      {
+        "cache_create": 0,
+        "cache_read": 0,
+        "input": 2402,
+        "output": 87
+      },
+      {
+        "cache_create": 0,
+        "cache_read": 0,
+        "input": 2511,
+        "output": 64
+      }
+    ],
+    "total_cost_usd": 0.002346
+  },
+  "naive": {
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "calls": 5,
+    "input_cost_usd": 0.007111,
+    "input_tokens": 64645,
+    "output_cost_usd": 0.000138,
+    "output_tokens": 494,
+    "per_call": [
+      {
+        "cache_create": 0,
+        "cache_read": 0,
+        "input": 12646,
+        "output": 159
+      },
+      {
+        "cache_create": 0,
+        "cache_read": 0,
+        "input": 12834,
+        "output": 89
+      },
+      {
+        "cache_create": 0,
+        "cache_read": 0,
+        "input": 12950,
+        "output": 85
+      },
+      {
+        "cache_create": 0,
+        "cache_read": 0,
+        "input": 13057,
+        "output": 79
+      },
+      {
+        "cache_create": 0,
+        "cache_read": 0,
+        "input": 13158,
+        "output": 82
+      }
+    ],
+    "total_cost_usd": 0.007249
+  },
+  "savings": {
+    "input_tokens_saved": 45492,
+    "input_tokens_saved_pct": 70.37,
+    "output_tokens_saved": -361,
+    "output_tokens_saved_pct": -73.08,
+    "usd_saved": 0.004903,
+    "usd_saved_pct": 67.64
+  },
+  "scenario": "5-turn real-API conversation: full pipeline vs naive baseline"
+}
