@@ -50,6 +50,9 @@ class MetricsCollector:
     extract_writes: int = 0
     todo_writes: int = 0
     todo_nudges_armed: int = 0
+    plan_mode_entries: int = 0
+    plan_mode_exits: int = 0
+    plan_mode_write_attempts: int = 0
 
     def record_full_compact(self) -> None:
         self.full_compacts += 1
@@ -71,6 +74,15 @@ class MetricsCollector:
 
     def record_todo_nudge_armed(self) -> None:
         self.todo_nudges_armed += 1
+
+    def record_plan_mode_entry(self) -> None:
+        self.plan_mode_entries += 1
+
+    def record_plan_mode_exit(self) -> None:
+        self.plan_mode_exits += 1
+
+    def record_plan_mode_write_attempt(self) -> None:
+        self.plan_mode_write_attempts += 1
 
     def add_externalized_bytes(self, byte_count: int) -> None:
         if byte_count < 0:

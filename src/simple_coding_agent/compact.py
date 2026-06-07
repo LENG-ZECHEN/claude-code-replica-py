@@ -139,6 +139,7 @@ class RuleBasedSummarizer:
                 MessageType.ATTACHMENT,
                 MessageType.ATTACHMENT_MEMORY,
                 MessageType.ATTACHMENT_TODO_NUDGE,
+                MessageType.ATTACHMENT_PLAN_MODE,
             ):
                 continue
 

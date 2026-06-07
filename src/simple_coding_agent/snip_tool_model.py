@@ -251,6 +251,7 @@ def register_snip_history_tool(
             description=_TOOL_DESCRIPTION,
             input_schema=_TOOL_INPUT_SCHEMA,
             fn=_snip_history,
+            read_only=True,
         )
     )
 

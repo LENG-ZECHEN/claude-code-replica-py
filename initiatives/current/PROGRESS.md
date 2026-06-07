@@ -43,3 +43,21 @@ exists in this file. Deleting or rewriting a prior block halts the loop.
     ToolSearch in replica, tool is always in initial schema.
   - verificationNudgeNeeded branch (TodoWriteTool.ts:76-86) skipped —
     GrowthBook-gated in TS, no verification agent in this replica.
+
+## M2 — done 2026-06-08
+
+- commit: [plan-srf/M2] (see git log)
+- tests: 864 → 882 (+18; gate was ≥14)
+- mypy: clean | ruff: clean
+- files changed: `permission.py` (new), `plan_mode_tools.py` (new),
+  `tests/test_permission_mode.py` (new), `tests/test_enter_plan_mode.py` (new),
+  `tests/test_plan_mode_soft_deny.py` (new), `tools.py`, `models.py`,
+  `transcript.py`, `compact.py`, `context.py`, `metrics.py`, `trace.py`,
+  `loop.py`, `snip_tool_model.py`, `todo_tool.py`, `tool_registry_factory.py`,
+  `tests/test_agent_integration.py`
+- exit gate: 3 new test files pass, pytest ≥14 growth, tools schema
+  mode-invariant (deep-equal), ATTACHMENT_PLAN_MODE in turn 2 messages,
+  soft-deny fires for write_file/run_shell/write_memory_entry in plan mode,
+  read_file/todo_write allowed → PASS (18 new tests pass, all 882 green)
+- notes: `_set_permission_mode` does NOT yet pass `source=` to tracer;
+  M3 must add that parameter when wiring the `/plan` slash command.

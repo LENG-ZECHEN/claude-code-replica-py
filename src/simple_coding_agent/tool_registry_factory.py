@@ -24,6 +24,7 @@ from .coding_tools import (
     search_text,
     write_file,
 )
+from .plan_mode_tools import register_enter_plan_mode_tool
 from .snip_tool_model import register_snip_history_tool
 from .tools import Tool, ToolRegistry
 from .transcript import Transcript
@@ -74,6 +75,7 @@ def build_default_registry(
         ),
         input_schema=list_schema,
         fn=lambda subdir=None: "\n".join(list_files(ws, subdir=subdir)),
+        read_only=True,
     ))
 
     read_schema: dict[str, Any] = {
@@ -91,6 +93,7 @@ def build_default_registry(
         description="Read a UTF-8 text file inside the workspace.",
         input_schema=read_schema,
         fn=lambda path: read_file(ws, path),
+        read_only=True,
     ))
 
     write_schema: dict[str, Any] = {
@@ -141,6 +144,7 @@ def build_default_registry(
         fn=lambda pattern, subdir=None: _format_search_results(
             search_text(ws, pattern, subdir=subdir)
         ),
+        read_only=True,
     ))
 
     run_schema: dict[str, Any] = {
@@ -180,6 +184,13 @@ def build_default_registry(
     # registered but acts on empty history); REPL call sites pass the SAME
     # Transcript the AgentLoop holds so model snips reach the live session.
     register_snip_history_tool(registry, transcript if transcript is not None else Transcript())
+
+    # M2: enter_plan_mode tool (plan-surface). Registered unconditionally so
+    # the model can always enter plan mode regardless of CLI flags. The
+    # mode_setter closure will be replaced when AgentLoop wires the real setter;
+    # this default (no-op) satisfies tool-registry unit tests that build the
+    # registry without a loop.
+    register_enter_plan_mode_tool(registry, lambda _mode: None)
 
     return registry
 

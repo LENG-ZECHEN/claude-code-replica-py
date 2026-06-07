@@ -116,6 +116,7 @@ def register_todo_write_tool(
         description=_DESCRIPTION,
         input_schema=_TODO_WRITE_SCHEMA,
         fn=lambda **kw: _todo_write_fn(**kw),
+        read_only=True,
     ))
 
 

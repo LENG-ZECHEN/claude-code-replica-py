@@ -60,12 +60,15 @@ class Tool:
     Source: BaseTool in src/Tool.ts.
     max_result_chars mirrors maxResultSizeChars (default 50_000).
     Set to None to disable externalization for this tool.
+    read_only mirrors isReadOnly() in TS BaseTool. When True, the tool may be
+    called in plan mode; when False, AgentLoop._execute_one soft-denies it.
     """
     name: str
     description: str
     input_schema: dict[str, Any]
     fn: Callable[..., str]
     max_result_chars: int | None = MAX_RESULT_CHARS
+    read_only: bool = False
 
 
 # ---------------------------------------------------------------------------

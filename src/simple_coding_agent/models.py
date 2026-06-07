@@ -54,6 +54,7 @@ class MessageType(StrEnum):
     ATTACHMENT = "attachment"        # recent-file re-injection; serialized as a user message
     ATTACHMENT_MEMORY = "attachment_memory"  # sideQuery memory injection (M7)
     ATTACHMENT_TODO_NUDGE = "attachment_todo_nudge"  # stale-todo reminder (plan-surface M1)
+    ATTACHMENT_PLAN_MODE = "attachment_plan_mode"    # per-turn plan-mode teaching (plan-surface M2)
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +231,25 @@ class Message:
             content=content,
             timestamp=_now_iso(),
             type=MessageType.ATTACHMENT_TODO_NUDGE,
+            is_meta=True,
+        )
+
+    @classmethod
+    def attachment_plan_mode(cls, content: str) -> Message:
+        """Create a per-turn plan-mode teaching injection message (plan-surface M2).
+
+        Carries ENTER_PLAN_MODE_TEACHING_TEXT wrapped in <system-reminder> tags,
+        prepended each turn while _permission_mode == PLAN. USER-role so it
+        reaches the API; _coalesce_same_role merges adjacency.
+        Source: attachments.ts:1186 getPlanModeAttachments + messages.ts:3826
+        case 'plan_mode' → getPlanModeInstructions.
+        """
+        return cls(
+            uuid=_new_uuid(),
+            role=Role.USER,
+            content=content,
+            timestamp=_now_iso(),
+            type=MessageType.ATTACHMENT_PLAN_MODE,
             is_meta=True,
         )
 

@@ -101,7 +101,11 @@ class Transcript:
         for msg in self._messages:
             if msg.is_virtual:
                 continue
-            if msg.type in (MessageType.COMPACT_BOUNDARY, MessageType.ATTACHMENT):
+            if msg.type in (
+                MessageType.COMPACT_BOUNDARY,
+                MessageType.ATTACHMENT,
+                MessageType.ATTACHMENT_PLAN_MODE,
+            ):
                 continue
             if msg.role == Role.SYSTEM:
                 continue

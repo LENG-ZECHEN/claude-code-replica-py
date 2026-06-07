@@ -32,6 +32,8 @@ from .models import (
     ToolCall,
     ToolResult,
 )
+from .permission import PermissionMode, PlanModeAttachment
+from .plan_mode_tools import register_enter_plan_mode_tool
 from .provider import STOP_MAX_TOKENS, PromptTooLongError, Provider
 from .recall_hooks import inject_memory_attachments
 from .snip import SnipTool
@@ -210,6 +212,7 @@ class AgentLoop:
         self._todo_nudge_machinery_enabled = False  # computed after _register_tools
         self._turns_since_last_todo_write: int = 0
         self._turns_since_last_todo_reminder: int = 0
+        self._permission_mode: PermissionMode = PermissionMode.NORMAL
         self._register_tools()
         self._todo_nudge_machinery_enabled = (
             todo_nudge_enabled
@@ -243,6 +246,7 @@ class AgentLoop:
             compacted_this_turn = self._maybe_compact()
             if compacted_this_turn:
                 compacted_overall = True
+            _plan_mode_attachment = self._maybe_arm_plan_mode_attachment()
 
             while True:
                 memory_snippets = self._collect_memory_snippets(user_input)
@@ -253,6 +257,7 @@ class AgentLoop:
                     memory_snippets=memory_snippets,
                     snip_nudge=self._compute_snip_nudge(),
                     todo_nudge=_todo_nudge,
+                    plan_mode_attachment=_plan_mode_attachment,
                 )
 
                 tools_spec = (
@@ -398,6 +403,7 @@ class AgentLoop:
             compacted_this_turn = self._maybe_compact()
             if compacted_this_turn:
                 compacted_overall = True
+            _plan_mode_attachment = self._maybe_arm_plan_mode_attachment()
 
             while True:
                 memory_snippets = self._collect_memory_snippets(user_input)
@@ -408,6 +414,7 @@ class AgentLoop:
                     memory_snippets=memory_snippets,
                     snip_nudge=self._compute_snip_nudge(),
                     todo_nudge=_todo_nudge,
+                    plan_mode_attachment=_plan_mode_attachment,
                 )
                 tools_spec = (
                     self._registry.to_api_format() if self._registry is not None else []
@@ -610,6 +617,12 @@ class AgentLoop:
                 )
             )
 
+        # Re-register enter_plan_mode with this loop's real mode setter, overwriting
+        # the no-op lambda placed by build_default_registry. The registry overwrite is
+        # safe: ToolRegistry.register() silently replaces existing entries.
+        if self._registry is not None:
+            register_enter_plan_mode_tool(self._registry, self._set_permission_mode)
+
 
     def _get_todos(self) -> list[TodoItem]:
         return list(self._todos)
@@ -804,6 +817,22 @@ class AgentLoop:
             return None
         return SnipNudge(candidate_uuids=tuple(candidates))
 
+    def _set_permission_mode(self, mode: PermissionMode) -> None:
+        """Flip permission mode; emit trace and record metrics."""
+        self._permission_mode = mode
+        if mode == PermissionMode.PLAN:
+            self._metrics.record_plan_mode_entry()
+            self._tracer.emit("permission", mode="plan")
+        else:
+            self._metrics.record_plan_mode_exit()
+            self._tracer.emit("permission", mode="normal")
+
+    def _maybe_arm_plan_mode_attachment(self) -> PlanModeAttachment | None:
+        """Return an opaque PlanModeAttachment marker when in PLAN mode, else None."""
+        if self._permission_mode == PermissionMode.PLAN:
+            return PlanModeAttachment()
+        return None
+
     def _capture_file_snapshot(self, call: ToolCall, content: str) -> None:
         """Record a read_file result as a recent FileSnapshot (M3).
 
@@ -824,6 +853,25 @@ class AgentLoop:
 
     def _execute_one(self, call: ToolCall) -> ToolResult:
         """Execute a single tool call; capture unknown-tool and runtime errors."""
+        # Plan-mode soft-deny: block non-read-only tools before execution.
+        # Unknown tools (not in registry) are treated as non-read-only and denied.
+        if self._permission_mode == PermissionMode.PLAN and self._registry is not None:
+            try:
+                tool = self._registry.get(call.name)
+                is_write = not tool.read_only
+            except UnknownToolError:
+                is_write = True
+            if is_write:
+                self._metrics.record_plan_mode_write_attempt()
+                return ToolResult(
+                    tool_use_id=call.id,
+                    content=(
+                        f"Plan mode active: '{call.name}' is not allowed. "
+                        "Only read-only tools may be called in plan mode."
+                    ),
+                    is_error=True,
+                )
+
         try:
             content, is_error = self._tool_executor.execute(call.name, call.input)
         except UnknownToolError:

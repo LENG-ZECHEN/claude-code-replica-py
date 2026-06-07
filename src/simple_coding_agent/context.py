@@ -21,6 +21,7 @@ from typing import Any
 from .claude_md import ClaudeMdLoader
 from .memory import ProjectMemory
 from .models import CompactSummary, Message, MessageType, Role, ToolCall, ToolResult
+from .permission import ENTER_PLAN_MODE_TEACHING_TEXT, PlanModeAttachment
 from .snip_tool_model import SnipNudge
 from .todo import TodoNudge, render_todo_nudge_body
 from .tool_result_store import ToolResultStore
@@ -353,6 +354,23 @@ def _todo_nudge_dict(nudge: TodoNudge) -> dict[str, Any]:
     }
 
 
+def _plan_mode_dict(attachment: PlanModeAttachment) -> dict[str, Any]:  # noqa: ARG001
+    """Render a PlanModeAttachment as one user-role API message (plan-surface M2).
+
+    Wraps ENTER_PLAN_MODE_TEACHING_TEXT in <system-reminder> tags and returns a
+    USER-role dict. The PlanModeAttachment is an opaque marker; the actual text
+    comes from the single source of truth in permission.py.
+    Source: attachments.ts:1186 getPlanModeAttachments + messages.ts:3826
+    case 'plan_mode' → wrapMessagesInSystemReminder.
+    """
+    return {
+        "role": Role.USER.value,
+        "content": (
+            f"<system-reminder>\n{ENTER_PLAN_MODE_TEACHING_TEXT}\n</system-reminder>"
+        ),
+    }
+
+
 def _remove_orphan_tool_results(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Drop tool_result blocks whose tool_use is no longer in context."""
     seen_tool_use_ids: set[str] = set()
@@ -435,6 +453,7 @@ class ContextBuilder:
         *,
         snip_nudge: SnipNudge | None = None,
         todo_nudge: TodoNudge | None = None,
+        plan_mode_attachment: PlanModeAttachment | None = None,
     ) -> BuiltContext:
         """Assemble a BuiltContext from the current transcript state."""
         raw_messages = transcript.messages_after_compact_boundary()
@@ -453,11 +472,14 @@ class ContextBuilder:
 
         # M4: prepend the snip nudge (when armed) ahead of the kept turns.
         # plan-surface M1: prepend the todo nudge (when armed) ahead of kept turns.
+        # plan-surface M2: prepend the plan-mode attachment (when armed) ahead of kept turns.
         # M3: re-attach recent-file snapshots in front of everything. The
-        # final front-to-back order is [*attachments, snip_nudge, todo_nudge, *kept]
-        # so the compact boundary → recent files → snip reminder → todo reminder →
-        # conversation ordering is preserved. All are added AFTER trimming so none
-        # are ever popped to satisfy the budget.
+        # final front-to-back order is [*attachments, snip_nudge, todo_nudge,
+        # plan_mode_attachment, *kept] so the compact boundary → recent files →
+        # snip → todo → plan mode → conversation ordering is preserved.
+        # All are added AFTER trimming so none are ever popped to satisfy the budget.
+        if plan_mode_attachment is not None:
+            api_messages = [_plan_mode_dict(plan_mode_attachment)] + api_messages
         if todo_nudge is not None:
             api_messages = [_todo_nudge_dict(todo_nudge)] + api_messages
         if snip_nudge is not None:
