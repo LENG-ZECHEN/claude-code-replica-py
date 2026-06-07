@@ -626,6 +626,7 @@ class AgentLoop:
                 self._registry,
                 self._set_permission_mode,
                 self._exit_plan_mode_callback,
+                metrics=self._metrics,
             )
 
 
@@ -885,7 +886,9 @@ class AgentLoop:
                     tool_use_id=call.id,
                     content=(
                         f"Plan mode active: '{call.name}' is not allowed. "
-                        "Only read-only tools may be called in plan mode."
+                        "Only read-only tools may be called in plan mode. "
+                        "Use exit_plan_mode to submit your plan for approval, "
+                        "or use /plan to exit plan mode manually."
                     ),
                     is_error=True,
                 )

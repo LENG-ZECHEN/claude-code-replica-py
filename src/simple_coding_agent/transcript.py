@@ -104,6 +104,8 @@ class Transcript:
             if msg.type in (
                 MessageType.COMPACT_BOUNDARY,
                 MessageType.ATTACHMENT,
+                MessageType.ATTACHMENT_MEMORY,
+                MessageType.ATTACHMENT_TODO_NUDGE,
                 MessageType.ATTACHMENT_PLAN_MODE,
             ):
                 continue

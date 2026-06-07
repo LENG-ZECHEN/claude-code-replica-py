@@ -19,9 +19,13 @@ factories — the tools are wired in _build_repl_loop / tool_registry_factory.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from .permission import ENTER_PLAN_MODE_TEACHING_TEXT, PermissionMode
 from .tools import Tool, ToolRegistry
+
+if TYPE_CHECKING:
+    from .metrics import MetricsCollector
 
 _ENTER_PLAN_MODE_SCHEMA: dict[str, object] = {
     "type": "object",
@@ -86,6 +90,7 @@ def register_exit_plan_mode_tool(
     registry: ToolRegistry,
     mode_setter: Callable[[PermissionMode], None],
     approval_callback: Callable[[str], bool],
+    metrics: MetricsCollector | None = None,
 ) -> None:
     """Register the exit_plan_mode tool in *registry*.
 
@@ -93,8 +98,16 @@ def register_exit_plan_mode_tool(
       - takes a required ``plan: str`` (minLength 1) argument
       - calls approval_callback(plan) — typically _confirm_exit_plan in cli.py
       - on approval: calls mode_setter(PermissionMode.NORMAL) and returns approval text
-      - on rejection: raises PlanRejectedError → ToolExecutor converts to is_error=True
+      - on rejection: bumps metrics.plan_mode_exits_rejected (if metrics passed)
+        and raises PlanRejectedError → ToolExecutor converts to is_error=True
       - is read_only=True (the tool is state-machine only; it does not write files)
+
+    When *metrics* is supplied, the rejection branch bumps
+    ``plan_mode_exits_rejected`` before raising. Without this wiring the
+    counter would be permanently zero, because the approval path bumps via
+    ``_set_permission_mode`` (NORMAL) while the rejection path short-circuits.
+    The approval branch deliberately does NOT bump here — ``mode_setter``
+    invokes ``_set_permission_mode`` which already records the exit.
 
     Source: ExitPlanModeV2Tool.ts core call() + approval/rejection branch.
     Out of scope: plan persistence, allowedPrompts, reentry attachments, analytics.
@@ -105,6 +118,8 @@ def register_exit_plan_mode_tool(
         if approval_callback(plan):
             mode_setter(PermissionMode.NORMAL)
             return "Plan approved. Exiting plan mode."
+        if metrics is not None:
+            metrics.record_plan_mode_exit_rejected()
         raise PlanRejectedError(
             "Plan rejected by user. Stay in plan mode and refine."
         )

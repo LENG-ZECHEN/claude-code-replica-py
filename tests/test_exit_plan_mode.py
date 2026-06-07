@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 import simple_coding_agent.claude_md as cm
+from simple_coding_agent.metrics import MetricsCollector
 from simple_coding_agent.permission import PermissionMode
 from simple_coding_agent.plan_mode_tools import PlanRejectedError, register_exit_plan_mode_tool
 from simple_coding_agent.tools import ToolExecutor, ToolRegistry
@@ -137,3 +138,65 @@ def test_toolexecutor_reject_path_is_error_with_rejection_text() -> None:
     content, is_error = executor.execute("exit_plan_mode", {"plan": "detailed plan"})
     assert is_error is True
     assert "Plan rejected by user. Stay in plan mode and refine." in content
+
+
+# ---------------------------------------------------------------------------
+# Metrics wiring (review-fix): the rejection path must bump
+# plan_mode_exits_rejected when a MetricsCollector is supplied. Without the
+# metrics= kwarg the rejection counter would be permanently zero because the
+# rejection branch short-circuits before mode_setter would have bumped it.
+# ---------------------------------------------------------------------------
+
+def test_exit_plan_mode_rejection_bumps_metrics_when_supplied() -> None:
+    registry = ToolRegistry()
+    metrics = MetricsCollector()
+    register_exit_plan_mode_tool(
+        registry,
+        lambda mode: None,
+        lambda plan: False,  # always reject
+        metrics=metrics,
+    )
+    tool = registry.get("exit_plan_mode")
+    assert metrics.plan_mode_exits_rejected == 0
+    with pytest.raises(PlanRejectedError):
+        tool.fn(plan="My plan")
+    assert metrics.plan_mode_exits_rejected == 1
+    assert metrics.plan_mode_exits_approved == 0
+    # Second rejection should keep incrementing.
+    with pytest.raises(PlanRejectedError):
+        tool.fn(plan="Another plan")
+    assert metrics.plan_mode_exits_rejected == 2
+
+
+def test_exit_plan_mode_rejection_without_metrics_does_not_crash() -> None:
+    registry = ToolRegistry()
+    register_exit_plan_mode_tool(
+        registry,
+        lambda mode: None,
+        lambda plan: False,
+        # metrics= omitted — must remain backward-compatible
+    )
+    tool = registry.get("exit_plan_mode")
+    with pytest.raises(PlanRejectedError):
+        tool.fn(plan="My plan")
+
+
+def test_exit_plan_mode_approval_does_not_double_bump_rejected() -> None:
+    """Approval path goes through mode_setter (which bumps `_approved` via
+    `_set_permission_mode`). The factory must not also bump anything on
+    approval, otherwise approval+rejection counts would diverge from total."""
+    registry = ToolRegistry()
+    metrics = MetricsCollector()
+    register_exit_plan_mode_tool(
+        registry,
+        lambda mode: None,  # no-op mode_setter for this unit test
+        lambda plan: True,  # always approve
+        metrics=metrics,
+    )
+    tool = registry.get("exit_plan_mode")
+    result = tool.fn(plan="My plan")
+    assert result == "Plan approved. Exiting plan mode."
+    # The factory must not bump on approval; only mode_setter chain would.
+    # Since mode_setter is a no-op here, both counters stay 0.
+    assert metrics.plan_mode_exits_approved == 0
+    assert metrics.plan_mode_exits_rejected == 0

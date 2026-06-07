@@ -481,3 +481,57 @@ def test_openai_repl_max_turns_exits_after_n_turns(
     assert "turn1" in user_texts
     assert "turn2" in user_texts
     assert "turn3" not in user_texts
+
+
+def test_openai_repl_no_todo_reminder_disables_machinery(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """``--no-todo-reminder`` propagates to the AgentLoop and disables the nudge.
+
+    Without this flag, simple-agent-openai was previously silently accepting
+    the documented PLAN/PROMPT surface but ignoring it for the live-provider
+    REPL — argparse would reject the unknown flag and the OpenAI REPL had no
+    way to disable the nudge machinery. This wiring closes that gap.
+    """
+    monkeypatch.setattr(openai_cli, "OpenAIProvider", _FakeOpenAIProvider)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _set_stdin(monkeypatch, "/exit")
+
+    rc = openai_cli.main([
+        "--no-dotenv",
+        "--repl",
+        "--workspace", str(tmp_path),
+        "--model", "test-model",
+        "--no-todo-reminder",
+    ])
+    assert rc == 0
+    loops = _captured_loops()
+    assert loops
+    # With todo_nudge_enabled=False, the loop must not register todo_write.
+    assert "todo_write" not in loops[0]._registry._tools
+    assert loops[0]._todo_nudge_machinery_enabled is False
+
+
+def test_openai_repl_todo_reminder_turns_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """``--todo-reminder-turns 3`` propagates into AgentLoop._todo_reminder_turns."""
+    monkeypatch.setattr(openai_cli, "OpenAIProvider", _FakeOpenAIProvider)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _set_stdin(monkeypatch, "/exit")
+
+    rc = openai_cli.main([
+        "--no-dotenv",
+        "--repl",
+        "--workspace", str(tmp_path),
+        "--model", "test-model",
+        "--todo-reminder-turns", "3",
+    ])
+    assert rc == 0
+    loops = _captured_loops()
+    assert loops
+    assert loops[0]._todo_reminder_turns == 3
+    # Without --no-todo-reminder, todo_write must still be registered.
+    assert "todo_write" in loops[0]._registry._tools

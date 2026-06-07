@@ -255,6 +255,28 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--no-todo-reminder",
+        action="store_true",
+        help=(
+            "Disable the turn-based TodoWrite stale-todo nudge (plan-surface "
+            "M1). When set, the system prompt's Todo Management teaching "
+            "section is also omitted and the todo_write tool is not "
+            "registered, so the nudge machinery is fully quiescent."
+        ),
+    )
+    parser.add_argument(
+        "--todo-reminder-turns",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Override TODO_REMINDER_TURNS (default 10). The turn-based "
+            "reminder fires when both 'turns_since_write >= N' AND "
+            "'turns_since_reminder >= N' hold. Ignored when "
+            "--no-todo-reminder is set."
+        ),
+    )
+    parser.add_argument(
         "--shell-mode",
         choices=("mock", "allowlist"),
         default="mock",
@@ -398,6 +420,8 @@ def _build_openai_repl_loop(
     extract_memories_enabled: bool = False,
     extract_throttle_n: int = 1,
     summarizer_mode: str = "auto",
+    todo_nudge_enabled: bool = True,
+    todo_reminder_turns: int | None = None,
 ) -> AgentLoop:
     """Wire a real-provider AgentLoop using the cli helper for everything else.
 
@@ -431,6 +455,8 @@ def _build_openai_repl_loop(
         extract_memories_enabled=extract_memories_enabled,
         extract_throttle_n=extract_throttle_n,
         summarizer_mode=summarizer_mode,
+        todo_nudge_enabled=todo_nudge_enabled,
+        todo_reminder_turns=todo_reminder_turns,
     )
 
 
@@ -454,6 +480,8 @@ def _run_openai_repl(
     extract_throttle_n: int = 1,
     show_steps: bool = False,
     summarizer_mode: str = "auto",
+    todo_nudge_enabled: bool = True,
+    todo_reminder_turns: int | None = None,
 ) -> int:
     """Drive the OpenAI-backed REPL, sharing slash commands with ``cli``.
 
@@ -488,6 +516,8 @@ def _run_openai_repl(
         extract_memories_enabled=extract_memories_enabled,
         extract_throttle_n=extract_throttle_n,
         summarizer_mode=summarizer_mode,
+        todo_nudge_enabled=todo_nudge_enabled,
+        todo_reminder_turns=todo_reminder_turns,
     )
 
     if resume is not None:
@@ -562,6 +592,8 @@ def main(argv: list[str] | None = None) -> int:
             extract_throttle_n=extract_throttle,
             show_steps=bool(args.show_steps),
             summarizer_mode=str(args.summarizer),
+            todo_nudge_enabled=not bool(args.no_todo_reminder),
+            todo_reminder_turns=args.todo_reminder_turns,
         )
 
     return _run_task(

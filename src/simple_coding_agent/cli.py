@@ -602,6 +602,7 @@ def _build_repl_loop(
         registry,
         loop._set_permission_mode,
         _confirm_exit_plan,
+        metrics=loop._metrics,
     )
     _LAST_LOOPS.append(loop)
     return loop
