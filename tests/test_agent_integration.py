@@ -75,7 +75,7 @@ def test_factory_returns_tool_registry(workspace: Path) -> None:
 def test_factory_registers_all_five_tools(workspace: Path) -> None:
     registry = build_default_registry(workspace)
     names = {t.name for t in registry.all_tools()}
-    # M4 added snip_history; plan-surface M2 added enter_plan_mode.
+    # M4 added snip_history; plan-surface M2 added enter_plan_mode; M3 added exit_plan_mode.
     assert names == {
         "list_files",
         "read_file",
@@ -84,13 +84,15 @@ def test_factory_registers_all_five_tools(workspace: Path) -> None:
         "run_shell",
         "snip_history",
         "enter_plan_mode",
+        "exit_plan_mode",
     }
 
 
 def test_factory_tools_have_schemas(workspace: Path) -> None:
     registry = build_default_registry(workspace)
     api_spec = registry.to_api_format()
-    assert len(api_spec) == 7  # five coding tools + snip_history (M4) + enter_plan_mode (M2)
+    # five coding tools + snip_history (M4) + enter_plan_mode (M2) + exit_plan_mode (M3)
+    assert len(api_spec) == 8
     for entry in api_spec:
         assert entry["name"]
         assert entry["description"]

@@ -15,8 +15,6 @@ Covers:
 """
 from __future__ import annotations
 
-import copy
-import json
 from pathlib import Path
 from typing import Any
 
@@ -24,21 +22,15 @@ import pytest
 
 import simple_coding_agent.claude_md as cm
 from simple_coding_agent.cli import _build_repl_loop
-from simple_coding_agent.context import ContextBudget, ContextBuilder
 from simple_coding_agent.loop import AgentLoop
-from simple_coding_agent.metrics import MetricsCollector
-from simple_coding_agent.models import MessageType
 from simple_coding_agent.permission import (
     ENTER_PLAN_MODE_TEACHING_TEXT,
     PermissionMode,
-    PlanModeAttachment,
 )
 from simple_coding_agent.plan_mode_tools import register_enter_plan_mode_tool
 from simple_coding_agent.provider import MockProvider, ProviderResponse
 from simple_coding_agent.tool_registry_factory import build_default_registry
-from simple_coding_agent.tools import ToolExecutor, ToolRegistry
-from simple_coding_agent.trace import NullTracer
-from simple_coding_agent.transcript import Transcript
+from simple_coding_agent.tools import ToolRegistry
 
 
 @pytest.fixture(autouse=True)
@@ -180,7 +172,9 @@ def test_turn2_attachment_contains_teaching_text(tmp_path: Path) -> None:
 def test_default_registry_read_only_audit(tmp_path: Path) -> None:
     """Verify read_only flags on all tools in the default registry."""
     registry = build_default_registry(tmp_path)
-    expected_read_only = {"read_file", "list_files", "search_text", "snip_history", "enter_plan_mode"}
+    expected_read_only = {
+        "read_file", "list_files", "search_text", "snip_history", "enter_plan_mode",
+    }
     expected_write = {"write_file", "run_shell"}
     for name in expected_read_only:
         tool = registry.get(name)

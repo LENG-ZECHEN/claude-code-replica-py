@@ -51,7 +51,8 @@ class MetricsCollector:
     todo_writes: int = 0
     todo_nudges_armed: int = 0
     plan_mode_entries: int = 0
-    plan_mode_exits: int = 0
+    plan_mode_exits_approved: int = 0
+    plan_mode_exits_rejected: int = 0
     plan_mode_write_attempts: int = 0
 
     def record_full_compact(self) -> None:
@@ -75,11 +76,28 @@ class MetricsCollector:
     def record_todo_nudge_armed(self) -> None:
         self.todo_nudges_armed += 1
 
+    @property
+    def plan_mode_exits(self) -> int:
+        """Total plan mode exits (approved + rejected) — computed, not stored."""
+        return self.plan_mode_exits_approved + self.plan_mode_exits_rejected
+
     def record_plan_mode_entry(self) -> None:
         self.plan_mode_entries += 1
 
     def record_plan_mode_exit(self) -> None:
-        self.plan_mode_exits += 1
+        """Generic exit counter used by _set_permission_mode (slash toggle path).
+
+        Counts as approved since the user explicitly chose to exit via /plan.
+        """
+        self.plan_mode_exits_approved += 1
+
+    def record_plan_mode_exit_approved(self) -> None:
+        """Tool-mediated exit where user approved the plan."""
+        self.plan_mode_exits_approved += 1
+
+    def record_plan_mode_exit_rejected(self) -> None:
+        """Tool-mediated exit attempt that was rejected by the user."""
+        self.plan_mode_exits_rejected += 1
 
     def record_plan_mode_write_attempt(self) -> None:
         self.plan_mode_write_attempts += 1

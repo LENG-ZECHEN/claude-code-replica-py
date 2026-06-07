@@ -54,6 +54,8 @@ from .memory import (
 )
 from .metrics import MetricsCollector
 from .models import ToolCall
+from .permission import PermissionMode
+from .plan_mode_tools import register_exit_plan_mode_tool
 from .provider import MockProvider, Provider, ProviderResponse
 from .session_store import (
     InvalidSessionNameError,
@@ -131,6 +133,8 @@ _REPL_HELP_TEXT: str = (
     "  /remember-session <text>       Add a session-scoped memory note "
     "(lost when REPL ends unless saved).\n"
     "  /todos                         Show the current todo list.\n"
+    "  /plan                          Toggle plan mode (silently; bidirectional). "
+    "Writes are soft-rejected while in plan mode.\n"
     "  /exit, /quit                   Leave the REPL.\n"
 )
 _REPL_DEFAULT_ANSWER: str = (
@@ -590,8 +594,36 @@ def _build_repl_loop(
     if system_prompt is not None:
         loop_kwargs["system_prompt"] = system_prompt
     loop = AgentLoop(**loop_kwargs)  # type: ignore[arg-type]
+    # Re-register exit_plan_mode with the CLI's approval gate, overwriting the
+    # no-op _exit_plan_mode_callback wired by AgentLoop._register_tools(). This
+    # mirrors the enter_plan_mode re-registration pattern in _register_tools:
+    # ToolRegistry.register() silently replaces the prior entry.
+    register_exit_plan_mode_tool(
+        registry,
+        loop._set_permission_mode,
+        _confirm_exit_plan,
+    )
     _LAST_LOOPS.append(loop)
     return loop
+
+
+def _confirm_exit_plan(plan_text: str) -> bool:
+    """Block on user approval when the model calls exit_plan_mode.
+
+    Prints the proposed plan, then reads one line from stdin:
+      "y" / "Y"                  → approved (returns True)
+      "n" / "N" / "" / EOF / ^C → rejected (returns False)
+
+    Source: ExitPlanModeV2Tool.ts approval-gate pattern (the user-confirmation
+    prompt shown before the model regains write privileges).
+    """
+    print("\n--- Proposed plan ---")
+    print(plan_text)
+    print("---------------------")
+    try:
+        return input("Approve plan? (y/N): ").strip().lower() == "y"
+    except (EOFError, KeyboardInterrupt):
+        return False
 
 
 def _handle_slash_command(cmd: str, loop: AgentLoop | None = None) -> str:
@@ -629,8 +661,36 @@ def _handle_slash_command(cmd: str, loop: AgentLoop | None = None) -> str:
     if head == "/todos":
         _handle_todos_command(loop)
         return "continue"
+    if head == "/plan":
+        _handle_plan_command(loop)
+        return "continue"
     print(f"Unknown command: {head!r}. Try /help for the command list.")
     return "continue"
+
+
+def _handle_plan_command(loop: AgentLoop | None) -> None:
+    """Implement ``/plan``: bidirectional NORMAL↔PLAN toggle (no approval prompt).
+
+    The user gets a fast manual escape that preserves transcript history so
+    they can inherit the read_file/search_text context accumulated during
+    planning and continue in NORMAL — or quickly enter plan mode to constrain
+    the next model turn. Both transitions emit a 'permission' trace with
+    source="slash" for observability.
+
+    Source: TS /plan slash is also bidirectional via the underlying setMode API.
+    """
+    if loop is None:
+        print("Cannot toggle plan mode outside a loop.")
+        return
+    if loop._permission_mode == PermissionMode.NORMAL:
+        loop._set_permission_mode(PermissionMode.PLAN, source="slash")
+        print(
+            "Plan mode entered. Write tools will be soft-rejected. "
+            "Use /plan again to exit, or let the model call ExitPlanMode."
+        )
+    else:
+        loop._set_permission_mode(PermissionMode.NORMAL, source="slash")
+        print("Plan mode exited. Write tools re-enabled.")
 
 
 def _handle_remember_command(args: list[str], loop: AgentLoop | None) -> None:

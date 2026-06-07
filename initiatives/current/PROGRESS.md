@@ -61,3 +61,22 @@ exists in this file. Deleting or rewriting a prior block halts the loop.
   read_file/todo_write allowed → PASS (18 new tests pass, all 882 green)
 - notes: `_set_permission_mode` does NOT yet pass `source=` to tracer;
   M3 must add that parameter when wiring the `/plan` slash command.
+
+## M3 — done 2026-06-08
+
+- commit: [plan-srf/M3] (see git log)
+- tests: 882 → 899 (+17; gate was ≥10)
+- mypy: clean | ruff: clean
+- files changed: `plan_mode_tools.py`, `metrics.py`, `loop.py`,
+  `cli.py`, `tool_registry_factory.py`, `tests/test_agent_integration.py`,
+  `tests/test_enter_plan_mode.py` (ruff cleanup), `tests/test_plan_mode_soft_deny.py` (ruff cleanup),
+  `tests/test_exit_plan_mode.py` (new), `tests/test_repl_plan_mode.py` (new)
+- exit gate: test_exit_plan_mode.py and test_repl_plan_mode.py pass (17 new tests);
+  /plan toggle NORMAL→PLAN prints "Plan mode entered...", PLAN→NORMAL prints
+  "Plan mode exited..."; both emit source=slash trace; exit_plan_mode tool
+  approve → NORMAL + is_error=False; reject → PLAN + is_error=True with
+  rejection text; transcript preserved across toggle → PASS
+- notes: `plan_mode_exits` converted to computed property (approved+rejected);
+  `_exit_plan_mode_callback` no-op added to loop as default before cli wires
+  `_confirm_exit_plan`; M2 ruff errors (unused imports in test files) fixed as
+  part of M3 cleanup since they blocked ruff clean baseline.

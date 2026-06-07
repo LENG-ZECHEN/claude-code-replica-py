@@ -1,6 +1,6 @@
-# HANDOFF — Next: M3 (ExitPlanMode tool + CLI approval + bidirectional /plan toggle)
+# HANDOFF — plan-surface initiative COMPLETE (M3 done)
 
-> Updated by: M2 autonomous agent
+> Updated by: M3 autonomous agent
 > Date: 2026-06-08
 
 ---
@@ -8,9 +8,9 @@
 ## 1. Current initiative
 
 - **slug**: `plan-surface`
-- **current milestone**: M2 ✓ (done 2026-06-08)
-- **next milestone**: `M3` — ExitPlanMode tool + CLI approval + bidirectional /plan toggle
-- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [next]
+- **current milestone**: M3 ✓ (done 2026-06-08) — FINAL MILESTONE
+- **next milestone**: none — initiative complete
+- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [done]
 
 ## 2. Completed milestones
 
@@ -79,10 +79,53 @@
     doesn't mention it. M3 must add `source` kwarg when wiring the `/plan`
     slash command.
 
+### M3
+
+- **commit**: see `[plan-srf/M3]` commit
+- **files changed**: `plan_mode_tools.py`, `metrics.py`, `loop.py`, `cli.py`,
+  `tool_registry_factory.py`, `tests/test_agent_integration.py`,
+  `tests/test_enter_plan_mode.py` (ruff cleanup),
+  `tests/test_plan_mode_soft_deny.py` (ruff cleanup),
+  `tests/test_exit_plan_mode.py` (new), `tests/test_repl_plan_mode.py` (new)
+- **tests added**: 17 new cases. Total: 882 → 899 (+17; gate was ≥10)
+- **behavior implemented**:
+  - `PlanRejectedError(RuntimeError)` in `plan_mode_tools.py` — mirrors
+    `SnipRefusedError`; ToolExecutor converts it to `is_error=True`.
+  - `register_exit_plan_mode_tool(registry, mode_setter, approval_callback)`
+    factory with `read_only=True`, schema `{plan: str ≥1}`, approval path flips
+    NORMAL and returns "Plan approved.", rejection raises `PlanRejectedError`.
+  - `_confirm_exit_plan(plan_text) -> bool` in `cli.py` — blocks on
+    `input("Approve plan? (y/N): ")`; EOFError/KeyboardInterrupt → False.
+  - `/plan` slash command bidirectional toggle (NORMAL↔PLAN), no approval
+    prompt, both directions emit `source="slash"` trace, transcript preserved.
+  - `_set_permission_mode(mode, *, source="tool")` — added `source` kwarg,
+    passes it to `tracer.emit("permission", ..., source=source)`.
+  - `_exit_plan_mode_callback` no-op on loop — overwritten by `_build_repl_loop`
+    with `_confirm_exit_plan` after `AgentLoop.__init__` runs.
+  - `plan_mode_exits_approved` and `plan_mode_exits_rejected` counters added to
+    `MetricsCollector`; `plan_mode_exits` converted to computed property (sum).
+  - `exit_plan_mode` registered in `build_default_registry` (no-op defaults)
+    and re-registered by `AgentLoop._register_tools()` + `_build_repl_loop`.
+- **design decisions**:
+  - `_exit_plan_mode_callback no-op on loop`: loop's own callback always
+    returns False. `_build_repl_loop` overwrites via a second
+    `register_exit_plan_mode_tool` call after AgentLoop init. This preserves
+    the same "no-op in unit tests, real callback in CLI" pattern used by
+    `enter_plan_mode`. Unit tests that build loops directly and want to test
+    approval use `_build_repl_loop` (which wires `_confirm_exit_plan`) and
+    monkeypatch `builtins.input`.
+  - `M2 ruff cleanup bundled into M3`: M2 left 16 ruff errors (unused imports
+    in test files). Fixed as part of M3 so the baseline is clean before
+    committing. Impact: immaterial (test-only import removal).
+  - `plan_mode_exits property`: `plan_mode_exits` is now a computed property
+    `approved + rejected`. `record_plan_mode_exit()` (called by the slash
+    toggle) increments `plan_mode_exits_approved` (manual exit treated as
+    "approved" since user explicitly chose it).
+
 ## 3. Current repo state
 
-- **tests**: 882 passing
-- **mypy**: clean (no issues found in 28 source files)
+- **tests**: 899 passing, 1 xpassed
+- **mypy**: clean (no issues found in 30 source files)
 - **ruff**: clean (All checks passed!)
 - **branch**: main
 - **known failing checks**: none
@@ -93,59 +136,35 @@
   `TodoNudge | None` which is passed to `build(todo_nudge=...)`. Do NOT
   append nudges to transcript — injection must be per-turn-fresh.
 - **Loop registration pattern**: `AgentLoop._register_tools()` re-registers
-  `enter_plan_mode` with the real `_set_permission_mode` closure, overwriting
-  the no-op lambda from `build_default_registry`. Preserve this pattern for
-  M3's `exit_plan_mode`.
+  `enter_plan_mode` AND `exit_plan_mode` with the real closures, overwriting
+  the no-op lambdas from `build_default_registry`. `_build_repl_loop` then
+  does a THIRD registration of `exit_plan_mode` to inject `_confirm_exit_plan`.
+  Preserve this three-layer pattern if exit_plan_mode behavior ever changes.
 - **Tools schema is mode-invariant**: `registry.to_api_format()` is called
   unconditionally regardless of `_permission_mode`. Do NOT filter tools by mode.
   The soft-deny in `_execute_one` is the ONLY enforcement mechanism at runtime.
-- **`_set_permission_mode` is a public method** (no leading `__`): M3's
-  `/plan` slash command calls it directly via `loop._set_permission_mode(...)`.
-  Do not rename or make it private.
+- **`_set_permission_mode` now has `*, source: str = "tool"` kwarg**: backward
+  compatible. Both `/plan` (source="slash") and tool-driven transitions (source
+  defaults to "tool") emit the source in the permission trace. Do not remove.
 - **read_only flag audit**: `read_file, list_files, search_text, snip_history,
-  enter_plan_mode, todo_write` are `read_only=True`. Any new read-only tool
-  must also set `read_only=True` at registration time.
+  enter_plan_mode, todo_write, exit_plan_mode` are `read_only=True`. Any new
+  read-only tool must also set `read_only=True` at registration time.
+- **`plan_mode_exits` is a computed property**: not a stored field. Any code
+  that tries to assign to `metrics.plan_mode_exits` will fail. Use
+  `record_plan_mode_exit_approved()` or `record_plan_mode_exit_rejected()`.
 
 ## 5. Next milestone guidance
 
-For `M3` — ExitPlanMode tool + CLI approval + bidirectional /plan toggle:
+**This is the final milestone. The plan-surface initiative is complete.**
 
-- **next scope**: `plan_mode_tools.py` gains `PlanRejectedError` and
-  `register_exit_plan_mode_tool(registry, mode_setter, approval_callback)`.
-  `cli.py` gains `/plan` bidirectional toggle slash command and
-  `_confirm_exit_plan` helper. `tool_registry_factory.py` registers
-  `exit_plan_mode`. `metrics.py` gains `plan_mode_exits_approved` and
-  `plan_mode_exits_rejected` (the existing `plan_mode_exits` becomes the sum).
-- **key architecture for M3**:
-  - `exit_plan_mode` tool has `read_only=True` (the tool itself is read-only;
-    the side-effect is mode flip on approval).
-  - `approval_callback(plan_text: str) -> bool` — wired in `_build_repl_loop`
-    as `_confirm_exit_plan`. MockProvider tests use a monkeypatched `input()`.
-  - `/plan` slash command calls `loop._set_permission_mode(PermissionMode.PLAN)`
-    or `loop._set_permission_mode(PermissionMode.NORMAL)` directly — NO approval
-    prompt for the manual toggle (only tool-triggered exit needs approval).
-  - **`source` kwarg for tracer**: M3 needs to add `source=` parameter to
-    `_set_permission_mode` so `/plan` emits `source="slash"` vs the tool
-    emitting `source="enter_plan_mode_tool"` / `source="exit_plan_mode_tool"`.
-    The M3 test `test_repl_plan_mode.py` checks for this.
-  - Transcript history is preserved across ALL mode transitions — the model
-    keeps its `read_file`/`search_text` context after `/plan` exit.
-- **files to read before implementing**:
-  - `src/simple_coding_agent/plan_mode_tools.py` (M2 pattern to extend)
-  - `src/simple_coding_agent/cli.py` (slash command registration pattern)
-  - `src/simple_coding_agent/loop.py` (`_set_permission_mode`, `_permission_mode`)
-  - `src/simple_coding_agent/snip_tool_model.py` (`SnipRefusedError` pattern for `PlanRejectedError`)
-- **expected new test files**: `tests/test_exit_plan_mode.py`,
-  `tests/test_repl_plan_mode.py` (≥10 cases total)
-- **risks**:
-  - The `input()` call in `_confirm_exit_plan` will block non-TTY environments.
-    Tests must monkeypatch `builtins.input` — not `cli.input`.
-  - `_set_permission_mode` currently has signature `(mode: PermissionMode) -> None`.
-    Adding `source: str = "tool"` as a kwarg-only parameter is backward-compatible
-    and the safe approach.
-  - `plan_mode_exits` in M2 is `plan_mode_exits: int = 0` with
-    `record_plan_mode_exit()`. M3 replaces/supplements with
-    `plan_mode_exits_approved` and `plan_mode_exits_rejected`. Decide whether
-    to keep or remove `plan_mode_exits` — the M3 prompt says "M2 generic
-    plan_mode_exits is the SUM (computed as approved+rejected, not stored
-    separately)" suggesting it should become a property not a field.
+There is no M4. The review session (run by `run_all_milestones.sh`) will audit
+this initiative, write `REVIEW.md`, and archive `initiatives/current/` into
+`initiatives/_archive/`.
+
+Deferred items (not in any future M — record for future initiatives if needed):
+- Plan-content file persistence (TS `plans.ts writeFile + getPlanFilePath`).
+- `allowedPrompts` schema (TS scoped-Bash permission requests in ExitPlanMode).
+- Reentry attachment (TS `plan_mode_reentry` message kind sent after rejection).
+- Analytics + teammate mailbox + autoMode integration.
+- `_confirm_exit_plan` blocks the event loop in `--stream` mode (acceptable for
+  the replica; documented in CLAUDE.md Current Limitations).

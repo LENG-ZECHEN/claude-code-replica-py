@@ -18,10 +18,9 @@ import pytest
 
 import simple_coding_agent.claude_md as cm
 from simple_coding_agent.cli import _build_repl_loop
-from simple_coding_agent.models import MessageType, ToolCall, ToolResult
+from simple_coding_agent.models import ToolCall, ToolResult
 from simple_coding_agent.permission import PermissionMode
-from simple_coding_agent.provider import MockProvider, ProviderResponse
-from simple_coding_agent.todo import TodoItem, TodoStatus
+from simple_coding_agent.provider import MockProvider
 
 
 @pytest.fixture(autouse=True)
@@ -100,7 +99,6 @@ def test_todo_write_allowed_in_plan_mode(tmp_path: Path) -> None:
     todos_payload = [
         {"content": "do thing", "status": "pending", "activeForm": "doing thing"},
     ]
-    import json
     result = _execute_one_directly(loop, "todo_write", {"todos": todos_payload})
     assert result.is_error is False
 

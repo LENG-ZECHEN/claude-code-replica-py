@@ -584,6 +584,7 @@ milestones:
 ---
 
 > Bootstrapped on 2026-06-08. Baseline commit: `17e616d`. Baseline pytest: 835 passing.
+> STATUS: complete (M1–M3 shipped on 2026-06-08)
 > SIZING WAIVED: M1 and M2 each touch 11 src files but ~5 are 1-3 line trivial diffs (enum/counter/branch additions). Implementation LOC ~80-110 per milestone, well below the obs-thresholds M1 thrash precedent (which had a new Protocol penetrating the tree). Per-pattern precedent: auto-memory M3 + SnipNudge succeeded with similar 5-file fanout.
 
 # Goal

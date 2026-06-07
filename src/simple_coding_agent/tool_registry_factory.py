@@ -24,7 +24,7 @@ from .coding_tools import (
     search_text,
     write_file,
 )
-from .plan_mode_tools import register_enter_plan_mode_tool
+from .plan_mode_tools import register_enter_plan_mode_tool, register_exit_plan_mode_tool
 from .snip_tool_model import register_snip_history_tool
 from .tools import Tool, ToolRegistry
 from .transcript import Transcript
@@ -191,6 +191,13 @@ def build_default_registry(
     # this default (no-op) satisfies tool-registry unit tests that build the
     # registry without a loop.
     register_enter_plan_mode_tool(registry, lambda _mode: None)
+
+    # M3: exit_plan_mode tool (plan-surface). The no-op mode_setter and
+    # always-False approval_callback are replaced by AgentLoop._register_tools
+    # with the real _set_permission_mode and _exit_plan_mode_callback / the CLI's
+    # _confirm_exit_plan helper. The defaults keep unit tests that build the
+    # registry directly from needing a real loop or CLI.
+    register_exit_plan_mode_tool(registry, lambda _mode: None, lambda _plan: False)
 
     return registry
 

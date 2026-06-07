@@ -33,7 +33,7 @@ from .models import (
     ToolResult,
 )
 from .permission import PermissionMode, PlanModeAttachment
-from .plan_mode_tools import register_enter_plan_mode_tool
+from .plan_mode_tools import register_enter_plan_mode_tool, register_exit_plan_mode_tool
 from .provider import STOP_MAX_TOKENS, PromptTooLongError, Provider
 from .recall_hooks import inject_memory_attachments
 from .snip import SnipTool
@@ -617,11 +617,16 @@ class AgentLoop:
                 )
             )
 
-        # Re-register enter_plan_mode with this loop's real mode setter, overwriting
-        # the no-op lambda placed by build_default_registry. The registry overwrite is
-        # safe: ToolRegistry.register() silently replaces existing entries.
+        # Re-register enter_plan_mode and exit_plan_mode with this loop's real
+        # mode setter and approval callback, overwriting the no-op lambdas placed
+        # by build_default_registry. ToolRegistry.register() silently replaces.
         if self._registry is not None:
             register_enter_plan_mode_tool(self._registry, self._set_permission_mode)
+            register_exit_plan_mode_tool(
+                self._registry,
+                self._set_permission_mode,
+                self._exit_plan_mode_callback,
+            )
 
 
     def _get_todos(self) -> list[TodoItem]:
@@ -817,15 +822,28 @@ class AgentLoop:
             return None
         return SnipNudge(candidate_uuids=tuple(candidates))
 
-    def _set_permission_mode(self, mode: PermissionMode) -> None:
-        """Flip permission mode; emit trace and record metrics."""
+    def _exit_plan_mode_callback(self, plan: str) -> bool:
+        """Default no-op approval callback used before cli.py wires the real one.
+
+        Always returns False so that exit_plan_mode is inert in test setups that
+        build the loop directly without _build_repl_loop. The real callback is
+        _confirm_exit_plan from cli.py, injected via _register_tools.
+        """
+        return False
+
+    def _set_permission_mode(self, mode: PermissionMode, *, source: str = "tool") -> None:
+        """Flip permission mode; emit trace (with source) and record metrics.
+
+        source: "slash"              — user toggled /plan in the REPL
+                "enter_plan_mode_tool" / "tool" — tool-driven transition
+        """
         self._permission_mode = mode
         if mode == PermissionMode.PLAN:
             self._metrics.record_plan_mode_entry()
-            self._tracer.emit("permission", mode="plan")
+            self._tracer.emit("permission", mode="plan", source=source)
         else:
             self._metrics.record_plan_mode_exit()
-            self._tracer.emit("permission", mode="normal")
+            self._tracer.emit("permission", mode="normal", source=source)
 
     def _maybe_arm_plan_mode_attachment(self) -> PlanModeAttachment | None:
         """Return an opaque PlanModeAttachment marker when in PLAN mode, else None."""
