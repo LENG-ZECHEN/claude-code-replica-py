@@ -1,0 +1,15 @@
+All checks pass. M3 is complete.
+
+**Summary of what M3 delivered:**
+
+- **`plan_mode_tools.py`**: Added `PlanRejectedError(RuntimeError)` and `register_exit_plan_mode_tool(registry, mode_setter, approval_callback)` factory with `read_only=True`, schema validates `plan: str ≥ 1`.
+
+- **`cli.py`**: Added `_confirm_exit_plan` helper (blocks on `input("Approve plan? (y/N): ")`), `/plan` bidirectional toggle in `_handle_slash_command` (both directions emit `source="slash"` trace, transcript preserved), `/plan` listed in `/help`.
+
+- **`loop.py`**: Added `*, source: str = "tool"` kwarg to `_set_permission_mode`, wired `exit_plan_mode` in `_register_tools` with `_exit_plan_mode_callback` no-op (overwritten by `_build_repl_loop`).
+
+- **`metrics.py`**: `plan_mode_exits` → computed `@property` (sum of `plan_mode_exits_approved + plan_mode_exits_rejected`).
+
+- **`tool_registry_factory.py`**: `exit_plan_mode` registered with no-op defaults.
+
+- **Tests**: 17 new cases across `test_exit_plan_mode.py` and `test_repl_plan_mode.py`. pytest 882 → 899 (+17). mypy clean, ruff clean.

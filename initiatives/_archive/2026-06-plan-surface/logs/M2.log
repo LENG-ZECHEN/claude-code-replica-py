@@ -1,0 +1,7 @@
+M2 is committed as `75eac7c`. Exit ritual complete:
+
+- **pytest**: 864 → 882 (+18, ≥14 gate ✓)
+- **mypy**: clean
+- **ruff**: clean
+- **commit**: `[plan-srf/M2]` prefix, 19 files, PROGRESS.md and HANDOFF.md included
+- **exit gate**: all 18 new tests pass; tools schema mode-invariant; ATTACHMENT_PLAN_MODE in turn 2 messages; soft-deny fires for write_file/run_shell/write_memory_entry; read_file/todo_write pass through normally

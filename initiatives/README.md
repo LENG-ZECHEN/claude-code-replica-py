@@ -12,7 +12,7 @@ For the active-initiative pointer and the bootstrap procedure, see
 
 | Slug | Status | Bootstrapped | Milestones | Baseline |
 |---|---|---|---|---|
-| [`plan-surface`](./current/) | M1 next | 2026-06-08 | M1 → M3 | `17e616d` (pytest 835) |
+| _(none)_ | — | — | — | — |
 
 ## Archived
 
@@ -24,6 +24,7 @@ For the active-initiative pointer and the bootstrap procedure, see
 | [2026-05-ctx-mgmt-pdf-align](./_archive/2026-05-ctx-mgmt-pdf-align/) | complete | 2026-05-23 | M1 → M4 | `02f17f6` |
 | [2026-05-auto-memory-overhaul](./_archive/2026-05-auto-memory-overhaul/) | complete | 2026-05-24 | M1 → M7 | `e9aef6a` |
 | [2026-05-ctx-mgmt-demo](./_archive/2026-05-ctx-mgmt-demo/) | complete | 2026-05-25 | M1 → M3 | `f937d8f` |
+| [2026-06-plan-surface](./_archive/2026-06-plan-surface/) | complete | 2026-06-08 | M1 → M3 | `1e242b5` |
 
 ## Folder shape (per initiative)
 

@@ -1,0 +1,1 @@
+M1 is committed at `e62e928`. Exit gate: 864 tests (+29, gate ≥14), mypy clean, ruff clean, `[plan-srf/M1]` commit. PROGRESS.md appended, HANDOFF.md rewritten pointing to M2.

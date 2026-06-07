@@ -1,0 +1,42 @@
+Phase 2B + 2C complete (staged multi-agent review-and-repair flow). Summary:
+
+- **All 3 milestones verified**: `[plan-srf/M1]` (`e62e928`), `[plan-srf/M2]` (`75eac7c`), `[plan-srf/M3]` (`edd25d0`)
+- **Initial quality gates**: pytest 899 + 1 xpassed, mypy clean, ruff clean
+- **Stage A subagents spawned in parallel**: code-reviewer + doc-curator-candidate-finder
+- **Main-agent reconciliation completed**: 9 code findings retained (1 HIGH, 3 MEDIUM, 5 LOW); 11 doc candidates applied (5 Tier A + 4 Tier B + 2 Tier C-as-mechanical), 2 Tier C proposals deferred
+- **Review-time repair loop**: 4 findings fixed (HIGH + 2 MEDIUM + 1 LOW), 6 findings deferred with rationale
+- **Review-time commits**:
+  - `4efc445 [plan-srf/review-fix] wire plan_mode_exits_rejected + soft-deny guidance + openai_cli flags`
+  - `1e242b5 [plan-srf/review-doc] sync CLAUDE.md/README.md and add subsystem/ADR docs`
+- **Final quality gates green**: pytest 904 + 1 xpassed (+69 from baseline 835), mypy clean, ruff clean
+- **Stage B narrator spawned after repair/re-review**: demo-narrator
+- **REVIEW.md**: scorecards, reconciled findings, fixed-during-review ledger, deferred follow-ups, validation results, wrap-up actions
+- **OWNER_BRIEF.zh-CN.md**: delivered features, demo commands, Before/After, owner-facing findings, resume/interview talking points
+- **Tier A auto-applied**:
+  - CLAUDE.md: appended `### todo.py` per-file summary
+  - CLAUDE.md: appended `### todo_tool.py` per-file summary
+  - CLAUDE.md: appended `### permission.py` per-file summary
+  - CLAUDE.md: appended `### plan_mode_tools.py` per-file summary (with review-fix `metrics=` kwarg note)
+  - README.md: appended `--no-todo-reminder` / `--todo-reminder-turns` flag paragraph
+- **Tier B auto-applied**:
+  - docs/todo.md: new subsystem doc for TodoWrite V1
+  - docs/plan-mode.md: new subsystem doc for Plan Mode
+  - docs/DECISIONS/0004-noop-default-tool-factory-then-loop-rewires.md: new ADR
+  - docs/DECISIONS/README.md: appended ADR-0004 row to index
+- **Tier C auto-applied (mechanical-accuracy fixes caused by this initiative)**:
+  - CLAUDE.md trace.py summary: `frozen at 9 names` → `frozen at 11 names` with `todo` + `permission` channels
+  - CLAUDE.md models.py summary: expanded `MessageType` enumeration
+- **Tier C proposed (deferred to human review)**:
+  - README.md: add slash-command section (`/todos` and `/plan` placement subjective)
+  - CLAUDE.md Current Limitations: add Plan Mode addendum (theme reorganization subjective)
+- **Archive committed** as `<wrap-sha pending until step 10>` `[plan-srf/wrap]`
+- **Final HEAD**: pending until wrap commit lands
+- **All wrap-gate checks pass**: pending verification after Step 10
+- **Main session stayed alive on --remote-control** for user attach.
+
+Key audit findings and review-time outcomes:
+- HIGH `plan_mode_exits_rejected` was dead code — FIXED in `4efc445`. Counter now bumps on rejection via `metrics=` kwarg on `register_exit_plan_mode_tool`. New regression tests in `test_exit_plan_mode.py` lock the wiring.
+- MEDIUM soft-deny ToolResult lost the PLAN-spec recovery guidance — FIXED in `4efc445`. Message now ends with "Use exit_plan_mode to submit your plan for approval, or use /plan to exit plan mode manually."
+- MEDIUM `simple-agent-openai` silently ignored `--no-todo-reminder` / `--todo-reminder-turns` — FIXED in `4efc445`. Both flags now wired with 2 new regression tests.
+- LOW `transcript.normalize_for_api` filter list out of sync with `compact.py` — FIXED in `4efc445`. Now filters `ATTACHMENT_MEMORY` and `ATTACHMENT_TODO_NUDGE` consistently.
+- MEDIUM (historical) M2 shipped 16 ruff errors despite PROGRESS claiming `ruff: clean`. Already cleaned by M3; suggested process fix: capture `ruff check .` stdout in Phase 2A exit gate.
