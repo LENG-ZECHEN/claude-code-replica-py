@@ -13,3 +13,4 @@ an architectural divergence, and may also be authored by hand.
 | [0001](./0001-centralize-threshold-precedence-resolution.md) | 2026-05-23 | Centralize threshold precedence resolution in `cli._resolve_threshold` | accepted | obs-thr-harden |
 | [0002](./0002-coexisting-engine-and-model-snip.md) | 2026-05-23 | Coexisting engine + model-driven snip with live-Transcript closure sharing | accepted | ctx-mgmt-pdf-align |
 | [0003](./0003-provider-selector-and-hook-module-extraction.md) | 2026-05-24 | Provider.call_selector protocol extension and budget-driven hook-module extraction | accepted | auto-memory-overhaul |
+| [0004](./0004-noop-default-tool-factory-then-loop-rewires.md) | 2026-06-08 | No-op default tool factory in `build_default_registry`, AgentLoop and REPL rewire with real closures | accepted | plan-surface |

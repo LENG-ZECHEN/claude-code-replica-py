@@ -90,6 +90,8 @@ Both REPLs also accept `--microcompact-minutes N` (override `MicroCompactor.thre
 
 Both REPLs additionally accept `--extract-memories` (enable automatic post-turn memory extraction; default off, also honoured via env `SIMPLE_AGENT_EXTRACT_MEMORIES=1`) and `--extract-throttle N` (run extraction at most once every `N` turns; default 1, also honoured via env `SIMPLE_AGENT_EXTRACT_THROTTLE`). Extraction is opt-in because it spends extra model tokens; `/stats` surfaces `extract_invocations` / `extract_writes` so the cost stays visible.
 
+Both REPLs also accept `--no-todo-reminder` (disable the turn-based TodoWrite stale-todo nudge from plan-surface M1; also omits the system-prompt `## Todo Management` teaching section and skips `todo_write` registration so the machinery is fully quiescent) and `--todo-reminder-turns N` (override the default `TODO_REMINDER_TURNS = 10`; the reminder fires only when both `turns_since_write >= N` AND `turns_since_reminder >= N`, ignored when `--no-todo-reminder` is set).
+
 ## Running the demo (safe, no API key required)
 
 ```bash
