@@ -6,9 +6,24 @@
 
 ## Active initiative
 
-**None.**
+**`plan-surface`** — see [`initiatives/current/PLAN.md`](./initiatives/current/PLAN.md).
 
-`initiatives/current/` is empty (`.gitkeep` only).
+| | |
+|---|---|
+| Bootstrapped | 2026-06-08 |
+| Baseline | `17e616d` (pytest 835 passing, mypy + ruff clean) |
+| Milestones | M1 → M3 (3 total; status: M1 next, M2 + M3 pending) |
+| Commit prefix | `plan-srf` |
+| Planned exit | All three milestones commit with `[plan-srf/M{N}]` prefixes, exit gates verified, pytest green |
+| Owner brief | [`PLAN.md`](./initiatives/current/PLAN.md) |
+| Next step | Run `./automation/scripts/run_all_milestones.sh` (see `automation/RUNBOOK.md` Phase 2) |
+
+**What this initiative ships:** Claude Code's two flagship "planning surface" mechanisms in the Python replica.
+
+- **M1 — TodoWrite (V1)**: single-tool, in-memory todo list with strict double-AND turn-based reminder (`TODO_REMINDER_TURNS=10`) that injects a USER-role `<system-reminder>` attachment when ≥10 assistant turns pass without a TodoWrite call AND ≥10 turns since the last reminder. NOT the V2 6-tool Tasks suite (file persistence / lockfile / DAG / swarm out of scope).
+- **M2 + M3 — Plan Mode**: `PermissionMode` enum + `Tool.read_only` flag + per-turn `ATTACHMENT_PLAN_MODE` teaching attachment + `ToolExecutor` soft-deny + `/plan` bidirectional toggle + `ExitPlanMode` with CLI approval. The API `tools` field stays **mode-invariant** across NORMAL ↔ PLAN so the prompt cache prefix is preserved (mirrors TS `tools.ts:271-327 getTools` which doesn't filter by mode either).
+
+> SIZING WAIVED in PLAN.md provenance: M1 and M2 each touch 11 src files but ~5 are 1-3 line trivial diffs. Implementation LOC ~80-110/milestone, well below the obs-thresholds M1 thrash precedent.
 
 ## Last completed initiative
 

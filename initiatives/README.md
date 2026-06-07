@@ -10,7 +10,9 @@ For the active-initiative pointer and the bootstrap procedure, see
 
 ## Active
 
-_None — `initiatives/current/` holds only `.gitkeep`._
+| Slug | Status | Bootstrapped | Milestones | Baseline |
+|---|---|---|---|---|
+| [`plan-surface`](./current/) | M1 next | 2026-06-08 | M1 → M3 | `17e616d` (pytest 835) |
 
 ## Archived
 
