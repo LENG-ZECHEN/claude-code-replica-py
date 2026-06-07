@@ -53,6 +53,7 @@ class MessageType(StrEnum):
     SNIP_BOUNDARY = "snip_boundary"
     ATTACHMENT = "attachment"        # recent-file re-injection; serialized as a user message
     ATTACHMENT_MEMORY = "attachment_memory"  # sideQuery memory injection (M7)
+    ATTACHMENT_TODO_NUDGE = "attachment_todo_nudge"  # stale-todo reminder (plan-surface M1)
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +212,24 @@ class Message:
             content=content,
             timestamp=_now_iso(),
             type=MessageType.ATTACHMENT_MEMORY,
+            is_meta=True,
+        )
+
+    @classmethod
+    def attachment_todo_nudge(cls, content: str) -> Message:
+        """Create a stale-todo reminder injection message (plan-surface M1).
+
+        Carries the V1 todo reminder text wrapped in <system-reminder> tags,
+        injected before Provider.call() when the double-AND turn counter fires.
+        USER-role so it reaches the API; _coalesce_same_role merges adjacency.
+        Source: messages.ts:3663-3678 case 'todo_reminder'.
+        """
+        return cls(
+            uuid=_new_uuid(),
+            role=Role.USER,
+            content=content,
+            timestamp=_now_iso(),
+            type=MessageType.ATTACHMENT_TODO_NUDGE,
             is_meta=True,
         )
 

@@ -276,6 +276,11 @@ class MockProvider:
         """Snapshot copy of call history (mutating it does not affect state)."""
         return list(self._history)
 
+    @property
+    def call_history(self) -> list[ProviderCall]:
+        """Alias for history; matches the call_history name used by todo tests."""
+        return self._history
+
     # ------------------------------------------------------------------
     # Convenience builders for scripted responses
     # ------------------------------------------------------------------

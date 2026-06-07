@@ -36,6 +36,11 @@ from .provider import STOP_MAX_TOKENS, PromptTooLongError, Provider
 from .recall_hooks import inject_memory_attachments
 from .snip import SnipTool
 from .snip_tool_model import SnipNudge, snippable_candidate_uuids
+from .todo import (
+    TODO_REMINDER_TURNS,
+    TodoItem,
+    TodoNudge,
+)
 from .tool_result_store import ToolResultStore
 from .tools import Tool, ToolExecutor, ToolRegistry, UnknownToolError
 from .trace import NullTracer, Tracer
@@ -143,6 +148,9 @@ class AgentLoop:
         extract_memories_enabled: bool = False,
         extract_throttle_n: int = 1,
         is_subloop: bool = False,
+        todo_nudge_enabled: bool = True,
+        todo_reminder_turns: int = TODO_REMINDER_TURNS,
+        todo_state: list[TodoItem] | None = None,
     ) -> None:
         if max_steps < 1:
             raise ValueError(f"max_steps must be >= 1, got {max_steps}")
@@ -196,7 +204,18 @@ class AgentLoop:
         self._extract_throttle_n: int = max(1, extract_throttle_n)
         self._already_surfaced_memories: set[str] = set()
         self._session_bytes_used: int = 0
+        self._todos: list[TodoItem] = todo_state if todo_state is not None else []
+        self._todo_nudge_enabled = todo_nudge_enabled
+        self._todo_reminder_turns = todo_reminder_turns
+        self._todo_nudge_machinery_enabled = False  # computed after _register_tools
+        self._turns_since_last_todo_write: int = 0
+        self._turns_since_last_todo_reminder: int = 0
         self._register_tools()
+        self._todo_nudge_machinery_enabled = (
+            todo_nudge_enabled
+            and self._registry is not None
+            and "todo_write" in self._registry._tools
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -216,6 +235,7 @@ class AgentLoop:
             self._transcript, user_input, self._provider, self._memory_dir,
             self._auto_memory_enabled, self._already_surfaced_memories,
             self._session_bytes_used, self._tracer)
+        _todo_nudge = self._maybe_inject_todo_nudge()
 
         for turn in range(1, self._max_steps + 1):
             self._maybe_microcompact()
@@ -232,6 +252,7 @@ class AgentLoop:
                     compact_summary=self._last_summary,
                     memory_snippets=memory_snippets,
                     snip_nudge=self._compute_snip_nudge(),
+                    todo_nudge=_todo_nudge,
                 )
 
                 tools_spec = (
@@ -369,6 +390,7 @@ class AgentLoop:
             self._transcript, user_input, self._provider, self._memory_dir,
             self._auto_memory_enabled, self._already_surfaced_memories,
             self._session_bytes_used, self._tracer)
+        _todo_nudge = self._maybe_inject_todo_nudge()
 
         for turn in range(1, self._max_steps + 1):
             self._maybe_microcompact()
@@ -385,6 +407,7 @@ class AgentLoop:
                     compact_summary=self._last_summary,
                     memory_snippets=memory_snippets,
                     snip_nudge=self._compute_snip_nudge(),
+                    todo_nudge=_todo_nudge,
                 )
                 tools_spec = (
                     self._registry.to_api_format() if self._registry is not None else []
@@ -561,32 +584,68 @@ class AgentLoop:
         return result
 
     def _register_tools(self) -> None:
-        """Wire write_memory_entry when project_memory is present."""
-        if self._project_memory is None or self._registry is None:
-            return
-        pm = self._project_memory
+        """Wire write_memory_entry when project_memory is present, and todo_write when enabled."""
+        if self._project_memory is not None and self._registry is not None:
+            pm = self._project_memory
 
-        def _write_memory_fn(
-            type: str,
-            id: str,
-            name: str,
-            description: str,
-            body: str,
-            tags: list[str] | None = None,
-        ) -> str:
-            if self._memory_writes_this_turn >= 3:
-                raise RuntimeError("memory write quota exhausted this turn (max 3)")
-            self._memory_writes_this_turn += 1
-            return write_memory_entry(pm, type, id, name, description, body, tags)
+            def _write_memory_fn(
+                type: str,
+                id: str,
+                name: str,
+                description: str,
+                body: str,
+                tags: list[str] | None = None,
+            ) -> str:
+                if self._memory_writes_this_turn >= 3:
+                    raise RuntimeError("memory write quota exhausted this turn (max 3)")
+                self._memory_writes_this_turn += 1
+                return write_memory_entry(pm, type, id, name, description, body, tags)
 
-        self._registry.register(
-            Tool(
-                name=WRITE_MEMORY_ENTRY_TOOL_NAME,
-                description=WRITE_MEMORY_ENTRY_TOOL_DESCRIPTION,
-                input_schema=WRITE_MEMORY_ENTRY_SCHEMA,
-                fn=_write_memory_fn,
+            self._registry.register(
+                Tool(
+                    name=WRITE_MEMORY_ENTRY_TOOL_NAME,
+                    description=WRITE_MEMORY_ENTRY_TOOL_DESCRIPTION,
+                    input_schema=WRITE_MEMORY_ENTRY_SCHEMA,
+                    fn=_write_memory_fn,
+                )
             )
-        )
+
+
+    def _get_todos(self) -> list[TodoItem]:
+        return list(self._todos)
+
+    def _set_todos(self, todos: list[TodoItem]) -> None:
+        self._todos = todos
+
+    def _maybe_inject_todo_nudge(self) -> TodoNudge | None:
+        """Return a TodoNudge when the double-AND counter fires, else None.
+
+        Uses simple per-loop integer counters (not transcript scanning) so the
+        N-th call to run() fires the nudge at exactly turn N regardless of
+        how many messages are in the transcript at call time. The caller passes
+        the returned value to ContextBuilder.build(todo_nudge=) so the nudge
+        is injected fresh for that turn only and does not persist in transcript.
+
+        Source: attachments.ts:3212-3317 getTodoReminderTurnCounts + arm logic.
+        Double-AND: turns_since_write >= todo_reminder_turns AND
+                    turns_since_reminder >= todo_reminder_turns.
+        """
+        if not self._todo_nudge_machinery_enabled:
+            return None
+        self._turns_since_last_todo_write += 1
+        self._turns_since_last_todo_reminder += 1
+        if (self._turns_since_last_todo_write >= self._todo_reminder_turns
+                and self._turns_since_last_todo_reminder >= self._todo_reminder_turns):
+            nudge = TodoNudge(todos=tuple(self._todos))
+            self._tracer.emit(
+                "todo",
+                since_reminder=self._turns_since_last_todo_reminder,
+                since_write=self._turns_since_last_todo_write,
+            )
+            self._metrics.record_todo_nudge_armed()
+            self._turns_since_last_todo_reminder = 0
+            return nudge
+        return None
 
     def _maybe_compact(self) -> bool:
         """Run compaction if the compactor says we are over budget."""
@@ -773,6 +832,10 @@ class AgentLoop:
 
         if call.name == "read_file" and not is_error:
             self._capture_file_snapshot(call, content)
+
+        if call.name == "todo_write" and not is_error:
+            self._turns_since_last_todo_write = 0
+            self._metrics.record_todo_write()
 
         if self._tool_result_store is None:
             return ToolResult(

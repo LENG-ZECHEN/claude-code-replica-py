@@ -134,7 +134,12 @@ class RuleBasedSummarizer:
         for msg in messages:
             if msg.is_virtual:
                 continue
-            if msg.type in (MessageType.COMPACT_BOUNDARY, MessageType.ATTACHMENT):
+            if msg.type in (
+                MessageType.COMPACT_BOUNDARY,
+                MessageType.ATTACHMENT,
+                MessageType.ATTACHMENT_MEMORY,
+                MessageType.ATTACHMENT_TODO_NUDGE,
+            ):
                 continue
 
             if msg.role == Role.USER and isinstance(msg.content, str):

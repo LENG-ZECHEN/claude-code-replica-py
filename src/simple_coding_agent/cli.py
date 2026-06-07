@@ -63,6 +63,8 @@ from .session_store import (
     session_path_for,
 )
 from .snip import SnipTool
+from .todo import TodoItem
+from .todo_tool import register_todo_write_tool
 from .tool_registry_factory import build_default_registry
 from .tool_result_store import ToolResultStore
 from .tools import ToolExecutor
@@ -128,6 +130,7 @@ _REPL_HELP_TEXT: str = (
     "  /remember <type> <id> <body>   Save a project memory entry (auto-learn target).\n"
     "  /remember-session <text>       Add a session-scoped memory note "
     "(lost when REPL ends unless saved).\n"
+    "  /todos                         Show the current todo list.\n"
     "  /exit, /quit                   Leave the REPL.\n"
 )
 _REPL_DEFAULT_ANSWER: str = (
@@ -387,6 +390,8 @@ def _build_repl_loop(
     extract_memories_enabled: bool = False,
     extract_throttle_n: int = 1,
     summarizer_mode: str = "auto",
+    todo_nudge_enabled: bool = True,
+    todo_reminder_turns: int | None = None,
 ) -> AgentLoop:
     """Wire one shared AgentLoop for the REPL session.
 
@@ -541,8 +546,24 @@ def _build_repl_loop(
         workspace_path=workspace,
         claude_md_loader=ClaudeMdLoader(tracer=active_tracer),
         project_memory=project_memory,
+        enable_todo_teaching=todo_nudge_enabled,
         tracer=active_tracer,
     )
+    _todos_shared: list[TodoItem] | None
+    if todo_nudge_enabled:
+        _todos_list: list[TodoItem] = []
+        _todos_shared = _todos_list
+
+        def _get_shared_todos() -> list[TodoItem]:
+            return list(_todos_list)
+
+        def _set_shared_todos(todos: list[TodoItem]) -> None:
+            _todos_list[:] = todos
+
+        register_todo_write_tool(registry, _get_shared_todos, _set_shared_todos)
+    else:
+        _todos_shared = None
+
     loop_kwargs: dict[str, object] = {
         "provider": resolved_provider,
         "tool_executor": executor,
@@ -562,6 +583,9 @@ def _build_repl_loop(
         "snip_nudge_growth_tokens": resolved_snip_nudge_growth_tokens,
         "extract_memories_enabled": extract_memories_enabled,
         "extract_throttle_n": extract_throttle_n,
+        "todo_nudge_enabled": todo_nudge_enabled,
+        **({"todo_reminder_turns": todo_reminder_turns} if todo_reminder_turns is not None else {}),
+        **({"todo_state": _todos_shared} if _todos_shared is not None else {}),
     }
     if system_prompt is not None:
         loop_kwargs["system_prompt"] = system_prompt
@@ -601,6 +625,9 @@ def _handle_slash_command(cmd: str, loop: AgentLoop | None = None) -> str:
         return "continue"
     if head == "/remember-session":
         _handle_remember_session_command(tokens[1:], loop)
+        return "continue"
+    if head == "/todos":
+        _handle_todos_command(loop)
         return "continue"
     print(f"Unknown command: {head!r}. Try /help for the command list.")
     return "continue"
@@ -682,6 +709,22 @@ def _handle_remember_session_command(
     )
     session_memory.add(entry)
     print(f"Remembered session note {entry.id[:8]}.")
+
+
+_TODO_GLYPHS: dict[str, str] = {
+    "pending": "☐",
+    "in_progress": "▶",
+    "completed": "☑",
+}
+
+
+def _handle_todos_command(loop: AgentLoop | None) -> None:
+    if loop is None or not loop._todos:
+        print("(no todos)")
+        return
+    for i, todo in enumerate(loop._todos, 1):
+        glyph = _TODO_GLYPHS.get(str(todo.status), "?")
+        print(f"  {i}. {glyph} {todo.content}")
 
 
 def _handle_save_command(args: list[str], loop: AgentLoop | None) -> None:
@@ -948,6 +991,8 @@ def _run_repl(
     extract_throttle_n: int = 1,
     show_steps: bool = False,
     summarizer_mode: str = "auto",
+    todo_nudge_enabled: bool = True,
+    todo_reminder_turns: int | None = None,
 ) -> int:
     """Run the interactive REPL.
 
@@ -995,6 +1040,8 @@ def _run_repl(
         extract_memories_enabled=extract_memories_enabled,
         extract_throttle_n=extract_throttle_n,
         summarizer_mode=summarizer_mode,
+        todo_nudge_enabled=todo_nudge_enabled,
+        todo_reminder_turns=todo_reminder_turns,
     )
 
     if resume is not None:
@@ -1206,6 +1253,22 @@ def _build_parser() -> argparse.ArgumentParser:
             "configured)."
         ),
     )
+    parser.add_argument(
+        "--no-todo-reminder",
+        action="store_true",
+        default=False,
+        help="Disable the turn-based TodoWrite reminder (plan-surface M1).",
+    )
+    parser.add_argument(
+        "--todo-reminder-turns",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Override the number of assistant turns between todo reminders "
+            "(default: 10). Only applies when --no-todo-reminder is not set."
+        ),
+    )
     return parser
 
 
@@ -1267,6 +1330,8 @@ def main(argv: list[str] | None = None) -> int:
             extract_throttle_n=extract_throttle,
             show_steps=bool(args.show_steps),
             summarizer_mode=str(args.summarizer),
+            todo_nudge_enabled=not bool(args.no_todo_reminder),
+            todo_reminder_turns=args.todo_reminder_turns,
         )
 
     # One-shot demo (unchanged behavior; default shell_mode is MOCK).

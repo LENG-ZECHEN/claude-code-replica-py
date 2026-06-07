@@ -48,6 +48,8 @@ class MetricsCollector:
     tokens_per_turn: list[int] = field(default_factory=list)
     extract_invocations: int = 0
     extract_writes: int = 0
+    todo_writes: int = 0
+    todo_nudges_armed: int = 0
 
     def record_full_compact(self) -> None:
         self.full_compacts += 1
@@ -63,6 +65,12 @@ class MetricsCollector:
 
     def record_extract_invocation(self) -> None:
         self.extract_invocations += 1
+
+    def record_todo_write(self) -> None:
+        self.todo_writes += 1
+
+    def record_todo_nudge_armed(self) -> None:
+        self.todo_nudges_armed += 1
 
     def add_externalized_bytes(self, byte_count: int) -> None:
         if byte_count < 0:
@@ -93,6 +101,10 @@ class MetricsCollector:
         lines.append(
             f"  extract_invocations={self.extract_invocations} "
             f"extract_writes={self.extract_writes}"
+        )
+        lines.append(
+            f"  todo_writes={self.todo_writes} "
+            f"todo_nudges_armed={self.todo_nudges_armed}"
         )
         return "\n".join(lines)
 

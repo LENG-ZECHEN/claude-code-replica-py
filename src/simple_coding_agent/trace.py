@@ -26,7 +26,7 @@ Channel names align with ``MetricsCollector`` counter names where the
 two surfaces overlap. The locked channel vocabulary for this milestone
 is: ``compact``, ``reactive``, ``microcompact``, ``snip``,
 ``externalize``, ``memory_select``, ``claude_md``, ``auto_learn``,
-``budget``.
+``budget``, ``todo``.
 
 Hard invariant: fire sites MUST NOT pass raw user input or raw LLM
 output text as field values. Only metadata (counts, token estimates,

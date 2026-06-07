@@ -1,53 +1,54 @@
-# HANDOFF — Next: M1 (TodoWrite (V1) tool + teaching prompt + turn-based reminder)
+# HANDOFF — Next: M2 (Plan Mode — EnterPlanMode tool + per-turn attachment)
 
-> Updated by: Phase 1 bootstrap of `plan-surface`
+> Updated by: M1 autonomous agent
 > Date: 2026-06-08
-> Re-verify Section 3 numbers before starting work — do not trust this
-> file blindly.
 
 ---
 
 ## 1. Current initiative
 
 - **slug**: `plan-surface`
-- **current milestone**: _(not started)_
-- **next milestone**: `M1` — TodoWrite (V1) tool + teaching prompt + turn-based reminder
-- **all milestones (per PLAN)**: M1 [next], M2 [pending], M3 [pending]
+- **current milestone**: M1 ✓ (done 2026-06-08)
+- **next milestone**: `M2` — Plan Mode — EnterPlanMode tool + per-turn attachment
+- **all milestones (per PLAN)**: M1 [done], M2 [next], M3 [pending]
 
 ## 2. Completed milestones
 
-_(none yet — this initiative has not started)_
+### M1
 
-<!--
-After each milestone, the milestone agent APPENDS one subsection like:
-
-### {{MILESTONE_ID}}
-
-- **commit**: `<sha>` `[<commit_prefix>/{{MILESTONE_ID}}] <subject>`
-- **files changed**: `<file1>`, `<file2>`, ...
-- **tests added**: `<test_file>` (+N cases). Total: <before> -> <after>
-- **behavior implemented**: <one-paragraph factual summary — what now
-  works that did not before. Cite new public symbols / CLI flags /
-  slash commands.>
+- **commit**: see `[plan-srf/M1]` commit
+- **files changed**: `todo.py` (new), `todo_tool.py` (new),
+  `tests/test_todo.py` (new), `tests/test_repl_todo.py` (new),
+  `models.py`, `context.py`, `loop.py`, `cli.py`, `metrics.py`,
+  `trace.py`, `compact.py`, `provider.py`
+- **tests added**: `tests/test_todo.py` (22 cases), `tests/test_repl_todo.py` (8 cases). Total: 835 → 864 (+29)
+- **behavior implemented**: TodoWrite V1 (single-tool, in-memory). `todo_write`
+  registered externally by `_build_repl_loop` via shared `_todos_list` closure.
+  System prompt gains `_TODO_MANAGEMENT_SECTION` when `enable_todo_teaching=True`.
+  Turn-based reminder via double-AND integer counters injected fresh each turn
+  via `ContextBuilder.build(todo_nudge=TodoNudge(...))` kwarg — NOT permanently
+  in transcript. `/todos` slash command. CLI flags: `--no-todo-reminder`,
+  `--todo-reminder-turns N`.
 - **design decisions (deviations from PLAN)**:
-  - `<short title>`: <what was different and WHY>. Visible in:
-    `<path:line>`. Impact on next milestone: <e.g., "must respect new
-    invariant X">.
-  - (none) if truly no divergences
+  - `Counter-based timing`: used simple `int` fields instead of transcript
+    scanning. Gives exact per-turn firing at turn N. Visible in:
+    `loop.py:_maybe_inject_todo_nudge`. Impact on M2: none.
+  - `TodoNudge via build() kwarg not transcript append`: nudge injected
+    fresh each turn (mirrors SnipNudge). Visible in: `context.py:_todo_nudge_dict`.
+    Impact on M2: attachment ordering for PlanModeAttachment should follow
+    the same pattern.
+  - `External registration in _build_repl_loop`: AgentLoop checks
+    `"todo_write" in registry._tools` to set `_todo_nudge_machinery_enabled`.
+    Impact on M2: `enter_plan_mode` should also be registered externally
+    in `_build_repl_loop` (or in `_register_tools` — per PLAN's note that
+    TS always registers EnterPlanMode unconditionally).
 - **known limitations**:
-  - <thing not fully done; e.g., "happy-path only, error case deferred">
-  - (none) if you fully cleaned up
-
-Prior subsections are NEVER deleted or rewritten — each milestone is the
-source of truth on itself.
--->
+  - `shouldDefer=true` (TodoWriteTool.ts:51) not implemented.
+  - verificationNudgeNeeded branch (TodoWriteTool.ts:76-86) skipped.
 
 ## 3. Current repo state
 
-> Re-verify these numbers before starting work.
-
-- **last commit**: `17e616dc7feeb563019ec3ba1b0fbd421b21554e` — `git -C python-replica show 17e616d`
-- **tests**: 835 passing
+- **tests**: 864 passing
 - **mypy**: clean (no issues found in 26 source files)
 - **ruff**: clean (All checks passed!)
 - **branch**: main
@@ -55,48 +56,33 @@ source of truth on itself.
 
 ## 4. Important constraints (carried forward)
 
-> Invariants that all subsequent milestones MUST respect. Each milestone
-> can ADD entries here; entries are removed only when explicitly retired.
-
-- **do not modify**: _(none yet — first milestone has free hand within its scope)_
-- **preserve**: _(none yet)_
-- **compatibility requirements**: _(none yet)_
+- **TodoNudge injection pattern**: `_maybe_inject_todo_nudge()` returns
+  `TodoNudge | None` which is passed to `build(todo_nudge=...)`. Do NOT
+  append nudges to transcript — injection must be per-turn-fresh.
+- **Loop registration pattern**: `AgentLoop` does NOT register `todo_write`.
+  Checks `"todo_write" in registry._tools`. External registration is in
+  `_build_repl_loop`. Preserve this pattern for M2's `enter_plan_mode`.
 
 ## 5. Next milestone guidance
 
-For `M1` — TodoWrite (V1) tool + teaching prompt + turn-based reminder:
+For `M2` — Plan Mode — EnterPlanMode tool + per-turn attachment:
 
-- **next scope**: see `initiatives/current/PLAN.md` and
-  `initiatives/current/config.yaml` for the authoritative scope.
-  Replicate Claude Code's V1 TodoWrite (the single-tool, in-memory form
-  enabled by `!isTodoV2Enabled()`) — explicitly NOT the V2 Tasks 6-tool
-  suite. Three load-bearing pieces: tool body, teaching `## Todo
-  Management` prompt section, turn-based reminder (strict double-AND
-  via a single `TODO_REMINDER_TURNS=10` constant). Plus a fourth
-  attachment type `ATTACHMENT_TODO_NUDGE` that shares the existing
-  per-turn USER `<system-reminder>` injection path with SnipNudge /
-  recall_hooks attachments.
-- **relevant files**: M1 starts on a clean baseline. Per PLAN's
-  Expected-files list:
-  NEW: `src/simple_coding_agent/todo.py`, `src/simple_coding_agent/todo_tool.py`
-  MODIFIED: `loop.py`, `context.py`, `tool_registry_factory.py`,
-  `cli.py`, `openai_cli.py`, `models.py`, `transcript.py`,
-  `compact.py`, `trace.py`, `metrics.py`
-  TESTS: `tests/test_todo.py` (new), `tests/test_repl_todo.py` (new),
-  `tests/test_trace.py` (extend negative-case coverage for new channel)
-- **expected tests**: ≥ 14 new cases across `tests/test_todo.py` +
-  `tests/test_repl_todo.py`. The CORE 10-turn cycle test (turn 10
-  injects, turns 11-19 cooldown, turn 20 re-injects) is the unique
-  signal that the strict V1 double-AND counter logic is correct.
-- **risks**: see PLAN.md "Risks / known unknowns". Most relevant for
-  M1: (a) attachment ordering when SnipNudge + TodoNudge arm in the
-  same turn (already partly covered by `_coalesce_same_role`);
-  (b) schema-strict providers and `"minLength": 1` encoding on the
-  `content` / `activeForm` fields.
+- **next scope**: see `initiatives/current/PLAN.md` M2 section and
+  `initiatives/current/config.yaml` for authoritative scope.
+  Key: `permission.py` (PermissionMode enum + PlanModeAttachment),
+  `plan_mode_tools.py` (register_enter_plan_mode_tool),
+  `tools.py` (Tool.read_only field + audit), `loop.py`
+  (_permission_mode field, _set_permission_mode, soft-deny in _execute_one,
+  plan_mode_attachment build() kwarg), `context.py` (plan_mode_attachment
+  kwarg injection), `cli.py` (/plan slash command).
+- **critical architecture**: TS does NOT filter tools at the schema layer
+  in plan mode. Tool list is mode-invariant. Constraint enforced via
+  (1) per-turn `<system-reminder>` attachment, (2) runtime soft-deny in
+  _execute_one. Mirror this exactly.
+- **relevant source files** (read BEFORE implementing):
+  - `claude-code-source-code/src/utils/attachments.ts:1186` (getPlanModeAttachments)
+  - `claude-code-source-code/src/tools/EnterPlanModeTool/EnterPlanModeTool.ts`
+  - `claude-code-source-code/src/utils/permissions/permissions.ts:932`
 
 The full ready-to-run prompt is at:
-`initiatives/current/prompts/M1.md`
-
-The autonomous loop (`automation/scripts/run_all_milestones.sh`) reads
-that prompt file directly. This Section 5 exists for manual
-single-milestone restarts via `automation/scripts/run_next.sh`.
+`initiatives/current/prompts/M2.md`
