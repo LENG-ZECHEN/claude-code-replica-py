@@ -258,3 +258,83 @@ def test_cli_todo_reminder_turns_flag(
     assert loops
     loop = loops[-1]
     assert loop._todo_reminder_turns == 3
+
+
+def test_todo_nudge_fires_only_on_first_inner_turn(tmp_path: Path) -> None:
+    """Follow-up fix (Item 2 from post-archive review-time deferred ledger):
+    `_todo_nudge` was captured once per loop.run() but reused on every inner
+    agent turn within that user input, causing the same nudge to be prepended
+    to every `build()` call. Mirrors TS getTodoReminderTurnCounts which fires
+    per user turn, not per inner agent turn. The fix clears `_todo_nudge` to
+    None after the first successful inner-turn build()."""
+    from simple_coding_agent.coding_tools import ShellMode
+    from simple_coding_agent.context import ContextBudget, ContextBuilder
+    from simple_coding_agent.models import ToolCall
+    from simple_coding_agent.provider import TokenUsage
+    from simple_coding_agent.todo import TodoItem, TodoStatus
+    from simple_coding_agent.todo_tool import register_todo_write_tool
+
+    (tmp_path / "f1.txt").write_text("a\n")
+    (tmp_path / "f2.txt").write_text("b\n")
+    (tmp_path / "f3.txt").write_text("c\n")
+
+    transcript = Transcript()
+    registry = build_default_registry(tmp_path, shell_mode=ShellMode.MOCK, transcript=transcript)
+
+    _todos_state: list[TodoItem] = []
+    register_todo_write_tool(
+        registry,
+        lambda: list(_todos_state),
+        lambda new: (_todos_state.__init__(new) or None),  # type: ignore[misc]
+    )
+
+    def _tool_call_resp(call_id: str, path: str) -> ProviderResponse:
+        return ProviderResponse(
+            text="",
+            tool_calls=[ToolCall(id=call_id, name="read_file", input={"path": path})],
+            usage=TokenUsage(),
+            stop_reason="tool_use",
+        )
+
+    provider = MockProvider([
+        _tool_call_resp("c1", "f1.txt"),
+        _tool_call_resp("c2", "f2.txt"),
+        _tool_call_resp("c3", "f3.txt"),
+        MockProvider.direct_answer("done"),
+    ])
+
+    budget = ContextBudget(max_tokens=200_000, reserved_output_tokens=8_192)
+    builder = ContextBuilder(budget=budget)
+
+    # Capture todo_nudge kwarg seen by each build() call.
+    nudge_kwarg_history: list[bool] = []
+    real_build = builder.build
+
+    def traced_build(**kwargs):  # type: ignore[no-untyped-def]
+        nudge_kwarg_history.append(kwargs.get("todo_nudge") is not None)
+        return real_build(**kwargs)
+
+    builder.build = traced_build  # type: ignore[assignment]
+
+    loop = AgentLoop(
+        provider=provider,
+        tool_executor=ToolExecutor(registry),
+        transcript=transcript,
+        context_builder=builder,
+        budget=budget,
+        registry=registry,
+        todo_nudge_enabled=True,
+        todo_reminder_turns=2,
+    )
+    # Pre-arm the nudge so the first inner turn definitely receives it.
+    loop._turns_since_last_todo_write = 10
+    loop._turns_since_last_todo_reminder = 10
+    loop._todos = [TodoItem(content="x", status=TodoStatus.IN_PROGRESS, activeForm="x-ing")]
+
+    result = loop.run("inspect 3 files")
+    assert result.status.name == "COMPLETED"
+    # 4 inner turns observed (3 tool turns + 1 final). Only the FIRST should
+    # carry the todo_nudge; the rest must be None.
+    assert nudge_kwarg_history == [True, False, False, False]
+    # The arm-counter metric must still bump exactly once for this user input.
+    assert loop._metrics.todo_nudges_armed == 1

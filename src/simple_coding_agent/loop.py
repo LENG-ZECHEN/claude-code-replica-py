@@ -288,6 +288,12 @@ class AgentLoop:
                     self._metrics.record_reactive_compact()
                     compacted_overall = True
 
+            # Clear the todo nudge after the FIRST successful build() so that
+            # subsequent inner agent turns within this same user input don't
+            # re-prepend the same nudge. Mirrors TS getTodoReminderTurnCounts
+            # which fires per user turn, not per inner agent turn.
+            _todo_nudge = None
+
             if response.stop_reason == STOP_MAX_TOKENS:
                 if response.text:
                     partial_msg = Message.assistant(response.text)
@@ -450,6 +456,12 @@ class AgentLoop:
                     self._tracer.emit("reactive", turn=turn)
                     self._metrics.record_reactive_compact()
                     compacted_overall = True
+
+            # Clear the todo nudge after the FIRST successful build() so that
+            # subsequent inner agent turns within this same user input don't
+            # re-prepend the same nudge. Mirrors TS getTodoReminderTurnCounts
+            # which fires per user turn, not per inner agent turn.
+            _todo_nudge = None
 
             if response is None:
                 self._refresh_externalized_bytes()
@@ -835,15 +847,30 @@ class AgentLoop:
     def _set_permission_mode(self, mode: PermissionMode, *, source: str = "tool") -> None:
         """Flip permission mode; emit trace (with source) and record metrics.
 
-        source: "slash"              — user toggled /plan in the REPL
-                "enter_plan_mode_tool" / "tool" — tool-driven transition
+        Idempotent: a transition to the current mode is a no-op (no metric
+        bump, no trace emit). The TS EnterPlanModeTool documents itself as
+        idempotent, and `enter_plan_mode` may be re-called inside PLAN
+        without semantic effect — over-counting `plan_mode_entries` on
+        re-entry would skew telemetry without telling us anything new.
+
+        Exit-counter dispatch by source:
+          - source == "slash"  → record_plan_mode_exit_manual()  (user /plan)
+          - else               → record_plan_mode_exit_approved() (tool path
+                                  reaches here only on the approved branch;
+                                  rejection bumps `_rejected` from the
+                                  exit_plan_mode factory before this runs)
         """
+        if self._permission_mode == mode:
+            return
         self._permission_mode = mode
         if mode == PermissionMode.PLAN:
             self._metrics.record_plan_mode_entry()
             self._tracer.emit("permission", mode="plan", source=source)
         else:
-            self._metrics.record_plan_mode_exit()
+            if source == "slash":
+                self._metrics.record_plan_mode_exit_manual()
+            else:
+                self._metrics.record_plan_mode_exit_approved()
             self._tracer.emit("permission", mode="normal", source=source)
 
     def _maybe_arm_plan_mode_attachment(self) -> PlanModeAttachment | None:

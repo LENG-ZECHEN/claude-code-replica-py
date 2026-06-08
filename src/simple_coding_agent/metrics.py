@@ -53,6 +53,7 @@ class MetricsCollector:
     plan_mode_entries: int = 0
     plan_mode_exits_approved: int = 0
     plan_mode_exits_rejected: int = 0
+    plan_mode_exits_manual: int = 0
     plan_mode_write_attempts: int = 0
 
     def record_full_compact(self) -> None:
@@ -78,26 +79,33 @@ class MetricsCollector:
 
     @property
     def plan_mode_exits(self) -> int:
-        """Total plan mode exits (approved + rejected) — computed, not stored."""
-        return self.plan_mode_exits_approved + self.plan_mode_exits_rejected
+        """Total plan mode exits (approved + rejected + manual) — computed."""
+        return (
+            self.plan_mode_exits_approved
+            + self.plan_mode_exits_rejected
+            + self.plan_mode_exits_manual
+        )
 
     def record_plan_mode_entry(self) -> None:
         self.plan_mode_entries += 1
 
-    def record_plan_mode_exit(self) -> None:
-        """Generic exit counter used by _set_permission_mode (slash toggle path).
-
-        Counts as approved since the user explicitly chose to exit via /plan.
-        """
-        self.plan_mode_exits_approved += 1
-
     def record_plan_mode_exit_approved(self) -> None:
-        """Tool-mediated exit where user approved the plan."""
+        """Tool-mediated exit where the user approved the model's plan."""
         self.plan_mode_exits_approved += 1
 
     def record_plan_mode_exit_rejected(self) -> None:
         """Tool-mediated exit attempt that was rejected by the user."""
         self.plan_mode_exits_rejected += 1
+
+    def record_plan_mode_exit_manual(self) -> None:
+        """User-driven exit via the `/plan` REPL slash command.
+
+        Distinct from `_approved`: the model did not request the exit, the
+        user just toggled back out. Keep separate so plan-acceptance-rate
+        analytics can compute model-driven exits without conflating with
+        manual interventions.
+        """
+        self.plan_mode_exits_manual += 1
 
     def record_plan_mode_write_attempt(self) -> None:
         self.plan_mode_write_attempts += 1

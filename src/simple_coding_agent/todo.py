@@ -116,7 +116,16 @@ def count_assistant_turns_since(
 ) -> int:
     """Count assistant turns backwards until predicate fires (exclusive).
 
-    Source: getTodoReminderTurnCounts() in attachments.ts:3212-3264.
+    **NOT CALLED IN PRODUCTION** — kept for forward-compat parity tests
+    only. The runtime `AgentLoop._maybe_inject_todo_nudge` uses simple
+    per-loop integer counters (`_turns_since_last_todo_write` /
+    `_turns_since_last_todo_reminder`) instead of transcript scanning;
+    see HANDOFF M1 "Counter-based timing" deviation in
+    `initiatives/_archive/2026-06-plan-surface/HANDOFF.md`. This helper
+    is intentionally excluded from `__all__` so `from todo import *`
+    callers do not assume it is the live arm-logic path.
+
+    Source mirror: getTodoReminderTurnCounts() in attachments.ts:3212-3264.
 
     Rules:
       - Iterate reversed(messages).
@@ -154,7 +163,12 @@ def count_assistant_turns_since(
 def _is_todo_write_call(msg: Message) -> bool:
     """True iff msg is an ASSISTANT message that called todo_write.
 
-    Source: attachments.ts:3233-3242.
+    **NOT CALLED IN PRODUCTION** — paired with `count_assistant_turns_since`
+    above for forward-compat parity tests only. Production runtime resets
+    `_turns_since_last_todo_write` directly when the `todo_write` tool
+    succeeds in `AgentLoop._execute_one`.
+
+    Source mirror: attachments.ts:3233-3242.
     """
     if msg.role != Role.ASSISTANT:
         return False
@@ -170,18 +184,29 @@ def _is_todo_write_call(msg: Message) -> bool:
 def _is_todo_reminder_attachment(msg: Message) -> bool:
     """True iff msg is an ATTACHMENT_TODO_NUDGE message.
 
-    Source: attachments.ts:3247-3253 (checks attachment.type == 'todo_reminder').
+    **NOT CALLED IN PRODUCTION** — paired with `count_assistant_turns_since`
+    above for forward-compat parity tests only. Production runtime resets
+    `_turns_since_last_todo_reminder` directly when the arm-logic fires
+    in `AgentLoop._maybe_inject_todo_nudge`.
+
+    Source mirror: attachments.ts:3247-3253 (checks attachment.type == 'todo_reminder').
     """
     return msg.type == MessageType.ATTACHMENT_TODO_NUDGE
 
 
+# The three helpers above (count_assistant_turns_since, _is_todo_write_call,
+# _is_todo_reminder_attachment) are deliberately NOT exported. They mirror
+# the TS transcript-scanning approach to arming the todo reminder, but the
+# replica's runtime uses simple per-loop integer counters instead (see
+# HANDOFF M1 "Counter-based timing" deviation). The helpers stay defined
+# (and explicitly importable via their names) so the parity tests in
+# tests/test_todo.py can pin the TS semantics, but `from todo import *`
+# will not surface them and reduce the chance of new callers assuming
+# they are the live arm-logic path.
 __all__ = [
     "TODO_REMINDER_TURNS",
     "TodoItem",
     "TodoNudge",
     "TodoStatus",
-    "_is_todo_reminder_attachment",
-    "_is_todo_write_call",
-    "count_assistant_turns_since",
     "render_todo_nudge_body",
 ]
