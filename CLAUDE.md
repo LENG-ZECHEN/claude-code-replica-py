@@ -145,6 +145,12 @@ These are intentional simplifications, not regressions, and are documented here 
 
 - **`ContextCompactor.compact()` re-appends kept messages after the boundary marker** rather than splicing the transcript. The pre-boundary copies remain in `Transcript.all_messages()` (and `export()`) but are filtered out by `messages_after_compact_boundary()` before reaching the API. This matches the source design and is harmless, but the transcript grows monotonically.
 
+- **Plan Mode is enforced only by attachment + soft-deny, never by tools-schema filtering.** `registry.to_api_format()` is called unconditionally in `AgentLoop.run()` / `run_stream()`, so the API `tools` field stays byte-identical across NORMAL ↔ PLAN to preserve the prompt cache prefix. A model that ignores the per-turn `<system-reminder>` teaching will keep emitting write-tool calls until soft-deny tool_results push it back; the `plan_mode_write_attempts` counter makes that spike visible. Mirrors `tools.ts:271-327 getTools` in the TS source which is also mode-blind.
+
+- **Plan content persistence, `allowedPrompts`, and reentry attachments are out of scope.** The replica's `exit_plan_mode` does not write the plan to disk (TS `plans.ts writeFile + getPlanFilePath`), does not accept scoped-Bash permission requests (TS `allowedPrompts` schema), and does not emit a `plan_mode_reentry` `MessageType.ATTACHMENT` after rejection. The rejection path raises `PlanRejectedError` so the model self-corrects via `is_error=True` ToolResult; there is no reentry-specific attachment beyond the next-turn `ATTACHMENT_PLAN_MODE` injection that already fires while in PLAN.
+
+- **`_confirm_exit_plan` synchronously blocks the event loop in `--stream` mode.** `input("Approve plan? (y/N): ")` is called from inside `AgentLoop` tool dispatch on the main thread, so streaming `text_delta` events stall until the user answers. Acceptable for the replica (matches CC's modal approval UX); would need an async approval channel to unblock streaming UIs.
+
 ---
 
 ## Initiative Operations

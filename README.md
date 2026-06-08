@@ -92,6 +92,20 @@ Both REPLs additionally accept `--extract-memories` (enable automatic post-turn 
 
 Both REPLs also accept `--no-todo-reminder` (disable the turn-based TodoWrite stale-todo nudge from plan-surface M1; also omits the system-prompt `## Todo Management` teaching section and skips `todo_write` registration so the machinery is fully quiescent) and `--todo-reminder-turns N` (override the default `TODO_REMINDER_TURNS = 10`; the reminder fires only when both `turns_since_write >= N` AND `turns_since_reminder >= N`, ignored when `--no-todo-reminder` is set).
 
+### REPL slash commands
+
+Inside `simple-agent --repl` or `simple-agent-openai --repl`, the following slash commands are recognised in addition to plain user input. Type `/help` to see the live list; the canonical source is `_REPL_HELP_TEXT` in `src/simple_coding_agent/cli.py`.
+
+| Command | Shipped by | Purpose |
+|---|---|---|
+| `/help` | runtime-activation M1 | List available slash commands. |
+| `/exit`, `/quit` | runtime-activation M1 | Exit the REPL (auto-saves `SessionMemory` if enabled). |
+| `/stats` | runtime-activation M3 | Print the current `MetricsCollector` snapshot (compact / snip / microcompact / reactive / externalized bytes / per-turn tokens / extract / todo / plan-mode counters). |
+| `/save <name>`, `/load <name>` | runtime-activation M4 | Persist or restore the current transcript + last compact summary to `<sessions_dir>/<name>.json`. |
+| `/remember <type> <id> <body…>` | runtime-activation M5 | Append a `ProjectMemory` entry from inside the REPL; honours the same secret-rejection / path-traversal guards as `simple-agent memory add`. |
+| `/todos` | plan-surface M1 | Show the current in-memory TodoWrite list with glyphs (`☐` pending, `▶` in-progress, `☑` completed). Empty list prints `(no todos)`. |
+| `/plan` | plan-surface M3 | Bidirectional toggle between `PermissionMode.NORMAL` and `PermissionMode.PLAN`. Silent (no approval prompt) and preserves transcript history; `--verbose` shows the `[trace] [permission] mode=… source=slash` line. |
+
 ## Running the demo (safe, no API key required)
 
 ```bash
