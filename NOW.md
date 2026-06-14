@@ -6,9 +6,38 @@
 
 ## Active initiative
 
-**None.**
+**session-memory-dream** — bootstrapped 2026-06-15.
+See [`initiatives/current/`](./initiatives/current/).
 
-`initiatives/current/` is empty (`.gitkeep` only).
+| | |
+|---|---|
+| Slug | `session-memory-dream` |
+| Status | active — bootstrapped, NOT yet executed |
+| Bootstrapped | 2026-06-15 |
+| Milestones | M1 → M7 (7) |
+| Commit prefix | `sm-dream` |
+| Baseline commit | `094cf90` |
+| Baseline pytest | 912 passing (+1 xpassed); mypy + ruff clean |
+| Brief | [`PLAN.md`](./initiatives/current/PLAN.md) · [`config.yaml`](./initiatives/current/config.yaml) |
+
+**What it builds:** the two remaining context/memory mechanisms that
+complete fidelity to Claude Code v2.1.88 — **(A) session-memory
+compaction** (reuse an incrementally-maintained session summary so
+auto-compaction skips the compaction-time LLM summarization call) and
+**(B) auto-dream** (a gated, forked sub-agent that periodically
+consolidates — merges/dedups/prunes/re-indexes — the cross-session
+memory store). Both ride on one new generic `ForkedAgentRunner`.
+
+**Milestone arc:** M1 generic runner → M2–M4 session-memory
+(state + summarizer → loop wiring + persistence → observability +
+dual-arm latency benchmark) → M5–M7 dream (lock + gate cascade →
+consolidator engine → CLI + trigger + docs). A disclosed, reproducible
+wall-clock benchmark replaces the never-existed "98.7%" claim, and the
+memory subsystem gains its missing 4th layer (periodic consolidation,
+the counterpart to per-turn `extract_memories`).
+
+**Next step (owner-triggered):** `./automation/scripts/run_all_milestones.sh`
+runs every milestone, then auto-invokes the review + wrap-up agent.
 
 ## Last completed initiative
 
@@ -33,24 +62,6 @@ per-turn `ATTACHMENT_PLAN_MODE` teaching attachment + `ToolExecutor`
 soft-deny + `/plan` bidirectional toggle + `ExitPlanMode` with CLI
 approval). The API `tools` field stays mode-invariant across NORMAL ↔
 PLAN so the prompt cache prefix is preserved.
-
-**Review-and-repair note:** the review session fixed one HIGH
-(`plan_mode_exits_rejected` was structurally added in M3 but
-operationally dead — the rejection branch raised `PlanRejectedError`
-before any counter bump; fix wires a `metrics=` kwarg through
-`register_exit_plan_mode_tool` and bumps in the rejection branch),
-two MEDIUM (soft-deny `ToolResult` content lost the PLAN-spec
-"Use exit_plan_mode / use /plan" recovery hint; `simple-agent-openai`
-silently ignored the `--no-todo-reminder` / `--todo-reminder-turns`
-flags PLAN required on both REPLs), and one LOW
-(`transcript.normalize_for_api` filter list drifted from
-`compact.py`). Review-fix commit `4efc445` ships 5 new tests across
-`test_exit_plan_mode.py` and `test_openai_cli_repl.py`. Doc work
-landed in `1e242b5`: four CLAUDE.md per-file summary appends, a
-README.md flag-paragraph append, two subsystem docs (`docs/todo.md`,
-`docs/plan-mode.md`), and ADR-0004 for the three-layer registration
-pattern. Five LOW findings deferred — see `REVIEW.md`'s deferred
-ledger.
 
 ## How to start a new initiative
 

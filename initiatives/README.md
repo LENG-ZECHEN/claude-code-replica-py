@@ -12,7 +12,7 @@ For the active-initiative pointer and the bootstrap procedure, see
 
 | Slug | Status | Bootstrapped | Milestones | Baseline |
 |---|---|---|---|---|
-| _(none)_ | — | — | — | — |
+| [session-memory-dream](./current/) | active | 2026-06-15 | M1 → M7 | `094cf90` |
 
 ## Archived
 
