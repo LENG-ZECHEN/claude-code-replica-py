@@ -231,3 +231,94 @@ def test_seeded_project_memory_reaches_built_system_prompt(
     assert injected, "memory_injected should be populated on the first step"
     assert any(seeded_body in snippet for snippet in injected)
     assert any(snippet.startswith("[feedback] tabs_pref") for snippet in injected)
+
+
+# ---------------------------------------------------------------------------
+# Scenario 4 (sm-dream M3): cross-process SM warm-resume
+# ---------------------------------------------------------------------------
+
+
+def test_cross_process_warm_resume_zero_sm_compact_calls(
+    tmp_path: Path,
+    sessions_dir: Path,
+) -> None:
+    """Session A warms SM state; Session B resumes and its first compaction
+    uses the warm SM with ZERO extra summarization provider calls.
+
+    This is the exit-gate load-bearing scenario for sm-dream M3:
+      - Session A: 1 turn with session_memory_enabled=True → SM state warm
+      - A saves session (SM state persisted via session_store round-trip)
+      - Session B: injects warm SM state, triggers _force_compact
+      - Assert: _force_compact adds ZERO provider calls (SM reuse path)
+
+    Source: sessionMemoryCompact.ts:498 — "SM-compact has no compact-API-call".
+    """
+    from simple_coding_agent.compact import ContextCompactor, LLMSummarizer
+    from simple_coding_agent.context import ContextBudget, ContextBuilder
+    from simple_coding_agent.loop import AgentLoop
+    from simple_coding_agent.models import Message
+    from simple_coding_agent.session_store import load_session, save_session
+    from simple_coding_agent.tools import ToolExecutor, ToolRegistry
+    from simple_coding_agent.transcript import Transcript
+
+    def _make_test_loop(provider: MockProvider) -> AgentLoop:
+        transcript = Transcript()
+        registry = ToolRegistry()
+        executor = ToolExecutor(registry)
+        budget = ContextBudget(max_tokens=8192, reserved_output_tokens=4096)
+        builder = ContextBuilder(budget=budget)
+        compactor = ContextCompactor(keep_recent=0, summarizer=LLMSummarizer(provider))
+        return AgentLoop(
+            provider=provider,
+            tool_executor=executor,
+            transcript=transcript,
+            context_builder=builder,
+            budget=budget,
+            registry=registry,
+            compactor=compactor,
+            session_memory_enabled=True,
+        )
+
+    # --- Session A: warm up SM state ---
+    provider_a = MockProvider([MockProvider.direct_answer("Session A reply.")])
+    loop_a = _make_test_loop(provider_a)
+    loop_a.run("Session A first question")
+    assert loop_a._session_memory_state.is_warm, "Session A must produce warm SM state"
+
+    # Save session — SM state serialised into JSON
+    session_path = tmp_path / "cross_process_test.json"
+    save_session(
+        session_path,
+        transcript=loop_a._transcript,
+        last_summary=loop_a._last_summary,
+        session_memory_state=loop_a._session_memory_state,
+    )
+
+    # --- Session B: resume and verify warm SM → zero compaction calls ---
+    provider_b = MockProvider([
+        MockProvider.direct_answer("Session B reply."),
+        MockProvider.direct_answer("compact fallback summary"),  # consumed only if warm path fails
+    ])
+    loop_b = _make_test_loop(provider_b)
+
+    _t, _s, sm_state = load_session(session_path)
+    assert sm_state.is_warm, "Loaded SM state must be warm (cross-process persistence)"
+
+    loop_b._session_memory_state = sm_state
+    loop_b._session_memory_cursor = None
+
+    # Populate transcript so _force_compact has messages to summarize
+    for i in range(3):
+        loop_b._transcript.append(Message.user(f"B msg {i}"))
+        loop_b._transcript.append(Message.assistant(f"B reply {i}"))
+
+    pre_count_b = len(provider_b.history)
+    result = loop_b._force_compact()
+    assert result is True
+
+    post_count_b = len(provider_b.history)
+    assert post_count_b == pre_count_b, (
+        f"Cross-process warm SM resume must add ZERO compaction provider calls, "
+        f"but got {post_count_b - pre_count_b} extra call(s). "
+        f"SM was_warm={sm_state.is_warm}; loop_b._sm_enabled={loop_b._sm_enabled}."
+    )

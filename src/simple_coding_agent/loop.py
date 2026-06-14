@@ -17,9 +17,12 @@ from .coding_tools import (
     WRITE_MEMORY_ENTRY_TOOL_NAME,
     write_memory_entry,
 )
-from .compact import ContextCompactor, MicroCompactor
+from .compact import ContextCompactor, MicroCompactor, SessionMemorySummarizer
 from .context import ContextBudget, ContextBuilder
-from .extraction_hooks import maybe_extract_memories
+from .extraction_hooks import (
+    maybe_extract_memories,
+    maybe_update_session_memory,
+)
 from .memory import ProjectMemory, SessionMemory
 from .metrics import MetricsCollector
 from .models import (
@@ -36,6 +39,7 @@ from .permission import PermissionMode, PlanModeAttachment
 from .plan_mode_tools import register_enter_plan_mode_tool, register_exit_plan_mode_tool
 from .provider import STOP_MAX_TOKENS, PromptTooLongError, Provider
 from .recall_hooks import inject_memory_attachments
+from .session_memory_state import SessionMemoryState
 from .snip import SnipTool
 from .snip_tool_model import SnipNudge, snippable_candidate_uuids
 from .todo import (
@@ -149,6 +153,7 @@ class AgentLoop:
         snip_nudge_growth_tokens: int = _DEFAULT_SNIP_NUDGE_GROWTH_TOKENS,
         extract_memories_enabled: bool = False,
         extract_throttle_n: int = 1,
+        session_memory_enabled: bool = False,
         is_subloop: bool = False,
         todo_nudge_enabled: bool = True,
         todo_reminder_turns: int = TODO_REMINDER_TURNS,
@@ -204,6 +209,9 @@ class AgentLoop:
         self._last_memory_message_uuid: str | None = None
         self._turns_since_last_extraction: int = 0
         self._extract_throttle_n: int = max(1, extract_throttle_n)
+        self._sm_enabled: bool = session_memory_enabled
+        self._session_memory_state: SessionMemoryState = SessionMemoryState.empty()
+        self._session_memory_cursor: str | None = None
         self._already_surfaced_memories: set[str] = set()
         self._session_bytes_used: int = 0
         self._todos: list[TodoItem] = todo_state if todo_state is not None else []
@@ -600,6 +608,16 @@ class AgentLoop:
             self._extraction_in_progress = False
             self._last_memory_message_uuid = outcome.last_memory_message_uuid
             self._turns_since_last_extraction = outcome.turns_since_last_extraction
+        sm_outcome = maybe_update_session_memory(
+            messages=self._transcript.all_messages(),
+            since_uuid=self._session_memory_cursor,
+            state=self._session_memory_state,
+            session_memory_enabled=self._sm_enabled,
+            is_subloop=self._is_subloop,
+        )
+        if sm_outcome.ran:
+            self._session_memory_state = sm_outcome.new_state
+            self._session_memory_cursor = sm_outcome.new_cursor_uuid
         return result
 
     def _register_tools(self) -> None:
@@ -688,15 +706,33 @@ class AgentLoop:
         return True
 
     def _force_compact(self) -> bool:
-        """Run compaction unconditionally."""
+        """Run compaction unconditionally.
+
+        When --session-memory is on and the SM state is WARM, temporarily injects
+        SessionMemorySummarizer so the summarization step returns prewarmed text
+        with ZERO provider calls (O(0) compaction). Cold/disabled SM falls through
+        to the configured Rule/LLM summarizer without crashing (null-vs-throw
+        contract from autoCompact.ts:241 autoCompactIfNeeded :288/:312).
+        """
         if self._compactor is None:
             return False
         snapshots = tuple(self._recent_file_snapshots)
-        self._last_summary = self._compactor.compact(
-            self._transcript, self._budget, snapshots=snapshots
-        )
+        if self._sm_enabled and self._session_memory_state.is_warm:
+            orig_summarizer = self._compactor.summarizer
+            self._compactor.summarizer = SessionMemorySummarizer(
+                self._session_memory_state, fallback=orig_summarizer
+            )
+            try:
+                self._last_summary = self._compactor.compact(
+                    self._transcript, self._budget, snapshots=snapshots
+                )
+            finally:
+                self._compactor.summarizer = orig_summarizer
+        else:
+            self._last_summary = self._compactor.compact(
+                self._transcript, self._budget, snapshots=snapshots
+            )
         self._metrics.record_full_compact()
-        # M4: a full compact resets the snip-nudge growth window.
         self._tokens_since_last_snip = 0
         return True
 

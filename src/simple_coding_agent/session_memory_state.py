@@ -47,7 +47,11 @@ from typing import Any
 
 from .models import Message
 
-__all__ = ["SessionMemoryState", "update_session_memory"]
+__all__ = ["SessionMemoryState", "update_session_memory", "update_session_memory_llm"]
+
+# Tool name for the LLM-mode updater's capture tool (mirrors createMemoryFileCanUseTool
+# from src/services/SessionMemory/sessionMemory.ts:460 — the "Edit one file only" gate)
+_SM_WRITE_TOOL_NAME = "write_session_memory_summary"
 
 # ---------------------------------------------------------------------------
 # Section vocabulary (mirrors RuleBasedSummarizer order in compact.py:165-189)
@@ -259,4 +263,105 @@ def update_session_memory(
         new_val = new_parsed.get(name, "")
         merged[name] = new_val if new_val else prev_dict.get(name, "")
 
+    return SessionMemoryState(sections=_apply_caps(merged))
+
+
+# ---------------------------------------------------------------------------
+# update_session_memory_llm
+# ---------------------------------------------------------------------------
+
+
+def update_session_memory_llm(
+    state: SessionMemoryState,
+    new_messages: list[Message],
+    provider: Any,
+) -> SessionMemoryState:
+    """LLM-mode SM updater via ForkedAgentRunner.
+
+    Uses a capture tool to receive the LLM's updated sections JSON, mirroring
+    the TS createMemoryFileCanUseTool gate (sessionMemory.ts:460) — the "Edit
+    one file only" path. Here, the single permitted tool is
+    'write_session_memory_summary', analogous to allowing edits of only the SM
+    file. The gate denies all other tool names.
+
+    Falls back to the deterministic update_session_memory fold if the LLM does
+    not call the capture tool (e.g., MockProvider scripted to return text).
+
+    Source mapping:
+      createMemoryFileCanUseTool <- src/services/SessionMemory/sessionMemory.ts:460
+      streamCompactSummary       <- src/services/compact/compact.ts:1136
+        (the LLM call we SKIP at compaction when warm state is available)
+    """
+    if not new_messages:
+        return state
+
+    # Lazy imports — forked_agent + tools import nothing from this module.
+    from .forked_agent import ForkedAgentRunner  # noqa: PLC0415
+    from .tools import Tool, ToolRegistry  # noqa: PLC0415
+
+    captured_sections: dict[str, str] = {}
+
+    def _write_summary(sections: dict[str, str]) -> str:
+        captured_sections.update(
+            {k: str(v) for k, v in sections.items() if isinstance(k, str)}
+        )
+        return "Session memory updated."
+
+    registry = ToolRegistry()
+    registry.register(Tool(
+        name=_SM_WRITE_TOOL_NAME,
+        description="Write the updated session memory summary sections.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "sections": {
+                    "type": "object",
+                    "description": "Mapping of section name to updated content.",
+                }
+            },
+            "required": ["sections"],
+        },
+        fn=lambda sections: _write_summary(sections),
+    ))
+
+    def _can_use_tool(name: str, _input: dict[str, Any]) -> tuple[bool, str]:
+        if name != _SM_WRITE_TOOL_NAME:
+            return False, f"Only '{_SM_WRITE_TOOL_NAME}' is permitted in SM updater."
+        return True, ""
+
+    system_prompt = (
+        "You are a session memory updater. Review the current session memory and "
+        "the new messages, then call write_session_memory_summary with an updated "
+        "sections dict. Return all canonical section names with updated content."
+    )
+
+    context_text = state.render() if state.is_warm else "(no prior session memory)"
+    messages_text = "\n".join(
+        f"{m.role.value}: {m.content if isinstance(m.content, str) else '[tool content]'}"
+        for m in new_messages
+    )
+    task_prompt = (
+        f"Current session memory:\n{context_text}\n\n"
+        f"New messages to integrate:\n{messages_text}\n\n"
+        f"Call write_session_memory_summary with the updated sections."
+    )
+
+    runner = ForkedAgentRunner(
+        provider=provider,
+        system_prompt=system_prompt,
+        can_use_tool=_can_use_tool,
+        tool_registry=registry,
+        max_turns=3,
+    )
+    runner.run(task_prompt)
+
+    if not captured_sections:
+        # LLM didn't call the capture tool; fall back to deterministic fold.
+        return update_session_memory(state, new_messages)
+
+    prev_dict: dict[str, str] = dict(state.sections)
+    merged: dict[str, str] = {
+        name: captured_sections.get(name, prev_dict.get(name, ""))
+        for name in _SECTION_NAMES
+    }
     return SessionMemoryState(sections=_apply_caps(merged))

@@ -393,6 +393,7 @@ def _build_repl_loop(
     aggressive_thresholds: bool = False,
     extract_memories_enabled: bool = False,
     extract_throttle_n: int = 1,
+    session_memory_enabled: bool = False,
     summarizer_mode: str = "auto",
     todo_nudge_enabled: bool = True,
     todo_reminder_turns: int | None = None,
@@ -587,6 +588,7 @@ def _build_repl_loop(
         "snip_nudge_growth_tokens": resolved_snip_nudge_growth_tokens,
         "extract_memories_enabled": extract_memories_enabled,
         "extract_throttle_n": extract_throttle_n,
+        "session_memory_enabled": session_memory_enabled,
         "todo_nudge_enabled": todo_nudge_enabled,
         **({"todo_reminder_turns": todo_reminder_turns} if todo_reminder_turns is not None else {}),
         **({"todo_state": _todos_shared} if _todos_shared is not None else {}),
@@ -807,6 +809,7 @@ def _handle_save_command(args: list[str], loop: AgentLoop | None) -> None:
             path,
             transcript=loop._transcript,
             last_summary=loop._last_summary,
+            session_memory_state=loop._session_memory_state,
         )
     except OSError as err:
         print(f"(warning: could not save session {name!r}: {err})")
@@ -827,7 +830,7 @@ def _apply_resume(name: str, loop: AgentLoop) -> int:
         print(f"Invalid session name: {err}")
         return 2
     try:
-        transcript, last_summary = load_session(path)
+        transcript, last_summary, sm_state = load_session(path)
     except SessionNotFoundError:
         print(f"No such session: {name!r}")
         return 2
@@ -836,6 +839,8 @@ def _apply_resume(name: str, loop: AgentLoop) -> int:
         return 2
     loop._transcript.replace_all(transcript.all_messages())
     loop._last_summary = last_summary
+    loop._session_memory_state = sm_state
+    loop._session_memory_cursor = None  # will re-scan from scratch on next update
     # The microcompact bookkeeping tracks a uuid from the previous
     # transcript; after a transcript replacement that pointer is stale,
     # so reset it to allow microcompact to re-evaluate the new transcript.
@@ -859,7 +864,7 @@ def _handle_load_command(args: list[str], loop: AgentLoop | None) -> None:
         print(f"Invalid session name: {err}")
         return
     try:
-        transcript, last_summary = load_session(path)
+        transcript, last_summary, sm_state = load_session(path)
     except SessionNotFoundError:
         print(f"No such session: {name!r}")
         return
@@ -868,6 +873,8 @@ def _handle_load_command(args: list[str], loop: AgentLoop | None) -> None:
         return
     loop._transcript.replace_all(transcript.all_messages())
     loop._last_summary = last_summary
+    loop._session_memory_state = sm_state
+    loop._session_memory_cursor = None  # will re-scan from scratch on next update
     # The microcompact bookkeeping tracks a uuid from the previous
     # transcript; after a transcript replacement that pointer is stale,
     # so reset it to allow microcompact to re-evaluate the new transcript.
@@ -1050,6 +1057,7 @@ def _run_repl(
     aggressive_thresholds: bool = False,
     extract_memories_enabled: bool = False,
     extract_throttle_n: int = 1,
+    session_memory_enabled: bool = False,
     show_steps: bool = False,
     summarizer_mode: str = "auto",
     todo_nudge_enabled: bool = True,
@@ -1100,6 +1108,7 @@ def _run_repl(
         aggressive_thresholds=aggressive_thresholds,
         extract_memories_enabled=extract_memories_enabled,
         extract_throttle_n=extract_throttle_n,
+        session_memory_enabled=session_memory_enabled,
         summarizer_mode=summarizer_mode,
         todo_nudge_enabled=todo_nudge_enabled,
         todo_reminder_turns=todo_reminder_turns,
@@ -1263,6 +1272,17 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--session-memory",
+        action="store_true",
+        default=False,
+        dest="session_memory",
+        help=(
+            "Enable session-memory state: incremental SM fold at stop hook "
+            "so compaction reuses the warm summary (O(0) provider calls). "
+            "Default OFF — mirrors extract_memories_enabled opt-in pattern."
+        ),
+    )
+    parser.add_argument(
         "--extract-memories",
         action="store_true",
         default=None,
@@ -1389,6 +1409,7 @@ def main(argv: list[str] | None = None) -> int:
             aggressive_thresholds=bool(args.aggressive_thresholds),
             extract_memories_enabled=extract_enabled,
             extract_throttle_n=extract_throttle,
+            session_memory_enabled=bool(args.session_memory),
             show_steps=bool(args.show_steps),
             summarizer_mode=str(args.summarizer),
             todo_nudge_enabled=not bool(args.no_todo_reminder),

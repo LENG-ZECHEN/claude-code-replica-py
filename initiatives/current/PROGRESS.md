@@ -40,3 +40,12 @@ Each milestone agent APPENDS one block at exit ritual, formatted:
 - **files changed**: `src/simple_coding_agent/session_memory_state.py`, `src/simple_coding_agent/compact.py`, `tests/test_session_memory_state.py`, `tests/test_session_memory_summarizer.py`
 - **exit gate**: `tests/test_session_memory_state.py AND tests/test_session_memory_summarizer.py pass; SessionMemoryState holds 9-section summary; to_jsonable/from_jsonable round-trip with unknown-key forward-compat; update_session_memory returns NEW state (immutability); warm SessionMemorySummarizer returns prewarmed text with ZERO provider calls; cold state delegates to fallback; ContextCompactor(summarizer=SessionMemorySummarizer(prewarmed)) produces non-empty CompactSummary; pytest grows by ≥12` → PASS (28 passed in targeted run; 951 total, +28 from 923)
 - **notes**: Lazy import of RuleBasedSummarizer inside update_session_memory() avoids circular import (compact.py imports SessionMemoryState at module level)
+
+## M3 — done 2026-06-15
+
+- **commit**: `(see git log)` `[sm-dream/M3] wire session-memory into loop + LLM updater + cross-process persistence`
+- **tests**: 951 → 962 (+11)
+- **mypy**: clean | **ruff**: clean
+- **files changed**: `src/simple_coding_agent/session_memory_state.py`, `src/simple_coding_agent/extraction_hooks.py`, `src/simple_coding_agent/session_store.py`, `src/simple_coding_agent/loop.py`, `src/simple_coding_agent/cli.py`, `src/simple_coding_agent/openai_cli.py`, `tests/test_loop_session_memory.py`, `tests/test_end_to_end_long_session.py`, `tests/test_repl_save_load.py`
+- **exit gate**: `maybe_update_session_memory runs in _run_stop_hooks; warm SM → _force_compact → ZERO provider calls (MockProvider delta=0); cross-process warm resume preserves SM; cold SM falls back without crash; pytest grows by ≥10` → PASS (14 passed in targeted run; 962 total, +11 from 951)
+- **notes**: Synchronous stop-hook fold replaces TS fire-and-forget async extraction; load_session now returns 3-tuple (transcript, summary, SessionMemoryState)

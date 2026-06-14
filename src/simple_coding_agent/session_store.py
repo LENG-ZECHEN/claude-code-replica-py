@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import CompactSummary
+from .session_memory_state import SessionMemoryState
 from .transcript import Transcript, _atomic_write_json
 
 _SESSION_VERSION = 1
@@ -128,21 +129,32 @@ def save_session(
     *,
     transcript: Transcript,
     last_summary: CompactSummary | None,
+    session_memory_state: SessionMemoryState | None = None,
 ) -> None:
-    """Atomically persist a transcript + last summary to ``path``."""
+    """Atomically persist a transcript + last summary to ``path``.
+
+    ``session_memory_state`` is written as an optional key so old readers
+    that do not know about SM state still load the file successfully.
+    """
     target = Path(path)
-    payload = {
+    payload: dict[str, Any] = {
         "version": _SESSION_VERSION,
         "transcript": transcript.to_jsonable(),
         "last_summary": _summary_to_dict(last_summary),
     }
+    if session_memory_state is not None:
+        payload["session_memory_state"] = session_memory_state.to_jsonable()
     _atomic_write_json(target, payload)
 
 
 def load_session(
     path: str | Path,
-) -> tuple[Transcript, CompactSummary | None]:
+) -> tuple[Transcript, CompactSummary | None, SessionMemoryState]:
     """Inverse of ``save_session``.
+
+    Returns a 3-tuple: (transcript, last_summary, session_memory_state).
+    When ``session_memory_state`` is absent from the file (old format), an
+    empty state is returned — backward compatible with pre-M3 session files.
 
     Raises ``SessionNotFoundError`` when ``path`` is missing so REPL
     callers can render ``no such session`` without a try/except over
@@ -161,7 +173,11 @@ def load_session(
         raise ValueError(f"session file at {target} has no 'transcript' object")
     transcript = Transcript.from_jsonable(transcript_payload)
     last_summary = _summary_from_dict(payload.get("last_summary"))
-    return transcript, last_summary
+    # Absent key → empty state (backward compat with pre-M3 session files)
+    sm_state = SessionMemoryState.from_jsonable(
+        payload.get("session_memory_state") or {}
+    )
+    return transcript, last_summary, sm_state
 
 
 __all__ = [
@@ -172,4 +188,5 @@ __all__ = [
     "resolve_sessions_dir",
     "save_session",
     "session_path_for",
+    "SessionMemoryState",
 ]

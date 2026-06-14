@@ -1,6 +1,6 @@
-# HANDOFF — session-memory-dream (M2 done, next: M3)
+# HANDOFF — session-memory-dream (M3 done, next: M4)
 
-> Updated by: M2 milestone agent
+> Updated by: M3 milestone agent
 > Date: 2026-06-15
 > Re-verify Section 3 numbers before starting work — do not trust this
 > file blindly.
@@ -10,9 +10,9 @@
 ## 1. Current initiative
 
 - **slug**: `session-memory-dream`
-- **current milestone**: M2 — done
-- **next milestone**: `M3` — loop wiring + LLM updater + session_store round-trip
-- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [next], M4 [pending], M5 [pending], M6 [pending], M7 [pending]
+- **current milestone**: M3 — done
+- **next milestone**: `M4` — SM-compact observability + dual-arm latency benchmark
+- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [done], M4 [next], M5 [pending], M6 [pending], M7 [pending]
 
 ## 2. Completed milestones
 
@@ -58,14 +58,27 @@ source of truth on itself.
   - `9 sections not 10`: The TS `DEFAULT_SESSION_MEMORY_TEMPLATE` has 10 headings; M2 uses the 9-section set from `RuleBasedSummarizer` (the deterministic fold reuses RuleBasedSummarizer heuristics, not the TS SM template). The TS SM template's 10 sections are for the M3 LLM updater. Documented in `session_memory_state.py` module docstring.
   - `compact.py __all__ not added`: `compact.py` had no `__all__` before M2; none was added (consistent with prior style — existing callers import by name). `session_memory_state.py` exports `__all__ = ["SessionMemoryState", "update_session_memory"]`.
 - **known limitations**:
-  - `merge logic is simple overwrite-then-fallback`: `update_session_memory` takes new content from new_messages; if a section has no new content, falls back to the previous state's value. There's no cross-turn accumulation within a section (e.g. "append new user messages to All User Messages"). M3's LLM updater will handle richer merging.
+  - `merge logic is simple overwrite-then-fallback`: `update_session_memory` takes new content from new_messages; if a section has no new content, falls back to the previous state's value. There's no cross-turn accumulation within a section (e.g. "append new user messages to All User Messages"). M3's LLM updater handles richer merging.
+
+### M3
+
+- **commit**: `(see git log)` `[sm-dream/M3] wire session-memory into loop + LLM updater + cross-process persistence`
+- **files changed**: `src/simple_coding_agent/session_memory_state.py` (MODIFIED — added `update_session_memory_llm`), `src/simple_coding_agent/extraction_hooks.py` (MODIFIED — added `MemoryUpdateOutcome` + `maybe_update_session_memory`), `src/simple_coding_agent/session_store.py` (MODIFIED — `save_session` + `load_session` SM round-trip, `load_session` now returns 3-tuple), `src/simple_coding_agent/loop.py` (MODIFIED — `session_memory_enabled` param, `_sm_enabled`/`_session_memory_state`/`_session_memory_cursor` fields, `_run_stop_hooks` wiring, `_force_compact` SM injection), `src/simple_coding_agent/cli.py` (MODIFIED — `--session-memory` flag, threaded through `_build_repl_loop`/`_run_repl`, `save_session`/`load_session` callers updated), `src/simple_coding_agent/openai_cli.py` (MODIFIED — `session_memory_enabled` threaded through `_build_openai_repl_loop`/`_run_openai_repl`), `tests/test_loop_session_memory.py` (NEW), `tests/test_end_to_end_long_session.py` (EXTENDED — scenario 4), `tests/test_repl_save_load.py` (FIXED — 3-tuple unpack)
+- **tests added**: `tests/test_loop_session_memory.py` (+10 cases) + `tests/test_end_to_end_long_session.py` (+1 case). Total: 951 → 962 (+11)
+- **behavior implemented**: `maybe_update_session_memory` (extraction_hooks.py) is a gated synchronous SM fold called from `AgentLoop._run_stop_hooks` after every turn when `--session-memory` is on. It slices messages since `_session_memory_cursor`, calls `update_session_memory`, advances cursor on success, preserves prior cursor on failure (at-least-once). `AgentLoop._force_compact` injects `SessionMemorySummarizer(self._session_memory_state)` when `_sm_enabled=True` and state is warm, restoring the original summarizer via try/finally after compact returns — ZERO extra provider calls on warm path. Cold/empty state falls through to the configured Rule/LLM summarizer without crashing (null-vs-throw contract). `session_store.save_session` accepts optional `session_memory_state` kwarg; `load_session` returns 3-tuple `(Transcript, CompactSummary | None, SessionMemoryState)` — absent key → `SessionMemoryState.empty()` (backward compat with pre-M3 files). CLI adds `--session-memory` flag (default OFF, mirrors `--extract-memories`). `update_session_memory_llm` in `session_memory_state.py` uses `ForkedAgentRunner` with a `write_session_memory_summary`-only `can_use_tool` gate (mirroring `createMemoryFileCanUseTool` from sessionMemory.ts:460), falling back to `update_session_memory` if the LLM doesn't call the tool.
+- **design decisions (deviations from PLAN)**:
+  - `load_session returns 3-tuple`: Changed from `tuple[Transcript, CompactSummary | None]` to `tuple[Transcript, CompactSummary | None, SessionMemoryState]`. All 3 call sites in `cli.py` updated. The alternative (a new `load_session_sm` function) would have split the API — the 3-tuple is simpler and the only callers are in scope. Visible in: `session_store.py::load_session`, `cli.py:830`, `cli.py:862`, `cli.py::_apply_resume`.
+  - `SM update always runs (not gated on memory_dir)`: `maybe_update_session_memory` is called unconditionally in `_run_stop_hooks` (gated only on `_sm_enabled`), unlike `maybe_extract_memories` which also gates on `_memory_dir is not None`. SM state is in-memory and doesn't need a memory_dir. This simplifies the call site.
+  - `_force_compact temporarily mutates compactor.summarizer`: TS achieves two-tier compaction by calling a separate `sessionMemoryCompact` function before `compactConversation`. The replica swaps `self._compactor.summarizer` temporarily (try/finally restore) since `ContextCompactor.compact()` uses `self.summarizer` internally and the compact() API is frozen. Net effect is identical: warm SM → O(0) summarize; cold → fallback.
+- **known limitations**:
+  - `update_session_memory_llm` not wired into `maybe_update_session_memory`: The stop-hook always calls the deterministic `update_session_memory` fold (no LLM per turn). The `update_session_memory_llm` function exists and is tested separately but the stop-hook doesn't call it. Rationale: (1) the deterministic fold keeps tests fast/deterministic; (2) LLM per-turn update adds latency at every stop-hook; (3) the warm state reuse at compaction is the value regardless of which updater built it. A future M3.5 could add a flag like `--session-memory-mode llm` to opt in. Documented here for the final review.
 
 ## 3. Current repo state
 
 > Re-verify these numbers before starting work.
 
-- **last commit**: `(see git log)` — `[sm-dream/M2] add SessionMemoryState + incremental fold + SessionMemorySummarizer`
-- **tests**: 951 passing (+1 xpassed)
+- **last commit**: `(see git log)` — `[sm-dream/M3] wire session-memory into loop + LLM updater + cross-process persistence`
+- **tests**: 962 passing (+1 xpassed)
 - **mypy**: clean (`mypy src` → no issues in 32 source files)
 - **ruff**: clean (`ruff check .` → All checks passed!)
 - **branch**: main
@@ -86,39 +99,41 @@ source of truth on itself.
 - **compatibility requirements**: `session_store.py` JSON envelope changes must be backward-compatible (new keys optional; absent → empty/default), mirroring how `restored_files`/`timestamp` are already optional.
 - **frozen public contracts (added by M2)**:
   - `SessionMemoryState` (session_memory_state.py): frozen dataclass; `sections: tuple[tuple[str, str], ...]`; `is_warm`/`is_empty` properties; `render() -> str`; `to_jsonable() -> dict`; `from_jsonable(data) -> SessionMemoryState`. Do NOT change these signatures.
-  - `update_session_memory(state, new_messages) -> SessionMemoryState` — pure function, immutable, no side effects. M3 is the PRODUCER (calls this per-turn). Do NOT change the signature.
+  - `update_session_memory(state, new_messages) -> SessionMemoryState` — pure function, immutable, no side effects. Do NOT change the signature.
   - `SessionMemorySummarizer` (compact.py): `__init__(state, fallback=None)` + `.summarize(messages) -> str` implementing the `Summarizer` Protocol drop-in. Do NOT change these signatures.
-  - `SessionMemoryState.to_jsonable()` is the on-disk shape that M3's `session_store` round-trip must consume. M3 must keep it backward-compatible (new keys in to_jsonable output must be tolerated by from_jsonable via the unknown-key-ignore path).
-  - `ContextCompactor`, `CompactSummary`, the `Summarizer` Protocol, `RuleBasedSummarizer`, `LLMSummarizer`, and `MicroCompactor` in `compact.py` are byte-identical in behavior — M2 only ADDED `SessionMemorySummarizer` and one import. Do not change any existing compact.py class signatures.
+  - `ContextCompactor`, `CompactSummary`, the `Summarizer` Protocol, `RuleBasedSummarizer`, `LLMSummarizer`, and `MicroCompactor` in `compact.py` are byte-identical in behavior — do not change any existing compact.py class signatures.
+- **invariants added by M3**:
+  - `--session-memory` flag is default OFF — M4+ must keep it opt-in.
+  - `session_memory_state` key in session JSON is OPTIONAL (absent → `SessionMemoryState.empty()`). Do not make it required; pre-M3 session files must still load.
+  - `load_session` now returns 3-tuple `(Transcript, CompactSummary | None, SessionMemoryState)`. All callers that previously used 2-tuple destructuring have been updated. M4 must not revert to 2-tuple.
+  - Two-tier null-vs-throw compaction contract: cold SM falls through to configured summarizer, NEVER crashes `_force_compact`. M4's observability wiring touches `_force_compact` — do not break this.
+  - `ContextCompactor.summarizer` is temporarily mutated in `_force_compact` (try/finally). M4 must not change `_force_compact`'s try/finally structure without preserving the fallback guarantee.
 
 ## 5. Next milestone guidance
 
-For `M3` — loop wiring + LLM updater + session_store round-trip:
+For `M4` — SM-compact observability + dual-arm latency benchmark:
 
-- **next scope**: Wire M2's producer/consumer into the runtime. Specifically:
-  1. **`loop.py::_run_stop_hooks`** — call `update_session_memory(self._session_memory_state, new_messages)` per-turn when `--session-memory` flag is set; store result in a new `_session_memory_state` field on `AgentLoop`.
-  2. **`loop.py::_force_compact`** — inject `SessionMemorySummarizer(self._session_memory_state, fallback=RuleBasedSummarizer())` as the summarizer when `_force_compact` calls `ContextCompactor`. On a WARM state, compaction costs O(0) provider calls.
-  3. **`session_store.py` round-trip** — persist `session_memory_state` alongside the transcript in the session JSON: `state.to_jsonable()` on save, `SessionMemoryState.from_jsonable(...)` on load (unknown-key-ignore is already implemented — just call it). The key in the JSON envelope should be `"session_memory_state"` (absent → `SessionMemoryState.empty()`).
-  4. **CLI `--session-memory` flag** — add to both `cli.py` and `openai_cli.py`; default OFF. When ON: create `SessionMemoryState.empty()` at loop construction; wire it through `_run_stop_hooks` and `_force_compact`.
-  5. **LLM updater via `ForkedAgentRunner`** — optionally, replace the `RuleBasedSummarizer().summarize()` call inside `update_session_memory` with an LLM-backed updater using `ForkedAgentRunner(provider, sm_system_prompt, can_use_tool=lambda *_: (True, ""), tool_registry=empty_registry)` and the SM update prompt from `prompts.ts`. This is M3's core new feature (the "dream" in session-memory-dream). The LLM receives the current `state.render()` + new messages and returns updated section text.
+- **next scope** (verbatim from PLAN.md M4):
+  1. `MetricsCollector` gains `sm_compact_reuses` and `sm_compact_misses` (`record_*` methods + `format_stats` lines) surfaced via `/stats`.
+  2. Emit `reused=<bool>` on the EXISTING `compact` trace channel — NO new channel (11-name vocab frozen). Assert the `StderrTracer` line contains `reused=True`/`reused=False`.
+  3. New `benchmarks/bench_sm_compact_latency.py` — headless, writes `benchmarks/_results/04_sm_compact_latency.{json,md}`, two arms: (a) DETERMINISTIC (RuleBasedSummarizer vs O(0) SM reuse, no API), (b) REAL-API gated behind `--confirm-api-call`.
+  4. `tests/test_bench_sm_compact.py` asserts `measured_reuse_ms < full_arm_ms` with injected delay.
 
-- **relevant files**:
-  - MODIFY: `src/simple_coding_agent/loop.py` — add `_session_memory_state: SessionMemoryState` field; wire into `_run_stop_hooks` and `_force_compact`.
-  - MODIFY: `src/simple_coding_agent/session_store.py` — add `session_memory_state` key to the session JSON envelope (`SessionMemoryState.to_jsonable()` / `from_jsonable()`).
-  - MODIFY: `src/simple_coding_agent/cli.py` — add `--session-memory` flag; pass state into AgentLoop.
-  - MODIFY: `src/simple_coding_agent/openai_cli.py` — same flag.
-  - READ (do NOT modify): `src/simple_coding_agent/session_memory_state.py` — M2's `update_session_memory` is the PRODUCER that M3 wires; `SessionMemoryState.from_jsonable` is what M3's session_store must call on load.
-  - READ (do NOT modify): `src/simple_coding_agent/compact.py` — `SessionMemorySummarizer` is already there; M3 just needs to inject it at `_force_compact` time with the current `_session_memory_state`.
-  - READ (do NOT modify): `src/simple_coding_agent/forked_agent.py` — M3's LLM updater uses `ForkedAgentRunner`; see M1 HANDOFF for the exact constructor signature.
+- **where to observe the reuse/miss decision**: `loop.py::_force_compact` lines ~694-708. The branch `if self._sm_enabled and self._session_memory_state.is_warm:` is the reuse decision point. M4 should record `sm_compact_reuses` in the True branch and `sm_compact_misses` in the else branch, then emit `reused=<bool>` on the `compact` trace channel BEFORE or AFTER the existing `compact` emit inside `ContextCompactor.compact()` — or pass `reused` as a kwarg to the trace emit that already fires inside `ContextCompactor.compact()`. The cleanest approach: add `reused` to the `ContextCompactor.compact()` trace emit by passing it as a parameter from `_force_compact` — but that requires changing `compact.py`. Alternatively, add a second `tracer.emit("compact", reused=...)` in `_force_compact` after the compaction. The 11-channel constraint allows multiple emits on the same channel.
 
-- **expected tests**:
-  - NEW: `tests/test_loop_session_memory.py` — AgentLoop integration: `--session-memory` ON produces a WARM state after 1+ turns; warm state yields O(0) compaction in subsequent compact calls.
-  - EXTEND: `tests/test_end_to_end_long_session.py` — scenario where SM state survives a `/save`+`/load` round-trip via session_store.
-  - EXTEND: `tests/test_repl_save_load.py` — `/save` includes `session_memory_state` key; `/load` restores it.
+- **relevant files for M4**:
+  - MODIFY: `src/simple_coding_agent/metrics.py` — add `sm_compact_reuses: int = 0`, `sm_compact_misses: int = 0`, `record_sm_compact_reuse()`, `record_sm_compact_miss()`, update `format_stats()`.
+  - MODIFY: `src/simple_coding_agent/loop.py::_force_compact` — call `self._metrics.record_sm_compact_reuse()` or `record_sm_compact_miss()`, emit `reused=<bool>` on `compact` trace channel.
+  - NEW: `benchmarks/bench_sm_compact_latency.py` — two-arm benchmark.
+  - NEW: `tests/test_bench_sm_compact.py` — CI-fast timing assertion.
+  - ALSO CHECK: `tests/test_trace.py` — the frozen trace channel test; confirm `compact` channel is already listed; M4 adds `reused` FIELD to an existing channel (not a new channel name), which is safe.
 
-- **risks and things M3 should watch for**:
-  - **`update_session_memory` receives ONLY new messages** (not the full transcript): M3 must decide the slice — likely messages since the last `_session_memory_update_cursor` (a new `uuid` cursor that M3 should store on AgentLoop alongside `_session_memory_state`). The cursor advances after each successful `update_session_memory` call.
-  - **warm/cold detection is `is_warm` on the state**: if the cursor is at the start of the session, `is_warm` is False (cold) and the fallback fires. After the first fold, `is_warm` is True and subsequent compactions are O(0). Make sure the first-turn update actually produces a warm state (non-empty messages required — watch for turns where the only messages are attachments or virtual messages).
-  - **`from_jsonable` contract for session_store**: M3 must use `SessionMemoryState.from_jsonable(data.get("session_memory_state", {}))` — the `{}` default is safe because `from_jsonable({})` → `empty()` (the missing-sections → empty path is tested and confirmed working).
-  - **compact.py line count**: compact.py is now 655 lines (was 617, added 38 for `SessionMemorySummarizer`). M3 must NOT add new classes to compact.py without checking the ≤800 line limit.
-  - **LLM updater prompt**: Use `DEFAULT_SESSION_MEMORY_TEMPLATE` from `src/services/SessionMemory/prompts.ts:11-41` as the system context. The 10-heading TS template is for the LLM updater; the 9-section Python section set is for the deterministic fold. Decide in M3 whether to keep one unified section set or keep them separate. If unified (recommended), migrate `_SECTION_NAMES` in `session_memory_state.py` to the 10 TS headings and update the parser accordingly — but that's a HANDOFF §2 deviation that must be documented.
+- **expected tests** (per PLAN exit gate, pytest grows ≥7):
+  - `tests/test_bench_sm_compact.py` — `measured_reuse_ms < full_arm_ms` (injected delay), metrics counter assertions, trace `reused=` field.
+  - Metrics counter integration tests — reuse/miss counters bump in correct branch.
+
+- **risks for M4**:
+  - **NO-ASYNC DIVERGENCE** (document for final review Current Limitations): TS background SM extraction (query.ts:1001 `void executePostSamplingHooks`) → replica SYNCHRONOUS incremental fold at stop hook. This is already documented in `extraction_hooks.py` module header. The final review session must fold this into `CLAUDE.md` Current Limitations. The final review agent should look in `extraction_hooks.py` module docstring for the exact wording.
+  - **`update_session_memory_llm` not wired into stop-hook**: The LLM-mode updater exists in `session_memory_state.py` but `maybe_update_session_memory` calls the deterministic fold only. If M4 or a future milestone wants to opt into LLM updates per turn, they must add a flag like `--session-memory-mode llm` and plumb it through `maybe_update_session_memory`. This was a conscious M3 decision (see §2 Known Limitations above).
+  - **benchmark honesty**: Never reintroduce a fabricated percentage. Every benchmark number must disclose its source. The PLAN's honesty rules apply: deterministic arm = reproducible floor; real-API arm = realistic headline; both labeled, never conflated.
+  - **trace channel freeze**: The `compact` channel already has `messages`, `post_tokens`, `pre_tokens`, `summarized` fields. Adding `reused=<bool>` is additive (not a new channel). The test `test_nine_channel_format_unchanged_for_scalar_values` pins specific field values for existing channels — M4 must NOT change existing field values, only add `reused`.

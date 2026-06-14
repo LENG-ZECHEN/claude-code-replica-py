@@ -279,7 +279,7 @@ def test_saved_compact_summary_roundtrips_all_fields(
     path = sessions_dir / "direct.json"
     save_session(path, transcript=transcript, last_summary=summary)
 
-    _t, restored = load_session(path)
+    _t, restored, _sm = load_session(path)
     assert restored is not None
     assert restored.boundary_uuid == "b-1"
     assert restored.summary_text == "restored summary text"
