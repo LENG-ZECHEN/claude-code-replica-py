@@ -67,3 +67,12 @@ Each milestone agent APPENDS one block at exit ritual, formatted:
 - **files changed**: `src/simple_coding_agent/consolidation_lock.py`, `tests/test_consolidation_lock.py`
 - **exit gate**: `consolidation_lock.py replicates cheapest-first gate cascade; 5 functions importable; test_consolidation_lock.py passes ≥8 cases; pytest grows by ≥8` → PASS (18 passed in targeted run; 987 total, +18 from 969; all five symbols importable verified)
 - **notes**: Scan throttle injected as last_scan_at_ms param (not closure-scoped); sessions_dir replaces TS per-cwd JSONL scan; no GrowthBook flags
+
+## M6 — done 2026-06-15
+
+- **commit**: `(see git log)` `[sm-dream/M6] DreamConsolidator engine (4-stage forked agent + deterministic fallback)`
+- **tests**: 987 → 1000 (+13)
+- **mypy**: clean | **ruff**: clean
+- **files changed**: `src/simple_coding_agent/dream.py`, `tests/test_dream_consolidator.py`
+- **exit gate**: `DreamConsolidator + frozen DreamResult; LLM mode uses ForkedAgentRunner with 4-stage prompt; deterministic fallback does Jaccard dedup + mtime prune; idempotency second run → merged=0, pruned=0; all writes via ProjectMemory; path-traversal/secret guards intact; pytest grows by ≥10` → PASS (13 passed in targeted run; 1000 total, +13 from 987; DreamResult.frozen=True verified; idempotency test passes; path-traversal + secret guard tests pass)
+- **notes**: HIGH_JACCARD_THRESHOLD=0.80 (not 0.85): identical-body entries with differing names score ≈0.846; 0.80 catches them while staying clear of genuinely distinct entries (~0.0–0.40). LLM/deterministic split on provider=None vs provider=<object>.

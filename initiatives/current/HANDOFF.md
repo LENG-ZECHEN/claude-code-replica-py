@@ -1,6 +1,6 @@
-# HANDOFF — session-memory-dream (M5 done, next: M6)
+# HANDOFF — session-memory-dream (M6 done, next: M7)
 
-> Updated by: M5 milestone agent
+> Updated by: M6 milestone agent
 > Date: 2026-06-15
 > Re-verify Section 3 numbers before starting work — do not trust this
 > file blindly.
@@ -10,9 +10,9 @@
 ## 1. Current initiative
 
 - **slug**: `session-memory-dream`
-- **current milestone**: M5 — done
-- **next milestone**: `M6` — DreamConsolidator engine (4-stage forked agent + deterministic fallback)
-- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [done], M4 [done], M5 [done], M6 [next], M7 [pending]
+- **current milestone**: M6 — done
+- **next milestone**: `M7` — `simple-agent memory dream` CLI subcommand + `--dream-on-exit` + metrics + ADR + docs
+- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [done], M4 [done], M5 [done], M6 [done], M7 [next]
 
 ## 2. Completed milestones
 
@@ -100,18 +100,32 @@ source of truth on itself.
   - `recordConsolidation` not implemented (consolidationLock.ts:130): intentionally deferred to M7, which owns the CLI `dream` subcommand and will stamp the lock from the CLI path.
   - No `DreamTask` registry / UI surfacing: M7 scope.
 
+### M6
+
+- **commit**: `(see git log)` `[sm-dream/M6] DreamConsolidator engine (4-stage forked agent + deterministic fallback)`
+- **files changed**: `src/simple_coding_agent/dream.py` (NEW), `tests/test_dream_consolidator.py` (NEW)
+- **tests added**: `tests/test_dream_consolidator.py` (+13 cases). Total: 987 → 1000 (+13)
+- **behavior implemented**: `DreamConsolidator(memory_dir, provider=None, sessions_dir=None, max_turns=20)` + frozen `DreamResult(merged, pruned, runs, written_paths)`. `.consolidate(lock_path, *, now_ms, last_scan_at_ms, ...)` gates via M5's `should_dream(...)` — no gate logic re-implemented. LLM path (provider is not None): `ForkedAgentRunner` with the 4-stage consolidation prompt ported from `consolidationPrompt.ts:10` (Orient/Gather/Consolidate/Prune+Index) plus anti-turn-waste directives and session list fed from `decision.sessions_since`. `can_use_tool` gate mirrors `createAutoMemCanUseTool` (extractMemories.ts:171): allows `read_file`, `list_files`, `search_text` unconditionally; allows `write_memory_entry` (ProjectMemory.save() enforces path-traversal + secret guards). Deterministic path (provider=None): O(N²) Jaccard scoring via `MemorySelector.score()` at `HIGH_JACCARD_THRESHOLD=0.80`; keeps NEWEST by mtime, deletes older via `ProjectMemory.delete()`; then prunes oldest if remaining entries > `MANIFEST_MAX_ENTRIES=200`. All writes via `ProjectMemory.save()/delete()`. On any exception after lock acquisition, `rollback_consolidation_lock(lock_path, prior_mtime)` is called (M5 rollback contract). Idempotency: post-dedup no near-identical pairs exist, so second run returns `merged=0, pruned=0`.
+- **design decisions (deviations from PLAN)**:
+  - `HIGH_JACCARD_THRESHOLD=0.80 not 0.85`: Entries with identical bodies but slightly differing names (e.g., frontmatter "Entry A" vs "Entry B") score ≈0.846. A threshold of 0.85 would miss these unambiguous duplicates. 0.80 correctly catches them while staying well above genuinely distinct entries (score ~0.0–0.40). Trade-off and choice documented in `dream.py` module docstring and constant comment. Visible in: `dream.py::HIGH_JACCARD_THRESHOLD`.
+  - `provider=None → deterministic (not isinstance check)`: The PLAN note "MockProvider / no provider → deterministic" was interpreted as "provider=None → deterministic, provider=<any object> → LLM". MockProvider behaves as a real provider in the LLM path for testing (scripted responses exercise ForkedAgentRunner). Tests use `provider=None` for the deterministic path and `MockProvider(scripted)` for the LLM path. Visible in: `dream.py::DreamConsolidator.consolidate`.
+  - `context_messages=[]` not `()`: ForkedAgentRunner.run() type signature is `list[dict]`; passing `()` (tuple) triggered mypy errors. Dream correctly passes `[]` (empty list) since it reads everything from disk via tools. Visible in: `dream.py::_run_llm_consolidation`.
+- **known limitations**:
+  - `recordConsolidation` (consolidationLock.ts:130) not called after successful dream: intentionally deferred to M7, which owns the CLI `dream` subcommand and stamps the lock after a successful run.
+  - LLM mode `merged` counter: counts entries written by the agent (via `write_memory_entry`), not true semantic merges. The agent may write 0–N entries; M7's metrics (`dream_merged`) may refine this reporting.
+
 ## 3. Current repo state
 
 > Re-verify these numbers before starting work.
 
-- **last commit**: `(see git log)` — `[sm-dream/M5] consolidation_lock + faithful dream gate cascade`
-- **tests**: 987 passing (+1 xpassed)
-- **mypy**: clean (`mypy src` → no issues in 33 source files)
+- **last commit**: `(see git log)` — `[sm-dream/M6] DreamConsolidator engine (4-stage forked agent + deterministic fallback)`
+- **tests**: 1000 passing (+1 xpassed)
+- **mypy**: clean (`mypy src` → no issues in 34 source files)
 - **ruff**: clean (`ruff check .` → All checks passed!)
 - **branch**: main
 - **known failing checks**: none
 
-## 4. Important constraints (carried forward)
+## 4. Important constraints
 
 > Invariants that all subsequent milestones MUST respect. Each milestone
 > can ADD entries here; entries are removed only when explicitly retired.
@@ -147,54 +161,74 @@ source of truth on itself.
   - M6 must call `consolidation_lock.should_dream(...)` for gating — NOT re-implement the gate cascade. The five public functions in `consolidation_lock.py` are the single source of truth for all gating logic.
   - `DreamGateDecision` is a frozen dataclass with fields `should_dream: bool`, `prior_mtime: float | None`, `sessions_since: tuple[str, ...]`. Do not change these fields.
   - `list_sessions_touched_since` returns filename **stems** (without `.json`), analogous to TS session UUIDs. `current_session_id` passed to `should_dream` must also be a stem.
+- **invariants added by M6 (dream engine contract)**:
+  - `DreamResult` is a **frozen dataclass** with fields `merged: int`, `pruned: int`, `runs: int`, `written_paths: tuple[str, ...]`. Do NOT add, remove, or rename fields — M7's metrics wiring references `result.merged`, `result.pruned`, `result.runs` by name.
+  - `DreamConsolidator.__init__(memory_dir, provider=None, sessions_dir=None, max_turns=20)` — M7 constructs this from the CLI path. Do not change the constructor signature.
+  - `DreamConsolidator.consolidate(lock_path, *, now_ms, last_scan_at_ms, ...)` — M7 calls this from the `dream` subcommand and the `--dream-on-exit` loop trigger. Do not change the call signature.
+  - All writes in dream MUST go through `ProjectMemory.save()` / `.delete()` — never `os.remove()` or direct file writes. Keeps M1's path-traversal guard and secret-detection in force.
+  - `HIGH_JACCARD_THRESHOLD=0.80` is a module constant in `dream.py`. Tests rely on this value; do not change it without updating the test expectations.
+  - `MANIFEST_MAX_ENTRIES=200` mirrors `MAX_ENTRYPOINT_LINES` from memdir.ts. Do not change.
 
 ## 5. Next milestone guidance
 
-For `M6` — DreamConsolidator engine (4-stage forked agent + deterministic fallback):
+For `M7` — `simple-agent memory dream` CLI subcommand + `--dream-on-exit` + metrics + ADR + doc updates:
 
-- **next scope** (from PLAN.md M6):
-  1. New `src/simple_coding_agent/dream.py::DreamConsolidator`. LLM mode runs `ForkedAgentRunner` (M1) with the ported 4-stage consolidation prompt (Orient / Gather / Consolidate / Prune+Index) and a memory-dir-scoped `can_use_tool` gate (read-only list/read/search + writes confined to `memory_dir`; `max_turns ≈ 20`).
-  2. Deterministic fallback (MockProvider / no provider) does Jaccard dedup of near-identical entries (keep newest, conservative high threshold) + mtime-based prune. Reuse `MemorySelector` from `memory.py` for Jaccard scoring.
-  3. Returns frozen `DreamResult(merged, pruned, runs, written_paths)`. All writes via `ProjectMemory.save/delete` (secret + path-traversal guards intact).
-  4. Idempotent: a second dream over an already-consolidated store is a no-op (`merged=0, pruned=0`).
-  5. Gating reuses M5's `consolidation_lock.should_dream(...)` — M6 does NOT re-implement gating.
-  6. `tests/test_dream_consolidator.py` passes ≥10 cases. pytest grows by ≥10.
+### Scope (from PLAN + sharpened by M6 findings)
 
-- **how M6 calls the gate cascade (M5 rollback contract)**:
-  ```python
-  decision = should_dream(lock_path, sessions_dir, enabled=True, now_ms=..., last_scan_at_ms=...)
-  if not decision.should_dream:
-      return DreamResult(merged=0, pruned=0, runs=0, written_paths=[])
-  try:
-      # run 4-stage ForkedAgentRunner here
-      ...
-  except Exception:
-      rollback_consolidation_lock(lock_path, decision.prior_mtime)
-      raise
-  ```
-  `decision.prior_mtime` is 0.0 when there was no prior lock file; `rollback_consolidation_lock` handles this correctly (unlinks). Never call acquire separately — `should_dream` already acquired.
+1. **`simple-agent memory dream` subcommand** in `memory_cli.py`:
+   - Default: dry-run (print what WOULD be consolidated, no writes)
+   - `--apply`: actually run `DreamConsolidator.consolidate()`
+   - `--force`: bypass `should_dream` gate, run consolidation unconditionally
+   - Exit codes: 0 (success / dry-run), 1 (exception), 2 (gate blocked in --apply mode)
 
-- **relevant files for M6**:
-  - CREATE: `src/simple_coding_agent/dream.py` (`DreamConsolidator`, `DreamResult`)
-  - CREATE: `tests/test_dream_consolidator.py`
-  - READ (do not modify): `src/simple_coding_agent/consolidation_lock.py` — gating entry point
-  - READ (do not modify): `src/simple_coding_agent/forked_agent.py` — M1's `ForkedAgentRunner` for the LLM path
-  - READ (do not modify): `src/simple_coding_agent/memory.py` — `MemorySelector` for Jaccard dedup, `ProjectMemory.save/delete` for guarded writes
-  - READ: TS source `autoDream/consolidationPrompt.ts:10` (`buildConsolidationPrompt` — port 4-phase prompt AND anti-turn-waste directives verbatim in spirit), `extractMemories/extractMemories.ts:171` (`createAutoMemCanUseTool` — the memory-dir gate to mirror)
+2. **`--dream-on-exit` flag** in `cli.py` and `openai_cli.py`:
+   - After each REPL session ends (EOF / `/exit`), fire `DreamConsolidator.consolidate()`
+   - Provider injection: use the same provider that drove the REPL
+   - `lock_path`: `<memory_dir>/../.consolidate-lock` or a configurable path
+   - `current_session_id`: the session name (from `--resume` or a fresh UUID)
 
-- **expected tests** (`tests/test_dream_consolidator.py`, ≥10 cases):
-  - Deterministic fallback: Jaccard dedup merges near-identical entries
-  - Deterministic fallback: mtime-based prune removes oldest below threshold
-  - Idempotency: second run over already-consolidated store → merged=0, pruned=0
-  - LLM path (MockProvider scripted): 4-stage prompt delivered to ForkedAgentRunner; writes confined to memory_dir (can_use_tool gate blocks writes outside)
-  - Rollback: if ForkedAgentRunner raises, rollback_consolidation_lock is called with decision.prior_mtime
-  - Gate: when should_dream returns False, DreamResult is a no-op (merged=0, pruned=0, no lock held)
-  - Secret guard: ProjectMemory.save rejects memory bodies matching the secret pattern
-  - Path-traversal guard: ProjectMemory.save blocks paths escaping memory_dir
+3. **Metrics** in `metrics.py`:
+   - New counters: `dream_runs: int = 0`, `dream_merged: int = 0`, `dream_pruned: int = 0`
+   - Record from `DreamResult`: `record_dream_run(result.merged, result.pruned)`
+   - Expose in `format_stats()` — three new lines below the SM-compact lines
 
-- **risks for M6**:
-  - **mtime resolution gotcha (from M5)**: `os.utime` takes float seconds; `os.stat().st_mtime` returns float seconds. Round-trip through division/multiplication by 1000 can introduce sub-millisecond drift. In tests, allow ±1 second tolerance in mtime comparisons (all M5 tests already do this — follow the same pattern).
-  - **`os.utime` second-vs-ms conversion**: M5's `rollback_consolidation_lock` converts `prior_mtime` (ms) to seconds via `prior_mtime / 1000.0` before calling `os.utime`. M6 must pass `prior_mtime` in the same ms unit (as returned by `try_acquire_consolidation_lock` and `DreamGateDecision.prior_mtime`).
-  - **PID-reuse guard edge case**: A lock older than HOLDER_STALE_MS is always reclaimed regardless of PID liveness (autoDream.ts:60 `Date.now() - mtimeMs < HOLDER_STALE_MS`). M6's retry logic must not assume a held lock means the prior dream is still running — check the mtime age instead.
-  - **`_force_compact` try/finally (M4 invariant)**: M6 does NOT touch `_force_compact`. Keep the invariant in mind — the M4 `reused=` emit fires before `record_full_compact()` and before the try/finally restore. Don't change this order.
-  - **ForkedAgentRunner max_turns ≈ 20**: The 4-stage consolidation prompt is more complex than the 5-turn extraction prompt. Use `max_turns=20` or a config kwarg — do not hardcode 5 from `ExtractMemoriesRunner`.
+4. **`recordConsolidation`** (consolidationLock.ts:130) — stamp the lock after a successful dream run so the time gate re-opens correctly. Call after `DreamConsolidator.consolidate()` returns. In M6, this was intentionally deferred; in M7 it is required for the timing gate to work end-to-end.
+
+5. **ADR** under `docs/DECISIONS/0005-dream-consolidator-design.md` (or the next available number):
+   - Document the LLM-vs-deterministic split decision
+   - Document the `HIGH_JACCARD_THRESHOLD=0.80` choice and why not 0.85
+   - Document the provider=None → deterministic convention
+
+6. **CLAUDE.md + Current-Limitations** doc updates:
+   - Add `dream.py` to the per-file summaries section
+   - Remove or update the "no-cron divergence" note in Current Limitations (dream fills that gap)
+
+### Relevant files for M7
+
+- **EXTEND**: `memory_cli.py` — add `dream` subcommand routing to the existing `add`/`list`/`delete`/`search`/`show` dispatch
+- **EXTEND**: `metrics.py` — `dream_runs`, `dream_merged`, `dream_pruned` counters
+- **EXTEND**: `cli.py` — `--dream-on-exit` flag, provider injection into DreamConsolidator after session end
+- **EXTEND**: `openai_cli.py` — same `--dream-on-exit` flag (share with cli.py)
+- **READ**: `src/simple_coding_agent/dream.py` (M6) — `DreamConsolidator.consolidate()` signature
+- **READ**: `src/simple_coding_agent/consolidation_lock.py` (M5) — `should_dream()` for the `--force` bypass pattern (M5 HANDOFF §5: "M7's `--force` must bypass `should_dream` WITHOUT calling acquire — use the lock's existing mtime as `prior_mtime`")
+- **CREATE**: `tests/test_memory_cli_dream.py` — dry-run vs --apply vs --force, exit codes, metrics incremented
+- **CREATE**: `docs/DECISIONS/0005-dream-consolidator-design.md`
+
+### Expected tests (`tests/test_memory_cli_dream.py`, ≥8 cases)
+
+- `dream` subcommand dry-run: prints summary, no entries deleted
+- `dream --apply`: actually runs consolidation, entries deduplicated
+- `dream --force`: bypasses gate, runs even before time/session threshold met
+- `dream --apply` with no entries: exits 0, merged=0, pruned=0
+- `dream --apply` gate blocked (time < min_hours): exits 2 (gate blocked)
+- Metrics counters increment on successful dream run
+- Provider injection: `--dream-on-exit` uses the session's provider
+- Exit code 1 on internal exception
+
+### Risks / surprises from M6
+
+- **`provider=None → deterministic` convention**: M7 must construct `DreamConsolidator(provider=provider)` correctly — passing `None` from `--dream-on-exit` (no real provider) would silently fall to deterministic. If M7 wants LLM dream from the REPL, it must pass the REPL's provider object.
+- **`recordConsolidation` still unimplemented**: Without it, the time gate sees mtime of the last WRITE (from `try_acquire_consolidation_lock`), not the last successful dream. M7 must call something like `os.utime(lock_path, (t, t))` (or a new `record_consolidation()` helper) after the dream completes successfully.
+- **`--force` bypass**: Do NOT call `should_dream()` in `--force` mode. Instead call `try_acquire_consolidation_lock()` directly and then `DreamConsolidator._run_llm_consolidation()` or `._run_deterministic_consolidation()` directly — OR expose a `force_consolidate()` method that skips the gate. Check autoDream.ts:178-179 for the TS pattern.
+- **`HIGH_JACCARD_THRESHOLD` test dependency**: The value 0.80 is relied on by test (d) — if M7 changes it (for any reason), update the test expectations.
+- **Trace channel frozen**: dream results surface via metrics + CLI output, NOT a new trace channel. The 11-channel vocabulary in `trace.py` must not be extended.
