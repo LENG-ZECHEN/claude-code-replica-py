@@ -49,3 +49,12 @@ Each milestone agent APPENDS one block at exit ritual, formatted:
 - **files changed**: `src/simple_coding_agent/session_memory_state.py`, `src/simple_coding_agent/extraction_hooks.py`, `src/simple_coding_agent/session_store.py`, `src/simple_coding_agent/loop.py`, `src/simple_coding_agent/cli.py`, `src/simple_coding_agent/openai_cli.py`, `tests/test_loop_session_memory.py`, `tests/test_end_to_end_long_session.py`, `tests/test_repl_save_load.py`
 - **exit gate**: `maybe_update_session_memory runs in _run_stop_hooks; warm SM → _force_compact → ZERO provider calls (MockProvider delta=0); cross-process warm resume preserves SM; cold SM falls back without crash; pytest grows by ≥10` → PASS (14 passed in targeted run; 962 total, +11 from 951)
 - **notes**: Synchronous stop-hook fold replaces TS fire-and-forget async extraction; load_session now returns 3-tuple (transcript, summary, SessionMemoryState)
+
+## M4 — done 2026-06-15
+
+- **commit**: `(see git log)` `[sm-dream/M4] SM-compact observability + dual-arm latency benchmark`
+- **tests**: 962 → 969 (+7)
+- **mypy**: clean | **ruff**: clean
+- **files changed**: `src/simple_coding_agent/metrics.py`, `src/simple_coding_agent/loop.py`, `benchmarks/bench_sm_compact_latency.py`, `benchmarks/_results/04_sm_compact_latency.json`, `benchmarks/_results/04_sm_compact_latency.md`, `tests/test_bench_sm_compact.py`, `tests/test_metrics_collector.py`
+- **exit gate**: `MetricsCollector gains sm_compact_reuses/misses; reused=<bool> on compact trace channel; bench_sm_compact_latency.py two-arm deterministic+real-API; test_bench_sm_compact.py asserts reuse_ms < full_ms; pytest grows by ≥7` → PASS (15 passed in targeted run; 969 total, +7 from 962; deterministic artifacts: full=0.399ms → reuse=0.291ms; StderrTracer emits reused=True/False on compact channel)
+- **notes**: reused=True emitted as second compact trace emit from _force_compact (compact.py also emits compact trace inside compact()); multiple emits on same channel is allowed

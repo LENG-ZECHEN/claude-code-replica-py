@@ -55,6 +55,8 @@ class MetricsCollector:
     plan_mode_exits_rejected: int = 0
     plan_mode_exits_manual: int = 0
     plan_mode_write_attempts: int = 0
+    sm_compact_reuses: int = 0
+    sm_compact_misses: int = 0
 
     def record_full_compact(self) -> None:
         self.full_compacts += 1
@@ -110,6 +112,14 @@ class MetricsCollector:
     def record_plan_mode_write_attempt(self) -> None:
         self.plan_mode_write_attempts += 1
 
+    def record_sm_compact_reuse(self) -> None:
+        """Warm SM path was taken — summarization used prewarmed state (O(0) cost)."""
+        self.sm_compact_reuses += 1
+
+    def record_sm_compact_miss(self) -> None:
+        """Cold/disabled SM — compaction fell back to full Rule/LLM summarizer."""
+        self.sm_compact_misses += 1
+
     def add_externalized_bytes(self, byte_count: int) -> None:
         if byte_count < 0:
             raise ValueError(f"byte_count must be >= 0, got {byte_count}")
@@ -143,6 +153,10 @@ class MetricsCollector:
         lines.append(
             f"  todo_writes={self.todo_writes} "
             f"todo_nudges_armed={self.todo_nudges_armed}"
+        )
+        lines.append(
+            f"  sm_compact_reuses={self.sm_compact_reuses} "
+            f"sm_compact_misses={self.sm_compact_misses}"
         )
         return "\n".join(lines)
 

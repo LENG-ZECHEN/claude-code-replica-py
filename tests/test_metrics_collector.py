@@ -384,3 +384,111 @@ def test_loop_result_exposes_metrics_field() -> None:
 
     assert result.metrics is metrics
     assert result.metrics.full_compacts >= 0
+
+
+# ---------------------------------------------------------------------------
+# 9. SM compact reuse counter
+# ---------------------------------------------------------------------------
+
+
+def test_sm_compact_reuse_counter() -> None:
+    """Warm SM path in _force_compact bumps sm_compact_reuses, not sm_compact_misses."""
+    from simple_coding_agent.compact import ContextCompactor, LLMSummarizer
+    from simple_coding_agent.context import ContextBudget, ContextBuilder
+    from simple_coding_agent.loop import AgentLoop
+    from simple_coding_agent.models import Message
+    from simple_coding_agent.session_memory_state import _SECTION_NAMES, SessionMemoryState
+    from simple_coding_agent.tools import ToolExecutor, ToolRegistry
+    from simple_coding_agent.transcript import Transcript
+
+    warm_state = SessionMemoryState(
+        sections=tuple((name, f"Content for {name}") for name in _SECTION_NAMES)
+    )
+    provider = MockProvider([MockProvider.direct_answer("done")])
+    transcript = Transcript()
+    registry = ToolRegistry()
+    executor = ToolExecutor(registry)
+    budget = ContextBudget(max_tokens=8192, reserved_output_tokens=4096)
+    builder = ContextBuilder(budget=budget)
+    metrics = MetricsCollector()
+    compactor = ContextCompactor(keep_recent=0, summarizer=LLMSummarizer(provider))
+    loop = AgentLoop(
+        provider=provider,
+        tool_executor=executor,
+        transcript=transcript,
+        context_builder=builder,
+        budget=budget,
+        registry=registry,
+        compactor=compactor,
+        session_memory_enabled=True,
+        metrics=metrics,
+    )
+    loop._session_memory_state = warm_state
+    for i in range(3):
+        transcript.append(Message.user(f"turn {i}"))
+        transcript.append(Message.assistant(f"reply {i}"))
+
+    loop._force_compact()
+
+    assert metrics.sm_compact_reuses == 1
+    assert metrics.sm_compact_misses == 0
+
+
+# ---------------------------------------------------------------------------
+# 10. SM compact miss counter
+# ---------------------------------------------------------------------------
+
+
+def test_sm_compact_miss_counter() -> None:
+    """Cold SM state (or disabled) in _force_compact bumps sm_compact_misses."""
+    from simple_coding_agent.compact import ContextCompactor, RuleBasedSummarizer
+    from simple_coding_agent.context import ContextBudget, ContextBuilder
+    from simple_coding_agent.loop import AgentLoop
+    from simple_coding_agent.models import Message
+    from simple_coding_agent.tools import ToolExecutor, ToolRegistry
+    from simple_coding_agent.transcript import Transcript
+
+    provider = MockProvider([MockProvider.direct_answer("done")])
+    transcript = Transcript()
+    registry = ToolRegistry()
+    executor = ToolExecutor(registry)
+    budget = ContextBudget(max_tokens=8192, reserved_output_tokens=4096)
+    builder = ContextBuilder(budget=budget)
+    metrics = MetricsCollector()
+    compactor = ContextCompactor(keep_recent=0, summarizer=RuleBasedSummarizer())
+    loop = AgentLoop(
+        provider=provider,
+        tool_executor=executor,
+        transcript=transcript,
+        context_builder=builder,
+        budget=budget,
+        registry=registry,
+        compactor=compactor,
+        session_memory_enabled=True,  # enabled but state stays cold (empty)
+        metrics=metrics,
+    )
+    # SM state is empty by default — cold path
+    assert loop._session_memory_state.is_empty
+    for i in range(3):
+        transcript.append(Message.user(f"turn {i}"))
+        transcript.append(Message.assistant(f"reply {i}"))
+
+    loop._force_compact()
+
+    assert metrics.sm_compact_misses == 1
+    assert metrics.sm_compact_reuses == 0
+
+
+# ---------------------------------------------------------------------------
+# 11. format_stats includes SM compact lines
+# ---------------------------------------------------------------------------
+
+
+def test_format_stats_includes_sm_compact_lines() -> None:
+    """format_stats() must mention sm_compact_reuses and sm_compact_misses."""
+    m = MetricsCollector()
+    m.record_sm_compact_reuse()
+    m.record_sm_compact_miss()
+    stats = m.format_stats()
+    assert "sm_compact_reuses" in stats
+    assert "sm_compact_misses" in stats

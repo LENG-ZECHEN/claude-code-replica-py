@@ -1,6 +1,6 @@
-# HANDOFF — session-memory-dream (M3 done, next: M4)
+# HANDOFF — session-memory-dream (M4 done, next: M5)
 
-> Updated by: M3 milestone agent
+> Updated by: M4 milestone agent
 > Date: 2026-06-15
 > Re-verify Section 3 numbers before starting work — do not trust this
 > file blindly.
@@ -10,9 +10,9 @@
 ## 1. Current initiative
 
 - **slug**: `session-memory-dream`
-- **current milestone**: M3 — done
-- **next milestone**: `M4` — SM-compact observability + dual-arm latency benchmark
-- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [done], M4 [next], M5 [pending], M6 [pending], M7 [pending]
+- **current milestone**: M4 — done
+- **next milestone**: `M5` — consolidation_lock + faithful dream gate cascade
+- **all milestones (per PLAN)**: M1 [done], M2 [done], M3 [done], M4 [done], M5 [next], M6 [pending], M7 [pending]
 
 ## 2. Completed milestones
 
@@ -73,12 +73,24 @@ source of truth on itself.
 - **known limitations**:
   - `update_session_memory_llm` not wired into `maybe_update_session_memory`: The stop-hook always calls the deterministic `update_session_memory` fold (no LLM per turn). The `update_session_memory_llm` function exists and is tested separately but the stop-hook doesn't call it. Rationale: (1) the deterministic fold keeps tests fast/deterministic; (2) LLM per-turn update adds latency at every stop-hook; (3) the warm state reuse at compaction is the value regardless of which updater built it. A future M3.5 could add a flag like `--session-memory-mode llm` to opt in. Documented here for the final review.
 
+### M4
+
+- **commit**: `(see git log)` `[sm-dream/M4] SM-compact observability + dual-arm latency benchmark`
+- **files changed**: `src/simple_coding_agent/metrics.py` (MODIFIED — `sm_compact_reuses`/`sm_compact_misses` fields + `record_*` methods + `format_stats` lines), `src/simple_coding_agent/loop.py` (MODIFIED — `_force_compact` emits `reused=<bool>` on `compact` trace channel, calls `record_sm_compact_reuse()`/`record_sm_compact_miss()`), `benchmarks/bench_sm_compact_latency.py` (NEW), `benchmarks/_results/04_sm_compact_latency.json` (NEW), `benchmarks/_results/04_sm_compact_latency.md` (NEW), `tests/test_bench_sm_compact.py` (NEW), `tests/test_metrics_collector.py` (EXTENDED — 3 new cases)
+- **tests added**: `tests/test_bench_sm_compact.py` (+4 cases) + `tests/test_metrics_collector.py` (+3 cases). Total: 962 → 969 (+7)
+- **behavior implemented**: `MetricsCollector` now has `sm_compact_reuses: int = 0` and `sm_compact_misses: int = 0` counters with `record_sm_compact_reuse()` / `record_sm_compact_miss()` methods and two lines appended to `format_stats()`. `AgentLoop._force_compact` decides the `reused` bool at the top of the function (`reused = self._sm_enabled and self._session_memory_state.is_warm`), runs compaction, then emits `self._tracer.emit("compact", reused=reused)` followed by metric recording — `record_full_compact()` always fires; then `record_sm_compact_reuse()` or `record_sm_compact_miss()` based on the same bool. `benchmarks/bench_sm_compact_latency.py` provides two arms: (a) deterministic — `RuleBasedSummarizer` recompute vs `SessionMemorySummarizer` warm reuse, perf_counter, no API (committed artifacts: full=0.399ms → reuse=0.291ms, median of 50); (b) real-API gated behind `--confirm-api-call` + key (exit 2 without flag, exit 3 without key), measuring `LLMSummarizer` wall-clock vs ~0 SM reuse on DashScope `qwen-plus-latest`. Each arm JSON includes `latency_source` disclosing provenance.
+- **design decisions (deviations from PLAN)**:
+  - `second compact trace emit from _force_compact`: `ContextCompactor.compact()` already emits a `compact` trace line (from inside compact.py:635). M4 adds a SECOND emit from `_force_compact` with just `reused=<bool>`. The HANDOFF §5 guidance mentioned adding `reused` as a field on the existing emit inside `ContextCompactor.compact()`, but this would require changing `compact.py`'s internal signature (passing `reused` from the caller) or leaving a confusing "who set reused?" for a frozen module. The cleanest approach was a second emit from `_force_compact` after compaction returns — multiple emits on the same channel are explicitly allowed (channels are frozen, not emit frequency). Test asserts `reused=True`/`reused=False` in the captured trace output, not channel-count.
+  - `benchmark transcript size`: The deterministic arm uses 20 message pairs × ~500 chars each to give RuleBasedSummarizer real work; the measured ratio (0.399ms / 0.291ms ≈ 1.4×) shows the deterministic floor. Real-API arm (DashScope LLM call ~100-500ms) would show a much larger ratio — but that is the headline number, not the floor. Both are disclosed honestly.
+- **known limitations**:
+  - `deterministic speedup ratio is modest (1.4×)`: RuleBasedSummarizer is a pure-Python 9-section extractor; even on 20 message pairs it runs in <1ms. The O(0) reuse path is genuinely faster, but the ratio only becomes dramatically large (100-500×) with a real LLM summarizer. The committed artifacts report the deterministic floor honestly with `latency_source` attribution.
+
 ## 3. Current repo state
 
 > Re-verify these numbers before starting work.
 
-- **last commit**: `(see git log)` — `[sm-dream/M3] wire session-memory into loop + LLM updater + cross-process persistence`
-- **tests**: 962 passing (+1 xpassed)
+- **last commit**: `(see git log)` — `[sm-dream/M4] SM-compact observability + dual-arm latency benchmark`
+- **tests**: 969 passing (+1 xpassed)
 - **mypy**: clean (`mypy src` → no issues in 32 source files)
 - **ruff**: clean (`ruff check .` → All checks passed!)
 - **branch**: main
@@ -105,35 +117,52 @@ source of truth on itself.
 - **invariants added by M3**:
   - `--session-memory` flag is default OFF — M4+ must keep it opt-in.
   - `session_memory_state` key in session JSON is OPTIONAL (absent → `SessionMemoryState.empty()`). Do not make it required; pre-M3 session files must still load.
-  - `load_session` now returns 3-tuple `(Transcript, CompactSummary | None, SessionMemoryState)`. All callers that previously used 2-tuple destructuring have been updated. M4 must not revert to 2-tuple.
-  - Two-tier null-vs-throw compaction contract: cold SM falls through to configured summarizer, NEVER crashes `_force_compact`. M4's observability wiring touches `_force_compact` — do not break this.
-  - `ContextCompactor.summarizer` is temporarily mutated in `_force_compact` (try/finally). M4 must not change `_force_compact`'s try/finally structure without preserving the fallback guarantee.
+  - `load_session` now returns 3-tuple `(Transcript, CompactSummary | None, SessionMemoryState)`. All callers that previously used 2-tuple destructuring have been updated. M5 must not revert to 2-tuple.
+  - Two-tier null-vs-throw compaction contract: cold SM falls through to configured summarizer, NEVER crashes `_force_compact`. M5 must not break `_force_compact`'s try/finally structure.
+  - `ContextCompactor.summarizer` is temporarily mutated in `_force_compact` (try/finally). Must be preserved in all future modifications to `_force_compact`.
+- **invariants added by M4**:
+  - `MetricsCollector.sm_compact_reuses` and `MetricsCollector.sm_compact_misses` counter names are FROZEN — later milestones must not rename them (the `/stats` REPL command exposes them in `format_stats()`).
+  - `reused=<bool>` field on the `compact` trace channel is FROZEN — it appears in the second trace emit from `_force_compact`. Later milestones must not remove or rename this field.
+  - `benchmarks/_results/04_sm_compact_latency.{json,md}` are committed artifacts; they represent the deterministic floor at time of M4 commit. The honesty rule stands: never conflate deterministic numbers with real-API numbers.
+  - No fabricated percentages: the benchmark must always report measured `perf_counter` timings with `latency_source` attribution. Never hardcode a ratio or percentage.
 
 ## 5. Next milestone guidance
 
-For `M4` — SM-compact observability + dual-arm latency benchmark:
+For `M5` — consolidation_lock + faithful dream gate cascade:
 
-- **next scope** (verbatim from PLAN.md M4):
-  1. `MetricsCollector` gains `sm_compact_reuses` and `sm_compact_misses` (`record_*` methods + `format_stats` lines) surfaced via `/stats`.
-  2. Emit `reused=<bool>` on the EXISTING `compact` trace channel — NO new channel (11-name vocab frozen). Assert the `StderrTracer` line contains `reused=True`/`reused=False`.
-  3. New `benchmarks/bench_sm_compact_latency.py` — headless, writes `benchmarks/_results/04_sm_compact_latency.{json,md}`, two arms: (a) DETERMINISTIC (RuleBasedSummarizer vs O(0) SM reuse, no API), (b) REAL-API gated behind `--confirm-api-call`.
-  4. `tests/test_bench_sm_compact.py` asserts `measured_reuse_ms < full_arm_ms` with injected delay.
+- **next scope** (from PLAN.md M5):
+  1. New `src/simple_coding_agent/consolidation_lock.py` replicating the cheapest-first dream gate cascade:
+     - `read_last_consolidated_at()` — reads lock file mtime as `datetime | None`
+     - `list_sessions_touched_since(sessions_dir, since_dt)` — scans session files by mtime
+     - `try_acquire_consolidation_lock(lock_path)` — writes PID to `.consolidate-lock`, returns prior mtime or None if already held
+     - `rollback_consolidation_lock(lock_path, prior_mtime)` — rewrites mtime so the time gate re-opens after failure
+     - `should_dream(sessions_dir, lock_path, *, ...)` — full gate cascade: enabled → time gate (≥24h since mtime) → scan throttle (10min) → session gate (≥5 sessions since last consolidation, current excluded) → acquire lock
+  2. Lock file `.consolidate-lock` is BOTH the PID mutex AND the timing state (mtime == lastConsolidatedAt). No separate state file.
+  3. HOLDER_STALE_MS = 1h (stale lock → re-acquire).
+  4. All timestamps injected via `os.utime` + `monkeypatch` in tests — NO real `sleep`.
+  5. `tests/test_consolidation_lock.py` passes with ≥8 cases.
 
-- **where to observe the reuse/miss decision**: `loop.py::_force_compact` lines ~694-708. The branch `if self._sm_enabled and self._session_memory_state.is_warm:` is the reuse decision point. M4 should record `sm_compact_reuses` in the True branch and `sm_compact_misses` in the else branch, then emit `reused=<bool>` on the `compact` trace channel BEFORE or AFTER the existing `compact` emit inside `ContextCompactor.compact()` — or pass `reused` as a kwarg to the trace emit that already fires inside `ContextCompactor.compact()`. The cleanest approach: add `reused` to the `ContextCompactor.compact()` trace emit by passing it as a parameter from `_force_compact` — but that requires changing `compact.py`. Alternatively, add a second `tracer.emit("compact", reused=...)` in `_force_compact` after the compaction. The 11-channel constraint allows multiple emits on the same channel.
+- **M5 is the start of the D-line** (D1). It does NOT depend on M2/M3/M4 directly — only M1 (ForkedAgentRunner) is a dependency (for M6, not M5 itself). M5 is pure lock + gate infrastructure.
 
-- **relevant files for M4**:
-  - MODIFY: `src/simple_coding_agent/metrics.py` — add `sm_compact_reuses: int = 0`, `sm_compact_misses: int = 0`, `record_sm_compact_reuse()`, `record_sm_compact_miss()`, update `format_stats()`.
-  - MODIFY: `src/simple_coding_agent/loop.py::_force_compact` — call `self._metrics.record_sm_compact_reuse()` or `record_sm_compact_miss()`, emit `reused=<bool>` on `compact` trace channel.
-  - NEW: `benchmarks/bench_sm_compact_latency.py` — two-arm benchmark.
-  - NEW: `tests/test_bench_sm_compact.py` — CI-fast timing assertion.
-  - ALSO CHECK: `tests/test_trace.py` — the frozen trace channel test; confirm `compact` channel is already listed; M4 adds `reused` FIELD to an existing channel (not a new channel name), which is safe.
+- **relevant files for M5**:
+  - CREATE: `src/simple_coding_agent/consolidation_lock.py`
+  - CREATE: `tests/test_consolidation_lock.py`
+  - READ first: `session_store.py::resolve_sessions_dir` and `SIMPLE_AGENT_SESSIONS_DIR` — M5's `list_sessions_touched_since` reuses this resolution helper to find the sessions directory where `.json` session files live.
+  - READ: TS source `autoDream/consolidationLock.ts` lines 29 (`readLastConsolidatedAt`), 46 (`tryAcquireConsolidationLock`), 91 (`rollbackConsolidationLock`), 118 (`listSessionsTouchedSince`); and `autoDream/autoDream.ts` lines 63-66 (DEFAULTS: minHours=24, minSessions=5), 56 (SESSION_SCAN_INTERVAL_MS=10min), 95 (isGateOpen), 125 (runAutoDream gate order).
 
-- **expected tests** (per PLAN exit gate, pytest grows ≥7):
-  - `tests/test_bench_sm_compact.py` — `measured_reuse_ms < full_arm_ms` (injected delay), metrics counter assertions, trace `reused=` field.
-  - Metrics counter integration tests — reuse/miss counters bump in correct branch.
+- **expected tests** (`tests/test_consolidation_lock.py`, ≥8 cases):
+  - Time gate OPEN when lock file mtime > 24h ago
+  - Time gate CLOSED when lock file mtime < 24h ago
+  - Session gate passes when ≥5 sessions touched since lastConsolidatedAt (current session excluded)
+  - Session gate fails when <5 sessions touched
+  - Scan-throttle blocks re-scan within 10min
+  - `try_acquire_consolidation_lock` returns prior mtime when acquired; None when already held by live PID
+  - `rollback_consolidation_lock` rewinds mtime so time gate re-opens
+  - `mtime == lastConsolidatedAt` round-trip (write lock → read mtime → verify datetime matches)
+  - All timestamps injected via `os.utime(path, (access_time, mtime))` + `monkeypatch.setenv("SIMPLE_AGENT_SESSIONS_DIR", str(tmp_path))`
 
-- **risks for M4**:
-  - **NO-ASYNC DIVERGENCE** (document for final review Current Limitations): TS background SM extraction (query.ts:1001 `void executePostSamplingHooks`) → replica SYNCHRONOUS incremental fold at stop hook. This is already documented in `extraction_hooks.py` module header. The final review session must fold this into `CLAUDE.md` Current Limitations. The final review agent should look in `extraction_hooks.py` module docstring for the exact wording.
-  - **`update_session_memory_llm` not wired into stop-hook**: The LLM-mode updater exists in `session_memory_state.py` but `maybe_update_session_memory` calls the deterministic fold only. If M4 or a future milestone wants to opt into LLM updates per turn, they must add a flag like `--session-memory-mode llm` and plumb it through `maybe_update_session_memory`. This was a conscious M3 decision (see §2 Known Limitations above).
-  - **benchmark honesty**: Never reintroduce a fabricated percentage. Every benchmark number must disclose its source. The PLAN's honesty rules apply: deterministic arm = reproducible floor; real-API arm = realistic headline; both labeled, never conflated.
-  - **trace channel freeze**: The `compact` channel already has `messages`, `post_tokens`, `pre_tokens`, `summarized` fields. Adding `reused=<bool>` is additive (not a new channel). The test `test_nine_channel_format_unchanged_for_scalar_values` pins specific field values for existing channels — M4 must NOT change existing field values, only add `reused`.
+- **risks for M5**:
+  - **Stale lock detection**: The TS uses `HOLDER_STALE_MS=1h` to detect dead-PID lock holders. In tests, inject a lock file with a PID that doesn't exist (e.g. `os.getpid() + 99999`) and an old mtime — the acquire function should treat it as stale and re-acquire. This is the trickiest test case.
+  - **Platform differences in `os.utime`**: `os.utime` takes `(atime_ns, mtime_ns)` or `(atime, mtime)` in seconds — use the float form and verify with `os.stat(path).st_mtime` round-trip. Sub-second precision may differ on macOS vs Linux.
+  - **`list_sessions_touched_since` current-session exclusion**: The TS excludes the current session from the count. The replica analog is "exclude the file being written to right now" — but since M5 is CLI-driven, the current session may not be identifiable. A safe default: pass the current session's path as an optional `exclude_path` arg and skip it in the scan.
+  - **`_force_compact` try/finally (from M4 invariant)**: M5 doesn't touch `_force_compact`, but keep the invariant in mind — the M4 `reused=` emit now fires BEFORE `record_full_compact()` and BEFORE the try/finally restore. Don't change this order.

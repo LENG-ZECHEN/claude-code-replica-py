@@ -717,7 +717,8 @@ class AgentLoop:
         if self._compactor is None:
             return False
         snapshots = tuple(self._recent_file_snapshots)
-        if self._sm_enabled and self._session_memory_state.is_warm:
+        reused = self._sm_enabled and self._session_memory_state.is_warm
+        if reused:
             orig_summarizer = self._compactor.summarizer
             self._compactor.summarizer = SessionMemorySummarizer(
                 self._session_memory_state, fallback=orig_summarizer
@@ -732,7 +733,12 @@ class AgentLoop:
             self._last_summary = self._compactor.compact(
                 self._transcript, self._budget, snapshots=snapshots
             )
+        self._tracer.emit("compact", reused=reused)
         self._metrics.record_full_compact()
+        if reused:
+            self._metrics.record_sm_compact_reuse()
+        else:
+            self._metrics.record_sm_compact_miss()
         self._tokens_since_last_snip = 0
         return True
 
