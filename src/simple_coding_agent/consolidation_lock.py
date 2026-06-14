@@ -329,6 +329,33 @@ def should_dream(
     )
 
 
+# ---------------------------------------------------------------------------
+# record_consolidation — consolidationLock.ts:130
+# ---------------------------------------------------------------------------
+
+
+def record_consolidation(lock_path: Path | str, now_ms: float) -> None:
+    """Stamp lock_path with ``now_ms`` as the new lastConsolidatedAt.
+
+    consolidationLock.ts:130 ``recordConsolidation``:
+        ``await writeFile(path, '')``
+        ``const t = now / 1000; await utimes(path, t, t)``
+    Best-effort: OSError is swallowed (mirrors rollback behaviour).
+
+    Called by DreamConsolidator.consolidate() after a successful dream so the
+    time gate re-opens after MIN_HOURS (24 h) rather than the much shorter
+    lock-write mtime from try_acquire_consolidation_lock.
+    """
+    path = Path(lock_path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+        t = now_ms / 1000.0
+        os.utime(path, (t, t))
+    except OSError:
+        pass  # best-effort; never raise from post-dream stamping
+
+
 __all__ = [
     "HOLDER_STALE_MS",
     "LOCK_FILE",
@@ -338,6 +365,7 @@ __all__ = [
     "DreamGateDecision",
     "list_sessions_touched_since",
     "read_last_consolidated_at",
+    "record_consolidation",
     "rollback_consolidation_lock",
     "should_dream",
     "try_acquire_consolidation_lock",

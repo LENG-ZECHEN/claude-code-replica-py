@@ -76,3 +76,12 @@ Each milestone agent APPENDS one block at exit ritual, formatted:
 - **files changed**: `src/simple_coding_agent/dream.py`, `tests/test_dream_consolidator.py`
 - **exit gate**: `DreamConsolidator + frozen DreamResult; LLM mode uses ForkedAgentRunner with 4-stage prompt; deterministic fallback does Jaccard dedup + mtime prune; idempotency second run → merged=0, pruned=0; all writes via ProjectMemory; path-traversal/secret guards intact; pytest grows by ≥10` → PASS (13 passed in targeted run; 1000 total, +13 from 987; DreamResult.frozen=True verified; idempotency test passes; path-traversal + secret guard tests pass)
 - **notes**: HIGH_JACCARD_THRESHOLD=0.80 (not 0.85): identical-body entries with differing names score ≈0.846; 0.80 catches them while staying clear of genuinely distinct entries (~0.0–0.40). LLM/deterministic split on provider=None vs provider=<object>.
+
+## M7 — done 2026-06-15
+
+- **commit**: `(see git log)` `[sm-dream/M7] dream CLI + --dream-on-exit + metrics + record_consolidation + ADR-0005`
+- **tests**: 1000 → 1013 (+13)
+- **mypy**: clean | **ruff**: clean
+- **files changed**: `src/simple_coding_agent/memory_cli.py`, `src/simple_coding_agent/loop.py`, `src/simple_coding_agent/cli.py`, `src/simple_coding_agent/metrics.py`, `src/simple_coding_agent/consolidation_lock.py`, `src/simple_coding_agent/dream.py`, `docs/DECISIONS/0005-dream-cli-no-cron-divergence.md`, `CLAUDE.md`, `tests/test_memory_cli_dream.py`
+- **exit gate**: `simple-agent memory dream (dry-run + --apply + --force + --provider openai); --dream-on-exit REPL flag; dream_runs/dream_merged/dream_pruned counters; record_consolidation stamps lock mtime; ADR-0005 documents no-cron divergence; pytest grows by >=8` → PASS (13 passed in targeted run; 1013 total, +13 from 1000; mypy 34 source files clean; ruff all checks passed)
+- **notes**: Dry-run uses scratch-copy approach (shutil.copytree to TemporaryDirectory); --force bypasses all gate thresholds (min_hours=0, min_sessions=0, last_scan_at_ms=0); record_consolidation placed inside DreamConsolidator.consolidate() so the method is self-contained (gate+run+stamp); _dream_fired guard prevents double-firing; MockProvider to provider=None for deterministic tests

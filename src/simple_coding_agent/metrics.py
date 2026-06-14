@@ -57,6 +57,9 @@ class MetricsCollector:
     plan_mode_write_attempts: int = 0
     sm_compact_reuses: int = 0
     sm_compact_misses: int = 0
+    dream_runs: int = 0
+    dream_merged: int = 0
+    dream_pruned: int = 0
 
     def record_full_compact(self) -> None:
         self.full_compacts += 1
@@ -120,6 +123,12 @@ class MetricsCollector:
         """Cold/disabled SM — compaction fell back to full Rule/LLM summarizer."""
         self.sm_compact_misses += 1
 
+    def record_dream_run(self, merged: int, pruned: int) -> None:
+        """One dream consolidation run completed; bump all three dream counters."""
+        self.dream_runs += 1
+        self.dream_merged += merged
+        self.dream_pruned += pruned
+
     def add_externalized_bytes(self, byte_count: int) -> None:
         if byte_count < 0:
             raise ValueError(f"byte_count must be >= 0, got {byte_count}")
@@ -157,6 +166,11 @@ class MetricsCollector:
         lines.append(
             f"  sm_compact_reuses={self.sm_compact_reuses} "
             f"sm_compact_misses={self.sm_compact_misses}"
+        )
+        lines.append(
+            f"  dream_runs={self.dream_runs} "
+            f"dream_merged={self.dream_merged} "
+            f"dream_pruned={self.dream_pruned}"
         )
         return "\n".join(lines)
 

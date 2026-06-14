@@ -293,6 +293,7 @@ milestones:
       and cli._build_repl_loop's provider-injection (Mock vs OpenAI) pattern.
 ---
 > Bootstrapped on 2026-06-15. Baseline commit: 094cf90d09fef37b3f8357b4e2b8de0434834dfd. Baseline pytest: 912 passing (+1 xpassed).
+> STATUS: complete (M1–M7 shipped on 2026-06-15)
 
 # Goal
 

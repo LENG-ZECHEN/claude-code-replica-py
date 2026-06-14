@@ -394,6 +394,7 @@ def _build_repl_loop(
     extract_memories_enabled: bool = False,
     extract_throttle_n: int = 1,
     session_memory_enabled: bool = False,
+    dream_on_exit: bool = False,
     summarizer_mode: str = "auto",
     todo_nudge_enabled: bool = True,
     todo_reminder_turns: int | None = None,
@@ -589,6 +590,7 @@ def _build_repl_loop(
         "extract_memories_enabled": extract_memories_enabled,
         "extract_throttle_n": extract_throttle_n,
         "session_memory_enabled": session_memory_enabled,
+        "dream_on_exit": dream_on_exit,
         "todo_nudge_enabled": todo_nudge_enabled,
         **({"todo_reminder_turns": todo_reminder_turns} if todo_reminder_turns is not None else {}),
         **({"todo_state": _todos_shared} if _todos_shared is not None else {}),
@@ -1003,16 +1005,20 @@ def _drive_repl_session(
         except OSError as err:
             print(f"(warning: could not save session memory: {err})")
 
+    def _exit_session() -> int:
+        """Common exit path: save session, fire dream if enabled, return 0."""
+        _save_session()
+        loop._run_dream_on_exit()
+        return 0
+
     while True:
         if max_turns is not None and _turn_count >= max_turns:
-            _save_session()
-            return 0
+            return _exit_session()
 
         line = _read_input_line()
         if line is None:
             print()
-            _save_session()
-            return 0
+            return _exit_session()
 
         stripped = line.strip()
         if not stripped:
@@ -1021,8 +1027,7 @@ def _drive_repl_session(
         if stripped.startswith("/"):
             signal = _handle_slash_command(stripped, loop)
             if signal == "exit":
-                _save_session()
-                return 0
+                return _exit_session()
             continue
 
         cue = detect_cue(stripped, tracer=loop._tracer)
@@ -1058,6 +1063,7 @@ def _run_repl(
     extract_memories_enabled: bool = False,
     extract_throttle_n: int = 1,
     session_memory_enabled: bool = False,
+    dream_on_exit: bool = False,
     show_steps: bool = False,
     summarizer_mode: str = "auto",
     todo_nudge_enabled: bool = True,
@@ -1109,6 +1115,7 @@ def _run_repl(
         extract_memories_enabled=extract_memories_enabled,
         extract_throttle_n=extract_throttle_n,
         session_memory_enabled=session_memory_enabled,
+        dream_on_exit=dream_on_exit,
         summarizer_mode=summarizer_mode,
         todo_nudge_enabled=todo_nudge_enabled,
         todo_reminder_turns=todo_reminder_turns,
@@ -1335,6 +1342,17 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--dream-on-exit",
+        action="store_true",
+        default=False,
+        dest="dream_on_exit",
+        help=(
+            "Fire one dream consolidation when the REPL exits (/exit or EOF). "
+            "Default OFF — mirrors extract_memories_enabled opt-in pattern. "
+            "Requires a memory directory (SIMPLE_AGENT_MEMORY_DIR or workspace default)."
+        ),
+    )
+    parser.add_argument(
         "--no-todo-reminder",
         action="store_true",
         default=False,
@@ -1410,6 +1428,7 @@ def main(argv: list[str] | None = None) -> int:
             extract_memories_enabled=extract_enabled,
             extract_throttle_n=extract_throttle,
             session_memory_enabled=bool(args.session_memory),
+            dream_on_exit=bool(args.dream_on_exit),
             show_steps=bool(args.show_steps),
             summarizer_mode=str(args.summarizer),
             todo_nudge_enabled=not bool(args.no_todo_reminder),

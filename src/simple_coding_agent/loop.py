@@ -154,6 +154,7 @@ class AgentLoop:
         extract_memories_enabled: bool = False,
         extract_throttle_n: int = 1,
         session_memory_enabled: bool = False,
+        dream_on_exit: bool = False,
         is_subloop: bool = False,
         todo_nudge_enabled: bool = True,
         todo_reminder_turns: int = TODO_REMINDER_TURNS,
@@ -210,6 +211,8 @@ class AgentLoop:
         self._turns_since_last_extraction: int = 0
         self._extract_throttle_n: int = max(1, extract_throttle_n)
         self._sm_enabled: bool = session_memory_enabled
+        self._dream_on_exit: bool = dream_on_exit
+        self._dream_fired: bool = False  # one-shot guard
         self._session_memory_state: SessionMemoryState = SessionMemoryState.empty()
         self._session_memory_cursor: str | None = None
         self._already_surfaced_memories: set[str] = set()
@@ -619,6 +622,53 @@ class AgentLoop:
             self._session_memory_state = sm_outcome.new_state
             self._session_memory_cursor = sm_outcome.new_cursor_uuid
         return result
+
+    def _run_dream_on_exit(self) -> None:
+        """Fire one dream consolidation at REPL /exit when dream_on_exit=True.
+
+        Source mapping: query/stopHooks.ts:155 executeAutoDream (fire-and-forget
+        at turn end). Replica analog: opt-in, post-session, synchronous, one-shot.
+
+        Divergence (documented in ADR-0005 + CLAUDE.md Current Limitations):
+          The replica has no cron and no asyncio background thread. "Scheduled
+          dream" = this opt-in /exit trigger (or the CLI batch command). NOT
+          per-turn like the TS stop hook.
+
+        Guards:
+          - dream_on_exit=False (default) → no-op.
+          - _dream_fired=True (already ran once this session) → no-op.
+          - _memory_dir is None (no project memory) → no-op.
+        """
+        if not self._dream_on_exit or self._dream_fired or self._memory_dir is None:
+            return
+        self._dream_fired = True
+
+        import time as _time  # noqa: PLC0415
+
+        from .consolidation_lock import LOCK_FILE
+        from .dream import DreamConsolidator
+
+        lock_path = self._memory_dir.parent / LOCK_FILE
+        # Use None provider (deterministic path) for MockProvider sessions;
+        # real provider (OpenAIProvider) for live sessions.
+        from .provider import MockProvider  # noqa: PLC0415
+        provider = None if isinstance(self._provider, MockProvider) else self._provider
+        consolidator = DreamConsolidator(
+            memory_dir=self._memory_dir,
+            provider=provider,
+        )
+        try:
+            result = consolidator.consolidate(
+                lock_path,
+                now_ms=_time.time() * 1000.0,
+                last_scan_at_ms=0.0,
+                min_hours=0.0,  # in-loop trigger: skip time gate (short sessions)
+                min_sessions=0,  # in-loop trigger: skip session gate
+                enabled=True,
+            )
+            self._metrics.record_dream_run(result.merged, result.pruned)
+        except Exception:
+            pass  # Dream is best-effort at /exit; never crash the REPL.
 
     def _register_tools(self) -> None:
         """Wire write_memory_entry when project_memory is present, and todo_write when enabled."""

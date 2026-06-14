@@ -52,6 +52,7 @@ from .consolidation_lock import (
     MIN_HOURS,
     MIN_SESSIONS,
     DreamGateDecision,
+    record_consolidation,
     rollback_consolidation_lock,
     should_dream,
 )
@@ -251,6 +252,9 @@ class DreamConsolidator:
             rollback_consolidation_lock(lock_path, decision.prior_mtime or 0.0)
             raise
 
+        # Stamp the lock so the time gate re-opens after MIN_HOURS.
+        # consolidationLock.ts:130 recordConsolidation (deferred from M6).
+        record_consolidation(lock_path, now)
         return result
 
     # ------------------------------------------------------------------
