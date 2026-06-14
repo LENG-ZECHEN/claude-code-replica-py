@@ -37,6 +37,7 @@ from .models import (
     ToolResult,
 )
 from .provider import PromptTooLongError, Provider
+from .session_memory_state import SessionMemoryState
 from .trace import NullTracer, Tracer
 from .transcript import Transcript
 
@@ -300,6 +301,42 @@ class LLMSummarizer:
             len(result),
         )
         return result
+
+
+class SessionMemorySummarizer:
+    """Drop-in Summarizer that returns prewarmed SessionMemoryState text.
+
+    Source mapping:
+      Warm fast-path <- SM compact eligibility check in
+                        src/services/compact/sessionMemoryCompact.ts:58-60
+                        (DEFAULT_SM_COMPACT_CONFIG: minTokens=10_000,
+                        minTextBlockMessages=5, maxTokens=40_000)
+
+    Design:
+      WARM state  -> .summarize() returns state.render() with ZERO provider calls.
+                     This is the O(0) compaction path — the entire point of the
+                     session-memory feature.
+      COLD/empty  -> delegates to the configured fallback (defaults to
+                     RuleBasedSummarizer so tests stay deterministic and no API
+                     key is required).
+
+    Satisfies the Summarizer Protocol (compact.py:102-107) so it is a drop-in
+    for ContextCompactor(summarizer=SessionMemorySummarizer(state)).
+    """
+
+    def __init__(
+        self,
+        state: SessionMemoryState,
+        fallback: Summarizer | None = None,
+    ) -> None:
+        self._state = state
+        self._fallback: Summarizer = fallback or RuleBasedSummarizer()
+
+    def summarize(self, messages: list[Message]) -> str:
+        """Return prewarmed text on WARM state; delegate to fallback on COLD."""
+        if self._state.is_warm:
+            return self._state.render()
+        return self._fallback.summarize(messages)
 
 
 _DEFAULT_MICROCOMPACT_MINUTES = 60
