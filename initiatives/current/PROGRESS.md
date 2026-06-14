@@ -22,3 +22,12 @@ Each milestone agent APPENDS one block at exit ritual, formatted:
 
 <!-- Milestone blocks begin below. The first real milestone (M1) appends
      its block here; do not place any entry above this line. -->
+
+## M1 — done 2026-06-15
+
+- **commit**: `(see git log)` `[sm-dream/M1] extract ForkedAgentRunner from ExtractMemoriesRunner`
+- **tests**: 912 → 923 (+11)
+- **mypy**: clean | **ruff**: clean
+- **files changed**: `src/simple_coding_agent/forked_agent.py`, `src/simple_coding_agent/extract_memories.py`, `tests/test_forked_agent.py`
+- **exit gate**: `test_forked_agent.py passes (≥ 6 cases) AND existing test_extract_memories*.py stay green` → PASS (35 passed in targeted run; 923 total, +11 from 912)
+- **notes**: Narrowed bare `except Exception: pass` in _build_whitelist_tools to `UnknownToolError` only; context injection bug fixed (base_messages now sent as context_messages)
