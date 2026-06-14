@@ -58,3 +58,12 @@ Each milestone agent APPENDS one block at exit ritual, formatted:
 - **files changed**: `src/simple_coding_agent/metrics.py`, `src/simple_coding_agent/loop.py`, `benchmarks/bench_sm_compact_latency.py`, `benchmarks/_results/04_sm_compact_latency.json`, `benchmarks/_results/04_sm_compact_latency.md`, `tests/test_bench_sm_compact.py`, `tests/test_metrics_collector.py`
 - **exit gate**: `MetricsCollector gains sm_compact_reuses/misses; reused=<bool> on compact trace channel; bench_sm_compact_latency.py two-arm deterministic+real-API; test_bench_sm_compact.py asserts reuse_ms < full_ms; pytest grows by ≥7` → PASS (15 passed in targeted run; 969 total, +7 from 962; deterministic artifacts: full=0.399ms → reuse=0.291ms; StderrTracer emits reused=True/False on compact channel)
 - **notes**: reused=True emitted as second compact trace emit from _force_compact (compact.py also emits compact trace inside compact()); multiple emits on same channel is allowed
+
+## M5 — done 2026-06-15
+
+- **commit**: `(see git log)` `[sm-dream/M5] consolidation_lock + faithful dream gate cascade`
+- **tests**: 969 → 987 (+18)
+- **mypy**: clean | **ruff**: clean
+- **files changed**: `src/simple_coding_agent/consolidation_lock.py`, `tests/test_consolidation_lock.py`
+- **exit gate**: `consolidation_lock.py replicates cheapest-first gate cascade; 5 functions importable; test_consolidation_lock.py passes ≥8 cases; pytest grows by ≥8` → PASS (18 passed in targeted run; 987 total, +18 from 969; all five symbols importable verified)
+- **notes**: Scan throttle injected as last_scan_at_ms param (not closure-scoped); sessions_dir replaces TS per-cwd JSONL scan; no GrowthBook flags
