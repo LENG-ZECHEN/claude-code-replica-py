@@ -201,7 +201,16 @@ def test_compact_trace_reused_false_for_cold_sm() -> None:
 
 
 def test_bench_module_run_deterministic_returns_expected_keys() -> None:
-    """bench_sm_compact_latency._run_deterministic() returns dict with required keys."""
+    """bench_sm_compact_latency._run_deterministic() returns dict with required keys.
+
+    Structure-only test: asserts the bench result has the right shape and that
+    each arm reports a non-negative median_ms / p90_ms. The full > reuse
+    ORDERING assertion lives in test_measured_reuse_ms_less_than_full_arm_ms
+    which uses a 5ms injected delay (_SlowSummarizer) to stay above timer
+    jitter; asserting the same ordering here with the real RuleBasedSummarizer
+    (~0.4ms) inside a ~0.3ms-reuse comparison is in the noise floor and was
+    intermittently flaking the pre-push gate (see post-wrap review log).
+    """
     bench = _load_bench_module()
     try:
         result = bench._run_deterministic(runs=5)
@@ -216,9 +225,8 @@ def test_bench_module_run_deterministic_returns_expected_keys() -> None:
     assert "reuse_arm" in det
     assert "latency_source" in det
 
-    full_arm = det["full_arm"]
-    reuse_arm = det["reuse_arm"]
-    assert full_arm["median_ms"] > reuse_arm["median_ms"], (
-        f"Expected full_arm median ({full_arm['median_ms']:.3f}ms) > "
-        f"reuse_arm median ({reuse_arm['median_ms']:.3f}ms)"
-    )
+    for arm_name in ("full_arm", "reuse_arm"):
+        arm = det[arm_name]
+        assert arm["median_ms"] >= 0, f"{arm_name} median_ms should be non-negative"
+        assert arm["p90_ms"] >= 0, f"{arm_name} p90_ms should be non-negative"
+        assert arm["runs"] == 5, f"{arm_name} runs should match requested 5"
