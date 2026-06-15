@@ -51,7 +51,7 @@ REVIEW_TEMPLATE="$REPLICA_DIR/automation/templates/review.md"
 MILESTONE_MODEL="${MILESTONE_MODEL:-claude-sonnet-4-6}"
 MILESTONE_EFFORT="${MILESTONE_EFFORT:-max}"
 
-REVIEW_MODEL="${REVIEW_MODEL:-claude-opus-4-7}"
+REVIEW_MODEL="${REVIEW_MODEL:-claude-opus-4-8}"
 REVIEW_EFFORT="${REVIEW_EFFORT:-max}"
 
 # ---------------------------------------------------------------------------

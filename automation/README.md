@@ -24,11 +24,11 @@ automation/
 
 ### 1. Claude Code CLI
 
-Both scripts call `claude --print --model claude-opus-4-7`. You need:
+Both scripts call `claude --print --model claude-opus-4-8`. You need:
 
 - Claude Code CLI v2.1.51 or later (`claude --version`)
 - A claude.ai account on Pro / Max / Team / Enterprise plan
-- The model `claude-opus-4-7` accessible to your account
+- The model `claude-opus-4-8` accessible to your account
 
 ### 2. allowedTools / disallowedTools
 

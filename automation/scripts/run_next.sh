@@ -44,7 +44,7 @@ CONFIG="$CURRENT_DIR/config.yaml"
 PROMPTS_DIR="$CURRENT_DIR/prompts"
 LOGS_DIR="$CURRENT_DIR/logs"
 
-CLAUDE_MODEL="claude-opus-4-7"
+CLAUDE_MODEL="claude-opus-4-8"
 
 # ---------------------------------------------------------------------------
 # Permission whitelist — IDENTICAL to run_all_milestones.sh.

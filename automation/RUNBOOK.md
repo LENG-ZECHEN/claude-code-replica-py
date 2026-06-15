@@ -237,7 +237,7 @@ for each milestone M{N} in milestones (in declaration order):
      Phase 1 Step 5 — is what prevents a prior archived initiative that
      reused this commit_prefix from poisoning the resumability check.)
 
-    claude --print --model claude-opus-4-7 \
+    claude --print --model claude-opus-4-8 \
            --allowedTools "<whitelist>" --disallowedTools "<denylist>" \
            < $prompt 2>&1 | tee $log_file
 
