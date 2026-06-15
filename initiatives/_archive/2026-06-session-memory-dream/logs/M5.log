@@ -1,0 +1,9 @@
+All 6 exit-ritual checks pass. M5 is complete.
+
+**Summary of what was built:**
+
+- `src/simple_coding_agent/consolidation_lock.py` (NEW, 191 lines): replicates the cheapest-first dream gate cascade from TS `autoDream.ts` + `consolidationLock.ts`. Five public functions (`read_last_consolidated_at`, `list_sessions_touched_since`, `try_acquire_consolidation_lock`, `rollback_consolidation_lock`, `should_dream`) + frozen `DreamGateDecision` dataclass. Lock file `.consolidate-lock` is both the PID mutex and the timing state (mtime = lastConsolidatedAt, no separate state file). All timestamps injectable; no real sleep.
+
+- `tests/test_consolidation_lock.py` (NEW, 18 cases): full TDD coverage — time-gate open/closed, session-gate pass/fail, current-session exclusion, scan-throttle, acquire returns prior mtime / None when held, rollback rewinds mtime, mtime round-trip.
+
+- pytest: 969 → 987 (+18); mypy: clean (33 files); ruff: clean.

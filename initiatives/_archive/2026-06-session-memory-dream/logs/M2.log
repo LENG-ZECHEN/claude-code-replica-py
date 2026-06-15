@@ -1,0 +1,14 @@
+**M2 exit ritual complete.** All 6 gate checks pass:
+
+1. ✅ Commit subject contains `[sm-dream/M2]` (`c824b49`)
+2. ✅ `initiatives/current/HANDOFF.md` modified in that commit
+3. ✅ `PROGRESS.md` contains `## M2 — done 2026-06-15`
+4. ✅ `pytest --tb=no -q` → 951 passed, 1 xpassed (green)
+5. ✅ HANDOFF.md has all 5 required verbatim section headers
+6. ✅ M1 blocks still present in both PROGRESS.md and HANDOFF.md (append-only)
+
+**Summary of what M2 shipped:**
+
+- **NEW `session_memory_state.py`**: `SessionMemoryState` (frozen dataclass, 9-section tuple, `is_warm`/`is_empty`, `render()`, `to_jsonable()`/`from_jsonable()` with unknown-key forward-compat); `update_session_memory(state, new_messages) -> SessionMemoryState` (immutable pure function using `RuleBasedSummarizer` via lazy import, per-section 8k-char + total 48k-char caps)
+- **MODIFIED `compact.py`**: Added `SessionMemorySummarizer` — Summarizer Protocol drop-in; WARM state returns prewarmed text (zero provider calls); COLD state delegates to fallback
+- **28 new tests** (923 → 951), mypy clean, ruff clean

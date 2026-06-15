@@ -1,0 +1,31 @@
+Phase 2B + 2C complete (staged multi-agent review-and-repair flow). Summary:
+
+- **All 7 milestones verified**: `[sm-dream/M1]` (`19020cd`), `[sm-dream/M2]` (`c824b49`), `[sm-dream/M3]` (`00dfea2`), `[sm-dream/M4]` (`97300de`), `[sm-dream/M5]` (`7ee0228`), `[sm-dream/M6]` (`346f555`), `[sm-dream/M7]` (`5730e78` + follow-up `1e2daad`).
+- **Initial quality gates**: pytest 1013 passed (+1 xpassed), mypy clean (no issues in 34 source files), ruff clean (all checks passed).
+- **Stage A subagents spawned in parallel**: `code-reviewer` (43 minutes) + `doc-curator-candidate-finder` (21 minutes). Both returned successfully.
+- **Main-agent reconciliation completed**: 5 MEDIUM + 5 LOW code findings retained; 4 Tier A doc candidates accepted (all applied); 1 Tier C doc candidate (the Implementation Roadmap initiative bullet) applied because it matches the established pattern; 4 Tier C paraphrase candidates left as proposals.
+- **Review-time repair loop**: 2 MEDIUM findings fixed (`sm_compact_misses` conflation + `_make_dream_provider` default model). 3 MEDIUM + 5 LOW findings deferred with rationale recorded in REVIEW.md.
+- **Review-time commits**:
+  - `13761bd [sm-dream/review-fix]` — honest sm_compact_miss metric + qwen-plus-latest default for dream openai provider (3 src + 2 test files; +3 tests)
+  - `0d721ac [sm-dream/review-doc]` — document session-memory-dream surfaces in CLAUDE.md and README.md (2 doc files)
+- **Final quality gates green**: pytest 1016 passed (+1 xpassed) — delta +104 from baseline 912, +3 from pre-review 1013; mypy clean; ruff clean.
+- **Stage B narrator spawned after repair/re-review**: `demo-narrator` (3 minutes) — produced full Chinese owner brief reflecting reconciled findings + review-time repair outcomes.
+- **REVIEW.md**: scorecards (7×40/40 prompt + execution mostly 45/45, M3 39/45, M4 44/45, M7 38/45), reconciled findings, fixed-during-review ledger, deferred follow-ups, validation results, wrap-up actions.
+- **OWNER_BRIEF.zh-CN.md**: delivered features (8 bullets), demo commands (5 scenarios), Before/After table (8 rows), owner-facing findings (3 MEDIUM + LOW summary), resume/interview talking points (5 highlights), follow-up backlog (5 items).
+- **Tier A auto-applied**:
+  - CLAUDE.md Per-File Summaries: appended `### forked_agent.py` + `### session_memory_state.py`
+  - README.md: appended `--session-memory` / `--dream-on-exit` paragraph + memory dream subcommand paragraph
+- **Tier B auto-applied**: none (no new subdirectory; ADR-0005 already exists from M7)
+- **Tier C auto-applied**: CLAUDE.md Implementation Roadmap appended `session-memory-dream initiative — M1–M7` bullet (commit pin 19020cd–1e2daad, pytest delta +101, post-review follow-up sub-bullet pinning 13761bd + 3 review tests)
+- **Tier C proposed (left for human review)**: paraphrases of `compact.py`, `loop.py`, `session_store.py`, `extraction_hooks.py` per-file summaries to integrate M2/M3 changes
+- **Archive committed** as `[sm-dream/wrap] post-execution review + archive (review-and-repair)`
+- **Final HEAD**: `[sm-dream/wrap]` commit (see git log)
+- **All wrap-gate checks pass**: latest commit subject matches, `initiatives/_archive/2026-06-session-memory-dream/` exists, REVIEW.md + OWNER_BRIEF.zh-CN.md present, `initiatives/current/` contains only `.gitkeep`, `git status --short` is empty, working tree clean.
+- **Main session stayed alive on --remote-control** for user attach.
+
+Key audit findings and review-time outcomes:
+- (FIXED `13761bd`) `sm_compact_misses` was conflating "user didn't opt in" with "feature on but SM cold" → now gated on `self._sm_enabled` with new pinning test.
+- (FIXED `13761bd`) `_make_dream_provider` defaulted to `gpt-4o` (DashScope does not serve it) → now `qwen-plus-latest`, matching `bench_openai_cost.py` + `bench_sm_compact_latency.py`; `OPENAI_MODEL` env var still overrides.
+- (DEFERRED) `.consolidate-lock` placed at `memory_dir.parent / LOCK_FILE` can escape the configured memory dir under `SIMPLE_AGENT_MEMORY_DIR` override; needs coordinated M5 test update.
+- (DEFERRED) `current_session_id` never threaded through CLI dream or `_run_dream_on_exit`; current session counts toward the ≥5-session gate (slightly looser than TS source).
+- (DEFERRED) `_run_dream_on_exit` silently zeroes all gate thresholds at loop.py:660-668 ("in-loop trigger: skip time gate (short sessions)" — by-design but undocumented as a divergence from PLAN; suggest ADR-0005 amendment or a `--dream-on-exit-respect-gates` flag).

@@ -1,0 +1,7 @@
+M3 exit ritual complete.
+
+- Commit `00dfea2`: `[sm-dream/M3] wire session-memory into loop + LLM updater + cross-process persistence`
+- 11 files, 733 insertions / 58 deletions
+- pytest: 951 → 962 (+11), mypy clean, ruff clean
+- PROGRESS.md: M3 block appended
+- HANDOFF.md: full 5-section rewrite (M1/M2 subsections preserved, M3 appended, M4 guidance written)

@@ -1,0 +1,9 @@
+All 6 shell-script checks pass. M1 is complete.
+
+**Summary of what was done:**
+
+- **NEW** `src/simple_coding_agent/forked_agent.py`: Generic `ForkedAgentRunner` with `run(task_prompt, context_messages=())` and `can_use_tool(name, input) -> (allow, reason)` gate. Gate deny returns `(reason, True)` before `ToolExecutor` is invoked — mirrors plan-mode soft-deny, not a schema filter. Context messages prepended to the first provider call.
+
+- **MODIFIED** `src/simple_coding_agent/extract_memories.py`: Refactored to thin wrapper over `ForkedAgentRunner`. Builds a restricted `ToolRegistry` (whitelist tools + tracked `write_memory_entry` closure over fresh local `ProjectMemory`). Fixes the context injection bug — `base_messages` now sent as `context_messages`. Public API unchanged (consumed by `extraction_hooks.py`). Narrowed bare `except Exception: pass` to `except UnknownToolError`.
+
+- **NEW** `tests/test_forked_agent.py`: 11 test cases covering all 4 exit-gate assertions (a)–(d). pytest total: 912 → 923 (+11).

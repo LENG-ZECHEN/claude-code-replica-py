@@ -12,7 +12,7 @@ For the active-initiative pointer and the bootstrap procedure, see
 
 | Slug | Status | Bootstrapped | Milestones | Baseline |
 |---|---|---|---|---|
-| [session-memory-dream](./current/) | active | 2026-06-15 | M1 → M7 | `094cf90` |
+| (none) | — | — | — | — |
 
 ## Archived
 
@@ -25,6 +25,7 @@ For the active-initiative pointer and the bootstrap procedure, see
 | [2026-05-auto-memory-overhaul](./_archive/2026-05-auto-memory-overhaul/) | complete | 2026-05-24 | M1 → M7 | `e9aef6a` |
 | [2026-05-ctx-mgmt-demo](./_archive/2026-05-ctx-mgmt-demo/) | complete | 2026-05-25 | M1 → M3 | `f937d8f` |
 | [2026-06-plan-surface](./_archive/2026-06-plan-surface/) | complete | 2026-06-08 | M1 → M3 | `1e242b5` |
+| [2026-06-session-memory-dream](./_archive/2026-06-session-memory-dream/) | complete | 2026-06-15 | M1 → M7 | `0d721ac` |
 
 ## Folder shape (per initiative)
 

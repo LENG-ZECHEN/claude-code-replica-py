@@ -1,0 +1,14 @@
+All 6 exit gate checks pass. M4 is complete.
+
+**Summary:**
+
+M4 `[sm-dream/M4]` committed (`97300de`). Changes:
+
+- **`metrics.py`**: Added `sm_compact_reuses`/`sm_compact_misses` int fields, `record_sm_compact_reuse()`/`record_sm_compact_miss()` methods, and two lines in `format_stats()`.
+- **`loop.py::_force_compact`**: Computes `reused = self._sm_enabled and self._session_memory_state.is_warm` at the top, emits `self._tracer.emit("compact", reused=reused)` after compaction, then records the appropriate counter.
+- **`benchmarks/bench_sm_compact_latency.py`**: Dual-arm benchmark — deterministic (always runs) and real-API (gated). Both arms include `latency_source` field for provenance disclosure.
+- **`benchmarks/_results/04_sm_compact_latency.{json,md}`**: Committed deterministic-arm artifacts: `full=0.399ms → reuse=0.291ms` (median of 50, no API).
+- **`tests/test_bench_sm_compact.py`**: 4 new tests including the `measured_reuse_ms < full_arm_ms` assertion with injected delay.
+- **`tests/test_metrics_collector.py`**: 3 new counter tests.
+
+pytest: 962 → 969 (+7). mypy clean. ruff clean. M5 guidance written in HANDOFF §5.

@@ -1,0 +1,11 @@
+M7 is complete. Commit `5730e78` closes the `session-memory-dream` initiative.
+
+**What shipped in this commit:**
+- `simple-agent memory dream` CLI subcommand (dry-run default, `--apply`, `--force`, `--provider openai`)
+- `--dream-on-exit` REPL flag with one-shot guard and `_exit_session()` covering all exit paths
+- `dream_runs / dream_merged / dream_pruned` counters in `MetricsCollector`
+- `record_consolidation()` in `consolidation_lock.py` called inside `consolidate()` (gate+run+stamp self-contained)
+- ADR-0005 documenting the no-cron divergence
+- CLAUDE.md per-file summaries for all 5 touched modules + Current Limitations bullet
+- `tests/test_memory_cli_dream.py`: 13 tests covering all 8 required scenarios
+- pytest: 1000 → 1013 | mypy: clean | ruff: clean

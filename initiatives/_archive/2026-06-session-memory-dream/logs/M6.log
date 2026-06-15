@@ -1,0 +1,1 @@
+M6 is committed. Commit `346f555` stages all four required files — `dream.py`, `test_dream_consolidator.py`, `PROGRESS.md`, and `HANDOFF.md` — with `[sm-dream/M6]` prefix. The exit gate passes: 1000 tests (+13 from 987), mypy clean, ruff clean, frozen `DreamResult`, idempotency verified. HANDOFF.md Section 2 has the M6 block appended and Section 5 has full M7 guidance.
