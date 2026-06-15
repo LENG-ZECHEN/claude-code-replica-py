@@ -4,8 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](pyproject.toml)
 
-A minimal Python coding agent replica studying the context-management and
-memory-management pipeline of Claude Code v2.1.88.
+A comprehensive study implementation of an agent runtime in Python —
+reproducing the context-management and memory-management pipeline of
+Claude Code v2.1.88.
 
 ## Purpose
 

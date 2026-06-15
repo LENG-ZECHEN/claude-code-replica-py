@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "simple-coding-agent"
 version = "0.1.0"
-description = "A minimal Python coding agent replica studying Claude Code v2.1.88 context and memory management"
+description = "A comprehensive study implementation of an agent runtime — reproducing Claude Code v2.1.88's context and memory management"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
