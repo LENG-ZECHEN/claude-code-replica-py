@@ -189,9 +189,9 @@ source of truth on itself.
   - `--dream-on-exit` flag is default OFF — keep it opt-in, mirroring `--extract-memories` and `--session-memory`.
   - ADR-0005 is the source of truth for the no-cron divergence and dry-run-default rationale. Do not contradict it in future code comments.
 
-## 5. Notes for the review session
+## 5. Next milestone guidance
 
-This is a closing note for the `session-memory-dream` review agent. The initiative is complete (M1–M7 shipped 2026-06-15).
+**No next milestone — the initiative is complete (M1–M7 shipped 2026-06-15).** The notes below are the handoff for the `session-memory-dream` review session (Phase 2B).
 
 ### What to review in M7
 
