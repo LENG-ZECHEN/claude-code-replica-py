@@ -215,7 +215,7 @@ def _make_dream_provider(provider_name: str | None) -> Provider | None:
         return None
     if provider_name == "openai":
         from .provider import OpenAIProvider
-        model = os.environ.get("OPENAI_MODEL", "gpt-4o")
+        model = os.environ.get("OPENAI_MODEL", "qwen-plus-latest")
         api_key = (
             os.environ.get("OPENAI_API_KEY") or os.environ.get("DASHSCOPE_API_KEY")
         )

@@ -787,7 +787,7 @@ class AgentLoop:
         self._metrics.record_full_compact()
         if reused:
             self._metrics.record_sm_compact_reuse()
-        else:
+        elif self._sm_enabled:
             self._metrics.record_sm_compact_miss()
         self._tokens_since_last_snip = 0
         return True

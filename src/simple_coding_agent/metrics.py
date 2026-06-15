@@ -120,7 +120,12 @@ class MetricsCollector:
         self.sm_compact_reuses += 1
 
     def record_sm_compact_miss(self) -> None:
-        """Cold/disabled SM — compaction fell back to full Rule/LLM summarizer."""
+        """SM enabled but state was cold — compaction fell back to full Rule/LLM summarizer.
+
+        Only recorded when --session-memory is on; a user who never opted in
+        sees miss=0 so the metric does not conflate "didn't enable the feature"
+        with "feature was enabled but state was empty".
+        """
         self.sm_compact_misses += 1
 
     def record_dream_run(self, merged: int, pruned: int) -> None:

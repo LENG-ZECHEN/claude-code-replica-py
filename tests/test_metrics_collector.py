@@ -440,7 +440,7 @@ def test_sm_compact_reuse_counter() -> None:
 
 
 def test_sm_compact_miss_counter() -> None:
-    """Cold SM state (or disabled) in _force_compact bumps sm_compact_misses."""
+    """SM enabled but cold state in _force_compact bumps sm_compact_misses."""
     from simple_coding_agent.compact import ContextCompactor, RuleBasedSummarizer
     from simple_coding_agent.context import ContextBudget, ContextBuilder
     from simple_coding_agent.loop import AgentLoop
@@ -476,6 +476,53 @@ def test_sm_compact_miss_counter() -> None:
     loop._force_compact()
 
     assert metrics.sm_compact_misses == 1
+    assert metrics.sm_compact_reuses == 0
+
+
+def test_sm_compact_miss_not_recorded_when_sm_disabled() -> None:
+    """When --session-memory is OFF, _force_compact does not bump sm_compact_misses.
+
+    Locks review-fix: previously the metric bumped on every compaction even
+    when the user never opted in, conflating "didn't enable feature" with
+    "feature was enabled but state was empty". Now the miss counter is only
+    recorded when self._sm_enabled is True.
+    """
+    from simple_coding_agent.compact import ContextCompactor, RuleBasedSummarizer
+    from simple_coding_agent.context import ContextBudget, ContextBuilder
+    from simple_coding_agent.loop import AgentLoop
+    from simple_coding_agent.models import Message
+    from simple_coding_agent.tools import ToolExecutor, ToolRegistry
+    from simple_coding_agent.transcript import Transcript
+
+    provider = MockProvider([MockProvider.direct_answer("done")])
+    transcript = Transcript()
+    registry = ToolRegistry()
+    executor = ToolExecutor(registry)
+    budget = ContextBudget(max_tokens=8192, reserved_output_tokens=4096)
+    builder = ContextBuilder(budget=budget)
+    metrics = MetricsCollector()
+    compactor = ContextCompactor(keep_recent=0, summarizer=RuleBasedSummarizer())
+    loop = AgentLoop(
+        provider=provider,
+        tool_executor=executor,
+        transcript=transcript,
+        context_builder=builder,
+        budget=budget,
+        registry=registry,
+        compactor=compactor,
+        # session_memory_enabled NOT set → defaults to False
+        metrics=metrics,
+    )
+    assert loop._sm_enabled is False
+    for i in range(3):
+        transcript.append(Message.user(f"turn {i}"))
+        transcript.append(Message.assistant(f"reply {i}"))
+
+    loop._force_compact()
+    loop._force_compact()  # second compaction should still leave miss at 0
+
+    assert metrics.full_compacts == 2  # both compactions did run
+    assert metrics.sm_compact_misses == 0  # but no SM miss recorded
     assert metrics.sm_compact_reuses == 0
 
 

@@ -232,6 +232,80 @@ def test_dream_provider_openai_constructs_provider(
     )
 
 
+def test_dream_provider_openai_default_model_is_qwen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--provider openai defaults to qwen-plus-latest (matches rest of codebase).
+
+    Locks review-fix: previously defaulted to gpt-4o, which fails when only
+    DASHSCOPE_API_KEY is set (DashScope endpoint does not serve gpt-4o). The
+    rest of the replica (benchmarks/bench_openai_cost.py,
+    benchmarks/bench_sm_compact_latency.py) targets qwen-plus-latest, so the
+    dream subcommand now matches. OPENAI_MODEL env var still overrides.
+    """
+    mem_dir = tmp_path / "memory"
+    mem_dir.mkdir()
+    monkeypatch.setenv("SIMPLE_AGENT_MEMORY_DIR", str(mem_dir))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-fake")
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+
+    constructed: list[object] = []
+    original_init = DreamConsolidator.__init__
+
+    def spy_init(
+        self: DreamConsolidator, memory_dir: object, provider: object = None, **kw: object
+    ) -> None:
+        constructed.append(provider)
+        original_init(self, memory_dir, provider=provider, **kw)
+
+    monkeypatch.setattr(DreamConsolidator, "__init__", spy_init)
+    monkeypatch.setattr(
+        DreamConsolidator, "consolidate",
+        lambda *a, **kw: DreamResult(merged=0, pruned=0, runs=0, written_paths=()),
+    )
+
+    rc = main(["dream", "--apply", "--force", "--provider", "openai"])
+    assert rc == 0
+
+    assert len(constructed) == 1
+    provider = constructed[0]
+    # OpenAIProvider stores the model on self._model
+    assert getattr(provider, "_model", None) == "qwen-plus-latest"
+
+
+def test_dream_provider_openai_model_env_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OPENAI_MODEL env var overrides the default model in --provider openai."""
+    mem_dir = tmp_path / "memory"
+    mem_dir.mkdir()
+    monkeypatch.setenv("SIMPLE_AGENT_MEMORY_DIR", str(mem_dir))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-fake")
+    monkeypatch.setenv("OPENAI_MODEL", "qwen-turbo")
+
+    constructed: list[object] = []
+    original_init = DreamConsolidator.__init__
+
+    def spy_init(
+        self: DreamConsolidator, memory_dir: object, provider: object = None, **kw: object
+    ) -> None:
+        constructed.append(provider)
+        original_init(self, memory_dir, provider=provider, **kw)
+
+    monkeypatch.setattr(DreamConsolidator, "__init__", spy_init)
+    monkeypatch.setattr(
+        DreamConsolidator, "consolidate",
+        lambda *a, **kw: DreamResult(merged=0, pruned=0, runs=0, written_paths=()),
+    )
+
+    rc = main(["dream", "--apply", "--force", "--provider", "openai"])
+    assert rc == 0
+
+    assert len(constructed) == 1
+    provider = constructed[0]
+    assert getattr(provider, "_model", None) == "qwen-turbo"
+
+
 # ---------------------------------------------------------------------------
 # (g) MetricsCollector dream_runs / dream_merged / dream_pruned
 # ---------------------------------------------------------------------------
