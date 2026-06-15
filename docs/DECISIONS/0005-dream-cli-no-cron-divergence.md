@@ -98,6 +98,48 @@ alternative — requiring every caller to call `record_consolidation`
 separately — would be error-prone and would split the lock invariant
 across two callsites.
 
+### 6. `--dream-on-exit` bypasses ALL gate thresholds (intentional)
+
+**Decision**: When a REPL launched with `--dream-on-exit` reaches `/exit`,
+EOF, or `max-turns` shutdown, `AgentLoop._run_dream_on_exit()` calls
+`DreamConsolidator.consolidate()` with `min_hours=0.0, min_sessions=0,
+last_scan_at_ms=0.0` — every gate in the M5 cascade trivially passes. A
+fresh session of three turns will still trigger a consolidation on exit.
+
+**Why**: The post-execution multi-agent review (2026-06-15) surfaced this
+as an undocumented divergence from the PLAN's reading of "fires one dream
+at REPL /exit", and the team accepted the bypass as the right semantic
+for the in-loop trigger. Three reasons:
+
+1. **Faithfulness vs UX trade-off.** The TS `executeAutoDream` in
+   `query/stopHooks.ts:155` fires at every turn end and is gated by the
+   normal cascade because per-turn frequency would otherwise destroy
+   batteries. The replica's `--dream-on-exit` is once-per-session
+   (collapsed from per-turn — see Decision 2 above), so the rate-limiting
+   role the gates play in the TS source is already absorbed by the
+   "one-shot at exit" reduction. Re-applying the same gate would
+   double-rate-limit and most short sessions would consolidate zero
+   times even though the user explicitly opted in.
+2. **Opt-in already filters intent.** `--dream-on-exit` is OFF by default
+   (mirroring `--extract-memories` and `--session-memory`). A user who
+   sets it has actively asked for an exit-time consolidation; silently
+   refusing because "you've only run 3 sessions today" violates the
+   principle of least surprise for the opt-in surface.
+3. **Operators who want gated periodic dream use the CLI batch.** The
+   external-cron analog (`simple-agent memory dream --apply` per
+   Decision 1) DOES honor the full cascade. The two surfaces are
+   intentionally complementary: CLI = gated periodic; REPL flag =
+   immediate per-exit.
+
+**Consequence**: `_run_dream_on_exit()` is documented in the `loop.py`
+docstring as "trigger irrespective of gate state — opt-in caller has
+already declared intent". The CLI batch path remains the gated periodic
+surface; do not pull the bypass into `simple-agent memory dream --apply`
+without explicit owner approval. If a future user needs an exit-time
+trigger that DOES respect the cascade (e.g. for headless harnesses that
+launch many short sessions), the right addition is a separate
+`--dream-on-exit-respect-gates` flag, not a flip of the default.
+
 ## Consequences
 
 - `consolidation_lock.py` gains `record_consolidation` (exported in
@@ -107,3 +149,7 @@ across two callsites.
   touch to a M6 module).
 - No new cron daemon, no asyncio loop, no background thread.
 - The no-cron divergence is documented in CLAUDE.md Current Limitations.
+- `--dream-on-exit` is the only opt-in surface in the replica that
+  intentionally bypasses the dream gate cascade; the CLI batch surface
+  honors the full cascade and is the right tool for any usage pattern
+  that needs throttling.
